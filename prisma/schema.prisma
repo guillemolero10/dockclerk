@@ -1,0 +1,250 @@
+// DockClerk data model.
+// The "legacy warehouse software" is a simulated replica built during the hackathon,
+// filled with invented data. It is never connected to a real company's database.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------- Master data of the legacy software ----------
+
+enum ClientType {
+  RAW_MATERIAL
+  FINISHED_GOODS
+}
+
+model Client {
+  id        String     @id @default(cuid())
+  code      String     @unique
+  name      String
+  type      ClientType
+  email     String?
+  phone     String?
+  items     Item[]
+  stock     Stock[]
+  inbounds  Inbound[]
+  outbounds Outbound[]
+  messages  Message[]
+}
+
+/// Where outbound goods are delivered (supermarket hubs, factories...).
+model Consignee {
+  id        String     @id @default(cuid())
+  code      String     @unique
+  name      String
+  address   String
+  city      String
+  /// Names customers use in free text, e.g. "Mercadona Riba-roja".
+  aliases   String[]
+  outbounds Outbound[]
+}
+
+model Carrier {
+  id        String     @id @default(cuid())
+  name      String
+  plate     String?
+  inbounds  Inbound[]
+  outbounds Outbound[]
+}
+
+enum Unit {
+  PALLET
+  BOX
+  BAG
+}
+
+model Item {
+  id             String         @id @default(cuid())
+  clientId       String
+  sku            String
+  description    String
+  unit           Unit
+  unitsPerPallet Int
+  tracksLot      Boolean        @default(false)
+  client         Client         @relation(fields: [clientId], references: [id])
+  stock          Stock[]
+  inboundLines   InboundLine[]
+  outboundLines  OutboundLine[]
+
+  @@unique([clientId, sku])
+}
+
+/// Current balance: goods of a client stored in the warehouse.
+model Stock {
+  id        String  @id @default(cuid())
+  clientId  String
+  itemId    String
+  lot       String?
+  pallets   Int
+  units     Int
+  location  String
+  inboundId String?
+  client    Client   @relation(fields: [clientId], references: [id])
+  item      Item     @relation(fields: [itemId], references: [id])
+  inbound   Inbound? @relation(fields: [inboundId], references: [id])
+}
+
+// ---------- Operations ----------
+
+enum InboundStatus {
+  EXPECTED
+  RECEIVING
+  RECEIVED
+  CLOSED
+}
+
+model Inbound {
+  id                String         @id @default(cuid())
+  number            Int            @unique @default(autoincrement())
+  date              DateTime
+  clientId          String
+  /// The supplier's delivery note number.
+  clientDocRef      String?
+  supplier          String?
+  carrierId         String?
+  plate             String?
+  expectedPallets   Int?
+  expectedUnits     Int?
+  receivedPallets   Int?
+  receivedUnits     Int?
+  incident          String?
+  status            InboundStatus  @default(EXPECTED)
+  /// Secret token for the driver's link (no login, no app).
+  driverToken       String         @unique @default(cuid())
+  client            Client         @relation(fields: [clientId], references: [id])
+  carrier           Carrier?       @relation(fields: [carrierId], references: [id])
+  lines             InboundLine[]
+  stock             Stock[]
+  receipt           DockReceipt?
+  createdAt         DateTime       @default(now())
+}
+
+model InboundLine {
+  id        String  @id @default(cuid())
+  inboundId String
+  itemId    String
+  lot       String?
+  pallets   Int
+  units     Int
+  inbound   Inbound @relation(fields: [inboundId], references: [id], onDelete: Cascade)
+  item      Item    @relation(fields: [itemId], references: [id])
+}
+
+enum OutboundStatus {
+  REQUESTED
+  PREPARED
+  SHIPPED
+  CLOSED
+}
+
+model Outbound {
+  id           String         @id @default(cuid())
+  number       Int            @unique @default(autoincrement())
+  date         DateTime
+  deadline     DateTime?
+  clientId     String
+  clientDocRef String?
+  consigneeId  String?
+  carrierId    String?
+  notes        String?
+  status       OutboundStatus @default(REQUESTED)
+  client       Client         @relation(fields: [clientId], references: [id])
+  consignee    Consignee?     @relation(fields: [consigneeId], references: [id])
+  carrier      Carrier?       @relation(fields: [carrierId], references: [id])
+  lines        OutboundLine[]
+  createdAt    DateTime       @default(now())
+}
+
+model OutboundLine {
+  id         String   @id @default(cuid())
+  outboundId String
+  itemId     String
+  pallets    Int
+  units      Int
+  outbound   Outbound @relation(fields: [outboundId], references: [id], onDelete: Cascade)
+  item       Item     @relation(fields: [itemId], references: [id])
+}
+
+/// Proof of delivery at the dock: photos, AI count, damages and driver signature.
+model DockReceipt {
+  id              String   @id @default(cuid())
+  inboundId       String   @unique
+  noteImageUrl    String?
+  palletImageUrl  String?
+  /// What the delivery note says vs. what SAM 3.1 counted.
+  noteUnits       Int?
+  countedUnits    Int?
+  /// [{ box: number, kind: "crushed", bbox: [...] }]
+  damages         Json?
+  signatureUrl    String?
+  pdfUrl          String?
+  signedAt        DateTime?
+  inbound         Inbound  @relation(fields: [inboundId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+}
+
+// ---------- The AI clerk ----------
+
+enum Channel {
+  EMAIL
+  WHATSAPP
+  PORTAL
+}
+
+enum MessageStatus {
+  NEW
+  PROCESSING
+  PROCESSED
+}
+
+model Message {
+  id            String        @id @default(cuid())
+  channel       Channel
+  fromName      String
+  fromAddress   String?
+  clientId      String?
+  subject       String?
+  body          String?
+  audioUrl      String?
+  attachmentUrl String?
+  receivedAt    DateTime      @default(now())
+  status        MessageStatus @default(NEW)
+  client        Client?       @relation(fields: [clientId], references: [id])
+  drafts        Draft[]
+}
+
+enum DraftKind {
+  CREATE_OUTBOUND
+  CREATE_INBOUND
+  REPLY_ONLY
+  NEEDS_HUMAN
+}
+
+enum DraftStatus {
+  PENDING
+  APPROVED
+  DISCARDED
+}
+
+/// What the agent proposes. Nothing touches the legacy software until a human approves it.
+model Draft {
+  id        String      @id @default(cuid())
+  messageId String?
+  kind      DraftKind
+  /// Proposed record (outbound/inbound fields).
+  payload   Json
+  /// Fields the agent is not sure about: [{ field, reason, options }]
+  doubts    Json        @default("[]")
+  /// Agent trace shown in the UI: [{ step, tool, input, output }]
+  steps     Json        @default("[]")
+  reply     String?
+  status    DraftStatus @default(PENDING)
+  message   Message?    @relation(fields: [messageId], references: [id])
+  createdAt DateTime    @default(now())
+}
