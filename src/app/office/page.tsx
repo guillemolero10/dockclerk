@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowRight, Boxes, Inbox, Mail, MessageCircle, Package, Sparkles, Truck, UserRound } from "lucide-react";
 import type { Channel } from "@prisma/client";
 import { db } from "@/lib/db";
-import { fmtNumber } from "@/lib/format";
+import { fmtNumber, madridDayRange } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -23,9 +23,7 @@ function dayLabel(date: Date) {
 }
 
 export default async function OfficeToday() {
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-  const endOfToday = new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000);
+  const { start: startOfToday, end: endOfToday } = madridDayRange();
 
   const [newMessages, latestMessages, trucksToday, nextShipments, stockTotals, stockByClient, clients] = await Promise.all([
     db.message.count({ where: { status: "NEW" } }),

@@ -6,3 +6,15 @@ export const fmtTime = (d: Date | null | undefined) =>
   d ? d.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" }) : "";
 
 export const fmtNumber = (n: number | null | undefined) => (n == null ? "" : n.toLocaleString("es-ES"));
+
+// The warehouse runs on Spanish time, but servers (Vercel) run on UTC.
+// Returns the UTC instants where today starts and ends in Madrid.
+export function madridDayRange(date = new Date()) {
+  const ymd = date.toLocaleDateString("en-CA", { timeZone: "Europe/Madrid" }); // 2026-10-26
+  const offset = new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Madrid", timeZoneName: "shortOffset" })
+    .formatToParts(date)
+    .find((p) => p.type === "timeZoneName")!.value; // "GMT+1"
+  const hours = Number(offset.replace("GMT", "") || 0);
+  const start = new Date(new Date(`${ymd}T00:00:00Z`).getTime() - hours * 60 * 60 * 1000);
+  return { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000) };
+}
