@@ -22,7 +22,7 @@ Built for the **Meta Global AI Developer Hackathon** (Oct 26 - Nov 4, 2026), Ind
 
 ## Run locally
 ```bash
-cp .env.example .env.local   # fill in your keys
+cp .env.example .env   # fill in your keys
 npm install
 npx prisma db push && npm run dev
 ```
