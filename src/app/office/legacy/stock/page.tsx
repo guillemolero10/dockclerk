@@ -6,7 +6,7 @@ import { UNIT_LABEL } from "@/lib/labels";
 
 export const dynamic = "force-dynamic";
 
-export default async function StockPage({ searchParams }: PageProps<"/office/stock">) {
+export default async function StockPage({ searchParams }: PageProps<"/office/legacy/stock">) {
   const { client } = await searchParams;
   const where: Prisma.StockWhereInput = {};
   if (typeof client === "string" && client) where.clientId = client;

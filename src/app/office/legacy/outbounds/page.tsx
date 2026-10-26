@@ -7,7 +7,7 @@ import { OUTBOUND_STATUS } from "@/lib/labels";
 
 export const dynamic = "force-dynamic";
 
-export default async function OutboundsPage({ searchParams }: PageProps<"/office/outbounds">) {
+export default async function OutboundsPage({ searchParams }: PageProps<"/office/legacy/outbounds">) {
   const { client, status } = await searchParams;
   const where: Prisma.OutboundWhereInput = {};
   if (typeof client === "string" && client) where.clientId = client;
@@ -42,7 +42,7 @@ export default async function OutboundsPage({ searchParams }: PageProps<"/office
             const line = o.lines[0];
             return (
               <tr key={o.id} style={{ background: OUTBOUND_STATUS[o.status].row }}>
-                <td><Link href={`/office/outbounds/${o.id}`} className="underline">{o.number}</Link></td>
+                <td><Link href={`/office/legacy/outbounds/${o.id}`} className="underline">{o.number}</Link></td>
                 <td>{fmtDate(o.date)}</td>
                 <td>{o.client.name}</td>
                 <td>{o.clientDocRef}</td>

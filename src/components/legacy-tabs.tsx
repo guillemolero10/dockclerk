@@ -4,9 +4,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const TABS = [
-  { href: "/office/outbounds", label: "Salidas" },
-  { href: "/office/inbounds", label: "Entradas" },
-  { href: "/office/stock", label: "Existencias" },
+  { href: "/office/legacy/outbounds", label: "Salidas" },
+  { href: "/office/legacy/inbounds", label: "Entradas" },
+  { href: "/office/legacy/stock", label: "Existencias" },
 ];
 
 export function LegacyTabs() {

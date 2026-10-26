@@ -6,7 +6,7 @@ import { INBOUND_STATUS } from "@/lib/labels";
 
 export const dynamic = "force-dynamic";
 
-export default async function InboundsPage({ searchParams }: PageProps<"/office/inbounds">) {
+export default async function InboundsPage({ searchParams }: PageProps<"/office/legacy/inbounds">) {
   const { client, status } = await searchParams;
   const where: Prisma.InboundWhereInput = {};
   if (typeof client === "string" && client) where.clientId = client;

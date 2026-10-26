@@ -6,7 +6,7 @@ import { OUTBOUND_STATUS, UNIT_LABEL } from "@/lib/labels";
 
 export const dynamic = "force-dynamic";
 
-export default async function OutboundDetail({ params }: PageProps<"/office/outbounds/[id]">) {
+export default async function OutboundDetail({ params }: PageProps<"/office/legacy/outbounds/[id]">) {
   const { id } = await params;
   const o = await db.outbound.findUnique({
     where: { id },
@@ -25,7 +25,7 @@ export default async function OutboundDetail({ params }: PageProps<"/office/outb
     <div className="space-y-3 bg-[#d4d0c8] p-3">
       <div className="flex items-center justify-between">
         <strong>Ficha de salida Nº {o.number}</strong>
-        <Link href="/office/outbounds" className="legacy-btn">Volver</Link>
+        <Link href="/office/legacy/outbounds" className="legacy-btn">Volver</Link>
       </div>
       <fieldset className="grid gap-1.5 border border-[#808080] p-3 sm:grid-cols-2">
         <legend className="px-1">Datos generales</legend>

@@ -22,7 +22,7 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
 
 /* ---------- "Legacy warehouse software" look (simulated, built for the demo) ---------- */
@@ -90,4 +90,49 @@ body {
   border: 2px solid;
   border-color: #808080 #fff #fff #808080;
   padding: 1px 4px;
+}
+
+/* ---------- DockClerk "control tower" look ---------- */
+@theme {
+  --color-dock-bg: #07090d;
+  --color-dock-panel: #0d1117;
+  --color-dock-line: #1c2330;
+  --color-dock-amber: #ffb020;
+}
+
+.dock-app {
+  background:
+    radial-gradient(1200px 600px at 85% -10%, rgba(255, 176, 32, 0.08), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(56, 120, 255, 0.07), transparent 60%),
+    var(--color-dock-bg);
+  color: #e6e8ec;
+  color-scheme: dark;
+}
+
+/* Fine blueprint grid behind the content, like a warehouse floor plan. */
+.dock-grid {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.dock-card {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015));
+  border: 1px solid var(--color-dock-line);
+  border-radius: 16px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 20px 40px -24px rgba(0, 0, 0, 0.6);
+}
+
+/* Safety stripes, the warehouse signature. */
+.hazard {
+  background: repeating-linear-gradient(-45deg, var(--color-dock-amber) 0 8px, #111 8px 16px);
+}
+
+@keyframes dock-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.dock-live {
+  animation: dock-pulse 1.6s ease-in-out infinite;
 }
