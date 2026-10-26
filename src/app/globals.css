@@ -24,3 +24,70 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ---------- "Legacy warehouse software" look (simulated, built for the demo) ---------- */
+.legacy {
+  font-family: Tahoma, Verdana, "Segoe UI", sans-serif;
+  font-size: 12px;
+  color: #000;
+  background: #d4d0c8;
+  border: 2px solid;
+  border-color: #fff #404040 #404040 #fff;
+}
+.legacy-titlebar {
+  background: linear-gradient(90deg, #0a246a, #a6caf0);
+  color: #fff;
+  font-weight: bold;
+  padding: 3px 6px;
+}
+.legacy-tab {
+  padding: 3px 10px;
+  border: 1px solid #808080;
+  border-bottom: none;
+  background: #d4d0c8;
+}
+.legacy-tab[aria-current="page"] {
+  background: #fff;
+  font-weight: bold;
+}
+.legacy-panel {
+  background: #fff;
+  border: 2px solid;
+  border-color: #808080 #fff #fff #808080;
+}
+.legacy-grid {
+  width: 100%;
+  border-collapse: collapse;
+  white-space: nowrap;
+}
+.legacy-grid th.text-right {
+  text-align: right;
+}
+.legacy-grid th {
+  background: #d4d0c8;
+  border: 1px solid #808080;
+  padding: 2px 6px;
+  text-align: left;
+  font-weight: normal;
+  position: sticky;
+  top: 0;
+}
+.legacy-grid td {
+  border: 1px solid #c0c0c0;
+  padding: 1px 6px;
+}
+.legacy-grid tr:hover td {
+  outline: 1px dotted #000;
+}
+.legacy-btn {
+  background: #d4d0c8;
+  border: 2px solid;
+  border-color: #fff #404040 #404040 #fff;
+  padding: 1px 10px;
+}
+.legacy-input {
+  background: #fff;
+  border: 2px solid;
+  border-color: #808080 #fff #fff #808080;
+  padding: 1px 4px;
+}

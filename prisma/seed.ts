@@ -187,7 +187,7 @@ async function main() {
     const balance = pick(candidates);
     const pallets = between(1, Math.min(12, balance.pallets - 1));
     balance.pallets -= pallets;
-    const age = between(0, 20);
+    const age = between(0, 18);
     const consignee = pick(consigneeRows);
     await db.outbound.create({
       data: {
@@ -197,8 +197,37 @@ async function main() {
         clientDocRef: `PED-${between(1000, 9999)}`,
         consigneeId: consignee.id,
         carrierId: pick(carrierRows).id,
-        status: age > 3 ? "CLOSED" : age > 1 ? "SHIPPED" : pick(["REQUESTED", "PREPARED"] as const),
+        status: age > 3 ? "CLOSED" : age > 0 ? "SHIPPED" : pick(["PREPARED", "SHIPPED"] as const),
         lines: { create: { itemId: balance.itemId, pallets, units: pallets * balance.unitsPerPallet } },
+      },
+    });
+  }
+
+  // Open work for the coming days, fixed on purpose so the demo never depends on luck.
+  const upcoming: [string, string, string, number, number, number][] = [
+    ["C003", "BOTA-INV", "D0701", 5, 1, 10],
+    ["C008", "TURRON-DUR", "D0610", 6, 1, 9],
+    ["C004", "AGUA-15", "D0520", 4, 1, 12],
+    ["C007", "CREMA-50", "D0901", 2, 2, 11],
+    ["C002", "PP-NAT", "D0800", 8, 2, 8],
+    ["C005", "TOALLA-BL", "D0700", 3, 2, 13],
+  ];
+  for (const [clientCode, sku, consigneeCode, pallets, inDays, hour] of upcoming) {
+    const client = clientRows.find((c) => c.code === clientCode)!;
+    const item = await db.item.findFirstOrThrow({ where: { clientId: client.id, sku } });
+    const balance = balances.find((b) => b.itemId === item.id && b.pallets > pallets);
+    if (balance) balance.pallets -= pallets; // reserved stock leaves the balance
+    const date = daysAgo(-inDays);
+    await db.outbound.create({
+      data: {
+        date,
+        deadline: new Date(date.getTime() + hour * 60 * 60 * 1000),
+        clientId: client.id,
+        clientDocRef: `PED-${between(1000, 9999)}`,
+        consigneeId: consigneeRows.find((c) => c.code === consigneeCode)!.id,
+        carrierId: pick(carrierRows).id,
+        status: "REQUESTED",
+        lines: { create: { itemId: item.id, pallets, units: pallets * item.unitsPerPallet } },
       },
     });
   }
