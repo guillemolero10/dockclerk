@@ -216,12 +216,17 @@ function space(
     });
     return;
   }
-  const levels = new Map<string, number>();
+  // Free rack slots right now, as the 3D shows them: pallets still on a dock lane (REC-n, EXP-n) are not in a rack.
+  const rackFree = new Map(
+    data.warehouses.map((w) => [
+      w.id,
+      makeLayout(w.dims).capacity - sum(data.stock.filter((s) => s.warehouseId === w.id && !/^(REC|EXP)-/.test(s.location)).map((s) => s.pallets)),
+    ]),
+  );
   for (const w of data.warehouses) {
     const capacity = makeLayout(w.dims).capacity;
     const series = dailyLevels(data, keys, index, shipped, (wid) => wid === w.id);
     const now = series[series.length - 1];
-    levels.set(w.id, capacity - now);
     const recent = series.slice(-fitDays);
     const fit = ols(recent.map((_, i) => i), recent);
     const growing = fit.slope - 1.96 * fit.seSlope > 0;
@@ -241,8 +246,8 @@ function space(
       })
       .filter((g) => g.delta > 0)
       .sort((a, b) => b.delta - a.delta);
-    const other = data.warehouses.filter((x) => x.id !== w.id).sort((a, b) => (levels.get(b.id) ?? 0) - (levels.get(a.id) ?? 0))[0];
-    const otherFree = other ? makeLayout(other.dims).capacity - dailyLevels(data, keys, index, shipped, (wid) => wid === other.id).at(-1)! : 0;
+    const other = data.warehouses.filter((x) => x.id !== w.id).sort((a, b) => rackFree.get(b.id)! - rackFree.get(a.id)!)[0];
+    const otherFree = other ? rackFree.get(other.id)! : 0;
 
     findings.push({
       id: `space-${w.code}`,

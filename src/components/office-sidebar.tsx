@@ -20,9 +20,9 @@ export function OfficeSidebar({ inboxCount, alertCount }: { inboxCount: number; 
   const isActive = (href: string, exact?: boolean) => (exact ? pathname === href : pathname.startsWith(href));
 
   return (
-    <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col bg-dock-ink text-white">
+    <aside className="flex w-full shrink-0 flex-col bg-dock-ink text-white md:sticky md:top-0 md:h-screen md:w-60">
       <div className="hazard h-2.5" />
-      <Link href="/office" className="flex items-center gap-2.5 px-5 py-5">
+      <Link href="/office" className="flex items-center gap-2.5 px-5 py-3 md:py-5">
         <span className="cond grid h-8 w-8 place-items-center bg-dock-yellow text-sm font-bold text-dock-ink">DC</span>
         <span>
           <span className="block text-[16px] font-semibold tracking-tight text-white">DockClerk</span>
@@ -30,7 +30,7 @@ export function OfficeSidebar({ inboxCount, alertCount }: { inboxCount: number; 
         </span>
       </Link>
 
-      <nav className="flex-1 space-y-1 px-3">
+      <nav className="flex gap-1 overflow-x-auto px-3 pb-2 md:block md:flex-1 md:space-y-1 md:overflow-visible md:pb-0">
         {NAV.map(({ href, label, icon: Icon, exact, badgeKey }) => {
           const active = isActive(href, exact);
           const badge = badgeKey === "inbox" ? inboxCount : badgeKey === "alerts" ? alertCount : 0;
@@ -38,7 +38,7 @@ export function OfficeSidebar({ inboxCount, alertCount }: { inboxCount: number; 
             <Link
               key={href}
               href={href}
-              className={`cond group flex items-center gap-3 px-3 py-2 text-sm transition-colors ${
+              className={`cond group flex shrink-0 items-center gap-3 whitespace-nowrap px-3 py-2 text-sm transition-colors ${
                 active ? "bg-dock-yellow text-dock-ink" : "text-white/60 hover:bg-white/5 hover:text-white"
               }`}
             >
@@ -53,10 +53,10 @@ export function OfficeSidebar({ inboxCount, alertCount }: { inboxCount: number; 
           );
         })}
 
-        <div className="cond px-3 pb-1 pt-5 text-[11px] text-white/30">Your software</div>
+        <div className="cond hidden px-3 pb-1 pt-5 text-[11px] text-white/30 md:block">Your software</div>
         <Link
           href="/office/legacy/outbounds"
-          className={`cond group flex items-center gap-3 px-3 py-2 text-sm transition-colors ${
+          className={`cond group flex shrink-0 items-center gap-3 whitespace-nowrap px-3 py-2 text-sm transition-colors ${
             pathname.startsWith("/office/legacy") ? "bg-dock-yellow text-dock-ink" : "text-white/60 hover:bg-white/5 hover:text-white"
           }`}
         >
@@ -66,7 +66,7 @@ export function OfficeSidebar({ inboxCount, alertCount }: { inboxCount: number; 
         </Link>
       </nav>
 
-      <div className="border-t border-white/10 p-3">
+      <div className="border-t border-white/10 p-1 md:p-3">
         <Link href="/" className="cond flex items-center gap-3 px-3 py-2 text-sm text-white/40 hover:text-white">
           <LogOut size={16} /> Switch role
         </Link>

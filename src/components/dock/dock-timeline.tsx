@@ -98,7 +98,7 @@ export function DockTimeline({
                           Nº {s.number} · {s.client.replace(/,? S\.[AL]\.$/, "")}
                         </span>
                         <span className="block truncate opacity-70">
-                          {s.status === "ARRIVED" ? "At the dock" : s.pallets !== null ? `${s.pallets} plt` : "plt on its way"}
+                          {s.status === "ARRIVED" ? "At the dock" : s.pallets !== null ? `${s.pallets} plt` : "pallets tbc"}
                         </span>
                       </Link>
                     );

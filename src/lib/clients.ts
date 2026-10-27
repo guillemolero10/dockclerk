@@ -108,7 +108,7 @@ export async function customerDetail(code: string, now = new Date()) {
       date: i.date,
       number: i.number,
       status: i.status as string,
-      what: i.lines.map((l) => `${l.pallets} × ${l.item.sku}`).join(", ") || `${i.expectedPallets ?? "?"} pallets`,
+      what: i.lines.map((l) => `${l.pallets} × ${l.item.sku}`).join(", ") || (i.expectedPallets !== null ? `${i.expectedPallets} pallets` : "pallets not announced yet"),
       who: i.supplier ?? "—",
       receipt: i.receipt ? i.id : null,
     })),

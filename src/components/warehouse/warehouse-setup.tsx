@@ -36,10 +36,13 @@ export function WarehouseSetup({ existing }: { existing: Existing | null }) {
   useEffect(() => {
     let disposed = false;
     let instance: WarehouseScene | null = null;
-    import("./scene").then(({ WarehouseScene }) => {
-      if (disposed || !mount.current) return;
-      instance = new WarehouseScene(mount.current, layout);
-    });
+    import("./scene")
+      .then(({ WarehouseScene }) => {
+        if (disposed || !mount.current) return;
+        instance = new WarehouseScene(mount.current, layout);
+      })
+      // No WebGL on this machine: the form still works, only the 3D preview is missing.
+      .catch(() => {});
     return () => {
       disposed = true;
       instance?.dispose();

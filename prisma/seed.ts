@@ -4,7 +4,7 @@
 
 import { randomUUID } from "node:crypto";
 import { PrismaClient, type ClientType, type Prisma, type Unit } from "@prisma/client";
-import { firstFree, slotMinutes, type Busy } from "../src/lib/dock/slots";
+import { DOCK_CLOSE_H, firstFree, slotMinutes, type Busy } from "../src/lib/dock/slots";
 import { makeLayout, type WarehouseDims } from "../src/lib/warehouse/layout";
 import { runAnalysis } from "../src/lib/analyst";
 import { simulateHistory } from "./history";
@@ -422,6 +422,24 @@ async function main() {
     },
   });
 
+  // Two cases so those alerts show up in the demo. No short order on purpose: it would top the analyst's report.
+  // a truck announced for tomorrow that still has no door...
+  const aitana = clientRows.find((c) => c.code === "C007")!;
+  await db.inbound.create({
+    data: {
+      date: daysAgo(-1),
+      clientId: aitana.id,
+      warehouseId: warehouseOfClient.get(aitana.id),
+      clientDocRef: "ALB-20431",
+      supplier: "Cosmética Aitana – Planta de Alcoy",
+      expectedPallets: 10,
+      status: "EXPECTED",
+    },
+  });
+  // ...and a delivery from this week that came in damaged.
+  const lastWeek = await db.inbound.findFirst({ where: { status: "CLOSED", incident: null, date: { gte: daysAgo(6), lt: daysAgo(1) } }, orderBy: { date: "desc" } });
+  if (lastWeek) await db.inbound.update({ where: { id: lastWeek.id }, data: { incident: "2 palés con cajas aplastadas" } });
+
   await seedDock({ warehouseRows, morning, expectedToys, expectedDrinks, carrierRows });
   await seedInbox(clientRows);
 
@@ -495,9 +513,13 @@ async function seedDock({
   // Still to come today.
   // Never in the past, so the demo does not open with a late truck whatever time the data is reset.
   const halfHour = 30 * MIN;
-  const soon = (h: number) => new Date(Math.min(at(0, 19).getTime(), Math.max(at(0, h).getTime(), Math.ceil((Date.now() + halfHour) / halfHour) * halfHour)));
-  await book(expectedToys.warehouseId!, "in", { inboundId: expectedToys.id }, soon(10), slotMinutes("in", null), { carrier: carrierRows[0], dock: 1 });
-  await book(expectedDrinks.warehouseId!, "in", { inboundId: expectedDrinks.id }, new Date(soon(12).getTime() + halfHour), slotMinutes("in", expectedDrinks.expectedPallets), { carrier: carrierRows[4] });
+  // Late in the day the slot is pulled back so it still ends before the dock closes.
+  const soon = (h: number, minutes: number, after = 0) =>
+    new Date(Math.min(at(0, DOCK_CLOSE_H).getTime() - minutes * MIN, Math.max(at(0, h).getTime(), Math.ceil((Date.now() + halfHour) / halfHour) * halfHour) + after));
+  const toysMinutes = slotMinutes("in", null);
+  const drinksMinutes = slotMinutes("in", expectedDrinks.expectedPallets);
+  await book(expectedToys.warehouseId!, "in", { inboundId: expectedToys.id }, soon(10, toysMinutes), toysMinutes, { carrier: carrierRows[0], dock: 1 });
+  await book(expectedDrinks.warehouseId!, "in", { inboundId: expectedDrinks.id }, soon(12, drinksMinutes, halfHour), drinksMinutes, { carrier: carrierRows[4] });
   // The first prepared outbound is booked; the second still needs a door.
   const preparedToday = await db.outbound.findMany({ where: { status: "PREPARED" }, include: { lines: true }, orderBy: { deadline: "asc" }, take: 1 });
   for (const o of preparedToday) {

@@ -97,8 +97,8 @@ export default async function DockPage({ searchParams }: PageProps<"/office/dock
       </section>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_360px]">
-        <section>
-          <div className="flex items-center justify-between gap-3">
+        <section className="min-w-0">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="cond flex items-center gap-2 text-sm">
               Waiting for a slot <span className="mono bg-dock-ink px-1.5 text-[11px] text-dock-yellow">{data.waiting.length}</span>
             </h2>
@@ -123,7 +123,7 @@ export default async function DockPage({ searchParams }: PageProps<"/office/dock
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-medium">{o.client}</span>
                     <span className="block truncate text-xs text-dock-ink/55">
-                      {o.kind === "in" ? `from ${o.counterpart}` : `to ${o.counterpart}`} · {o.pallets ?? "?"} plt
+                      {o.kind === "in" ? `from ${o.counterpart}` : `to ${o.counterpart}`}{o.pallets !== null ? ` · ${o.pallets} plt` : ""}
                     </span>
                   </span>
                   <span className="mono text-xs text-dock-ink/60">{o.kind === "in" ? "expected" : "pick up"} ~{madridHm(o.preferred)}</span>

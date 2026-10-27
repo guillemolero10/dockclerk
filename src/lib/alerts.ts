@@ -74,11 +74,12 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
     const who = a.inbound?.client.name ?? a.outbound?.client.name ?? "";
     const what = a.inbound ? `delivery Nº ${a.inbound.number}` : `collection Nº ${a.outbound?.number}`;
     const minutes = Math.round((t - a.startsAt.getTime()) / 60000);
+    const lateBy = minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h${minutes % 60 ? ` ${minutes % 60} min` : ""}`;
     alerts.push({
       id: `late-${a.id}`,
       level: "red",
       kind: "dock",
-      title: `Truck ${minutes} min late at ${a.warehouse.code} door ${a.dock}`,
+      title: `Truck ${lateBy} late at ${a.warehouse.code} door ${a.dock}`,
       detail: `${who} · ${what} · slot ${madridHm(a.startsAt)}${a.carrier ? ` · ${a.carrier.name}` : ""}${a.plate ? ` (${a.plate})` : ""}. Call the carrier or free the door.`,
       href: `/office/dock?w=${a.warehouse.code}`,
       action: "Open the dock",
@@ -92,10 +93,10 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
       level: "red",
       kind: "dock",
       title: `Delivery Nº ${i.number} never arrived`,
-      detail: `${i.client.name} announced ${i.expectedPallets ?? "?"} pallets for ${fmtDate(i.date)}. Ask the customer whether it is still coming.`,
+      detail: `${i.client.name} announced ${i.expectedPallets !== null ? `${i.expectedPallets} pallets` : "a delivery"} for ${fmtDate(i.date)}. Ask the customer whether it is still coming.`,
       href: `/office/legacy/inbounds`,
       action: "See the delivery",
-      notice: `Hola${firstName(i.client.contact) ? ` ${firstName(i.client.contact)}` : ""}, la entrada Nº ${i.number} (${i.expectedPallets ?? "?"} palés) estaba prevista para el ${fmtDate(i.date)} y no ha llegado. ¿Sigue en pie o la anulamos? Un saludo.`,
+      notice: `Hola${firstName(i.client.contact) ? ` ${firstName(i.client.contact)}` : ""}, la entrada Nº ${i.number}${i.expectedPallets !== null ? ` (${i.expectedPallets} palés)` : ""} estaba prevista para el ${fmtDate(i.date)} y no ha llegado. ¿Sigue en pie o la anulamos? Un saludo.`,
     });
   }
 
@@ -155,7 +156,7 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
       level: "amber",
       kind: "dock",
       title: `Delivery Nº ${i.number} has no dock slot`,
-      detail: `${i.client.name}, ${i.expectedPallets ?? "?"} pallets due ${i.date < today.end ? "today" : "tomorrow"}. Book a door before the truck turns up.`,
+      detail: `${i.client.name}, ${i.expectedPallets !== null ? `${i.expectedPallets} pallets` : "a delivery"} due ${i.date < today.end ? "today" : "tomorrow"}. Book a door before the truck turns up.`,
       href: `/office/dock`,
       action: "Book a slot",
     });

@@ -10,7 +10,7 @@ const AREA = { rack: "in the racks", receiving: "in the receiving lane", dispatc
 
 export default async function TracePage({ searchParams }: PageProps<"/office/trace">) {
   const { lot, q } = await searchParams;
-  const query = typeof q === "string" ? q : "";
+  const query = typeof q === "string" ? q.trim() : "";
   const lotCode = typeof lot === "string" ? lot : null;
 
   let trace = lotCode ? await traceLot(lotCode) : null;
@@ -18,7 +18,7 @@ export default async function TracePage({ searchParams }: PageProps<"/office/tra
   if (!trace && query) {
     options = await findLots(query);
     // One exact match: go straight to it.
-    const exact = options.find((o) => o.lot.toLowerCase() === query.trim().toLowerCase());
+    const exact = options.find((o) => o.lot.toLowerCase() === query.toLowerCase());
     if (exact || options.length === 1) trace = await traceLot((exact ?? options[0]).lot);
   }
   const suggestions = !trace && !query ? await lotsAtRisk() : [];
@@ -38,8 +38,11 @@ export default async function TracePage({ searchParams }: PageProps<"/office/tra
         <button className="cond bg-dock-ink px-5 text-sm text-dock-yellow">Trace</button>
       </form>
 
+      {!trace && lotCode && !query && <p className="mt-6 text-sm text-dock-ink/60">No lot “{lotCode}” on record.</p>}
       {!trace && query && options.length === 0 && <p className="mt-6 text-sm text-dock-ink/60">No lot matches “{query}”.</p>}
-      {!trace && options.length > 1 && <LotList title={`${options.length} lots match “${query}”`} lots={options} />}
+      {!trace && options.length > 1 && (
+        <LotList title={`${options.length} lots match “${query}”${options.length > 24 ? " (first 24 shown)" : ""}`} lots={options.slice(0, 24)} />
+      )}
       {suggestions.length > 0 && <LotList title="Lots a recall would hit first (soonest to expire, still in the building)" lots={suggestions} />}
       {trace && <Trail t={trace} />}
     </main>

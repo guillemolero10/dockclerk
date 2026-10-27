@@ -70,7 +70,7 @@ export default async function AlertsPage() {
                       <span className="cond flex w-24 shrink-0 items-center gap-1.5 pt-0.5 text-[11px] text-dock-ink/55">
                         <Icon size={15} /> {label}
                       </span>
-                      <div className="min-w-0 flex-1 space-y-1.5">
+                      <div className="min-w-[12rem] flex-1 space-y-1.5">
                         <p className="font-semibold">{a.title}</p>
                         <p className="text-sm text-dock-ink/70">{a.detail}</p>
                         {a.notice && <CopyNotice text={a.notice} />}

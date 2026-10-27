@@ -22,7 +22,7 @@ export default async function OfficeLayout({ children }: LayoutProps<"/office">)
   const inboxCount = newMessages + pendingDrafts;
 
   return (
-    <div className="dock-app flex min-h-screen">
+    <div className="dock-app flex min-h-screen flex-col md:flex-row">
       <OfficeSidebar inboxCount={inboxCount} alertCount={alerts.filter((a) => a.level === "red").length} />
       <div className="dock-grid min-w-0 flex-1">{children}</div>
     </div>

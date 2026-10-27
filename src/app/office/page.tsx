@@ -103,8 +103,8 @@ export default async function OfficeToday() {
       )}
 
       <section className="mt-6 grid gap-4 lg:grid-cols-3">
-        <div className="dock-console p-5 lg:col-span-2">
-          <div className="flex items-center justify-between">
+        <div className="dock-console min-w-0 p-5 lg:col-span-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="cond text-xs text-white/50">AI clerk · activity log</h2>
             <Link href="/office/inbox" className="cond group flex items-center gap-1.5 bg-dock-yellow px-3 py-1.5 text-sm font-semibold text-dock-ink transition hover:brightness-95">
               <Sparkles size={15} /> Let the clerk handle it

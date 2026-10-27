@@ -129,23 +129,26 @@ body {
      concrete texture on .dock-app already supplies it */
 }
 
-.dock-card {
-  background: var(--color-dock-concrete-2);
-  border: 1.5px solid var(--color-dock-ink);
-  border-radius: 10px;
-  box-shadow: 4px 4px 0 var(--color-dock-ink);
-}
+/* In the components layer so utilities on the same element (bg-*, hover:*, p-*) win. */
+@layer components {
+  .dock-card {
+    background: var(--color-dock-concrete-2);
+    border: 1.5px solid var(--color-dock-ink);
+    border-radius: 10px;
+    box-shadow: 4px 4px 0 var(--color-dock-ink);
+  }
 
-.dock-input {
-  width: 100%;
-  border: 1.5px solid var(--color-dock-ink);
-  background: #fff;
-  padding: 6px 10px;
-  font-size: 14px;
-}
-.dock-input:focus {
-  outline: 3px solid var(--color-dock-yellow);
-  outline-offset: 0;
+  .dock-input {
+    width: 100%;
+    border: 1.5px solid var(--color-dock-ink);
+    background: #fff;
+    padding: 6px 10px;
+    font-size: 14px;
+  }
+  .dock-input:focus {
+    outline: 3px solid var(--color-dock-yellow);
+    outline-offset: 0;
+  }
 }
 
 /* Safety stripes, the warehouse signature. */

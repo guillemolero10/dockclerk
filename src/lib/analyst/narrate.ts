@@ -44,8 +44,9 @@ function template(findings: Finding[], gaps: Gap[]): Story {
   const top = findings.slice(0, 3);
   const summary = top.length
     ? `This week ${findings.length === 1 ? "one thing stands" : `${findings.length} things stand`} out. ` +
-      `First: ${top[0].title.charAt(0).toLowerCase()}${top[0].title.slice(1)}. ` +
-      (top[1] ? `Then: ${top.slice(1).map((f) => f.title.charAt(0).toLowerCase() + f.title.slice(1)).join("; ")}. ` : "") +
+      // Titles start with a name (N2, MUNECA-CL, a carrier, a customer), so they keep their capital.
+      `First: ${top[0].title}. ` +
+      (top[1] ? `Then: ${top.slice(1).map((f) => f.title).join("; ")}. ` : "") +
       (gaps.length ? `Some questions need more history before I can answer them.` : "")
     : "Nothing in the data needs action this week.";
   return { headline: top[0]?.title ?? "All clear this week", summary: summary.trim(), order: findings.map((f) => f.id), notes: {} };

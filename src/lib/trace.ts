@@ -10,16 +10,18 @@ export type LotOption = { lot: string; sku: string; description: string; client:
 /** Lots matching a search on lot code or SKU, newest delivery first. */
 export async function findLots(q: string): Promise<LotOption[]> {
   const query = q.trim();
+  // % and _ are LIKE wildcards: escape them so "%" searches for a percent sign, not for everything.
+  const like = query.replace(/[\\%_]/g, "\\$&");
   const lines = await db.inboundLine.findMany({
     where: {
       lot: query ? undefined : { not: null },
       ...(query
-        ? { OR: [{ lot: { contains: query, mode: "insensitive" } }, { item: { sku: { contains: query, mode: "insensitive" } } }], NOT: { lot: null } }
+        ? { OR: [{ lot: { contains: like, mode: "insensitive" } }, { item: { sku: { contains: like, mode: "insensitive" } } }], NOT: { lot: null } }
         : {}),
     },
     include: { item: { include: { client: true } }, inbound: { select: { date: true } } },
     orderBy: { inbound: { date: "desc" } },
-    take: 24,
+    take: 300, // lines, not lots: one lot can arrive on several lines
   });
   const seen = new Set<string>();
   return lines

@@ -24,7 +24,7 @@ export default async function PortalMovements() {
       kind: "in" as const,
       date: i.date,
       number: i.number,
-      what: i.lines.map((l) => `${l.pallets} × ${l.item.sku}${l.lot ? ` (${l.lot})` : ""}`).join(", ") || `${i.expectedPallets ?? "?"} pallets`,
+      what: i.lines.map((l) => `${l.pallets} × ${l.item.sku}${l.lot ? ` (${l.lot})` : ""}`).join(", ") || (i.expectedPallets !== null ? `${i.expectedPallets} pallets` : "pallets not announced yet"),
       who: i.supplier ?? "—",
       status: IN[i.status],
       receipt: i.receipt ? i.id : null,
