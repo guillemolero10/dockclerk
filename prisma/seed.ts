@@ -259,6 +259,7 @@ async function main() {
   }
 
   // Picked this morning and waiting in the dispatch lanes for their trucks: off the shelves already.
+  const staged: Prisma.StockCreateManyInput[] = [];
   const preparedToday: [string, string, string, number, number][] = [
     ["C006", "PVC-BLA", "D0802", 6, 16],
     ["C005", "SABANA-90", "D0951", 4, 18],
@@ -269,7 +270,7 @@ async function main() {
     const balance = balances.find((b) => b.itemId === item.id && b.pallets >= pallets);
     if (!balance) throw new Error(`Not enough ${sku} for the prepared outbound`);
     balance.pallets -= pallets;
-    await db.outbound.create({
+    const outbound = await db.outbound.create({
       data: {
         date: today,
         deadline: new Date(today.getTime() + hour * 60 * 60 * 1000),
@@ -282,6 +283,15 @@ async function main() {
         lines: { create: { itemId: item.id, pallets, units: pallets * item.unitsPerPallet } },
       },
     });
+    // The picked pallets wait in the next dispatch lane of their warehouse.
+    const warehouseId = warehouseOfClient.get(client.id)!;
+    const lane = new Set(staged.filter((x) => x.warehouseId === warehouseId).map((x) => x.outboundId)).size + 1;
+    for (let i = 0; i < pallets; i++) {
+      staged.push({
+        warehouseId, clientId: client.id, itemId: item.id, lot: balance.lot, pallets: 1, units: item.unitsPerPallet,
+        location: `EXP-${lane}`, inboundId: balance.inboundId, outboundId: outbound.id,
+      });
+    }
   }
 
   // Every pallet gets its own rack slot. Customers keep to their own stretch of racking,
@@ -319,7 +329,7 @@ async function main() {
       }
     }
   }
-  await db.stock.createMany({ data: stockRows });
+  await db.stock.createMany({ data: [...stockRows, ...staged] });
 
   // Unloaded at 7:40 this morning, still on the floor of the receiving lane until put away.
   const granzas = clientRows.find((c) => c.code === "C006")!;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useFormStatus } from "react-dom";
-import { AlertTriangle, Check, Mail, MessageCircle, UserRound, X } from "lucide-react";
+import { AlertTriangle, Check, Mail, MessageCircle, Mic, UserRound, X } from "lucide-react";
 import type { Channel, DraftKind } from "@prisma/client";
 import { approveDraft, discardDraft } from "@/app/office/inbox/actions";
 import type { Doubt, HumanPayload, OutboundPayload, ReplyPayload, Step } from "@/lib/agent/types";
@@ -23,7 +23,7 @@ const KIND: Record<DraftKind, { label: string; tone: string; action: string }> =
   NEEDS_HUMAN: { label: "Needs you", tone: "bg-dock-red text-white", action: "Mark as handled" },
 };
 
-const CHANNEL_ICON: Record<Channel, typeof Mail> = { EMAIL: Mail, WHATSAPP: MessageCircle, PORTAL: UserRound };
+const CHANNEL_ICON: Record<Channel, typeof Mail> = { EMAIL: Mail, WHATSAPP: MessageCircle, PORTAL: UserRound, FLOOR: Mic };
 
 function when(iso: string | null) {
   if (!iso) return "—";

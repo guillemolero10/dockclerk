@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { getDockDay } from "@/lib/dock/day";
 import { DOCK_CLOSE_H, DOCK_OPEN_H, firstFree, overlaps, slotMinutes, type Busy } from "@/lib/dock/slots";
 import { madridDay, madridHm } from "@/lib/format";
+import { shipOutbound } from "@/lib/ops/floor";
 import { getSession } from "@/lib/session";
 import { makeLayout } from "@/lib/warehouse/layout";
 
@@ -115,10 +116,8 @@ export async function updateSlot(formData: FormData) {
     const received = slot.inbound && ["RECEIVED", "CLOSED"].includes(slot.inbound.status);
     const loaded = slot.outbound && ["PREPARED", "SHIPPED"].includes(slot.outbound.status);
     if (!received && !loaded) return;
-    await db.$transaction([
-      db.dockAppointment.update({ where: { id }, data: { status: "DONE" } }),
-      ...(slot.outbound?.status === "PREPARED" ? [db.outbound.update({ where: { id: slot.outbound.id }, data: { status: "SHIPPED" } })] : []),
-    ]);
+    await db.dockAppointment.update({ where: { id }, data: { status: "DONE" } });
+    if (slot.outbound?.status === "PREPARED") await shipOutbound(slot.outbound.id);
   } else if (action === "noshow" && slot.status === "BOOKED") {
     await db.dockAppointment.update({ where: { id }, data: { status: "NO_SHOW" } });
   } else if (action === "cancel" && (slot.status === "BOOKED" || slot.status === "NO_SHOW")) {

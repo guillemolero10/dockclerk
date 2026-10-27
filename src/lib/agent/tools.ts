@@ -54,17 +54,22 @@ export async function findItem(clientId: string, fragment: string) {
 }
 
 /**
- * Pallets and units of an item free to promise right now: what is on the shelves
- * minus what open outbounds have already claimed (it stays on the shelf until picked).
+ * Pallets and units of an item free to promise right now: what is on the shelves and not
+ * picked yet, minus what open outbounds still have to pick (it stays on the shelf until then).
  */
 export async function checkStock(clientId: string, itemId: string) {
-  const [onHand, reserved] = await Promise.all([
-    db.stock.aggregate({ where: { clientId, itemId }, _sum: { pallets: true, units: true } }),
+  const [unpicked, ordered, pickedForOpen] = await Promise.all([
+    db.stock.aggregate({ where: { clientId, itemId, outboundId: null }, _sum: { pallets: true, units: true } }),
     db.outboundLine.aggregate({ where: { itemId, outbound: { clientId, status: "REQUESTED" } }, _sum: { pallets: true, units: true } }),
+    db.stock.aggregate({ where: { clientId, itemId, outbound: { status: "REQUESTED" } }, _sum: { pallets: true, units: true } }),
   ]);
+  const stillToPick = {
+    pallets: Math.max(0, (ordered._sum.pallets ?? 0) - (pickedForOpen._sum.pallets ?? 0)),
+    units: Math.max(0, (ordered._sum.units ?? 0) - (pickedForOpen._sum.units ?? 0)),
+  };
   return {
-    pallets: Math.max(0, (onHand._sum.pallets ?? 0) - (reserved._sum.pallets ?? 0)),
-    units: Math.max(0, (onHand._sum.units ?? 0) - (reserved._sum.units ?? 0)),
+    pallets: Math.max(0, (unpicked._sum.pallets ?? 0) - stillToPick.pallets),
+    units: Math.max(0, (unpicked._sum.units ?? 0) - stillToPick.units),
   };
 }
 

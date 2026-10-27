@@ -110,6 +110,9 @@ model Stock {
   pallets     Int
   units       Int
   location    String
+  /// Picked for this outbound: it sits in a dispatch lane until the truck leaves.
+  outboundId  String?
+  outbound    Outbound? @relation(fields: [outboundId], references: [id], onDelete: SetNull)
   inboundId   String?
   client      Client    @relation(fields: [clientId], references: [id])
   item        Item      @relation(fields: [itemId], references: [id])
@@ -192,6 +195,9 @@ model Outbound {
   carrier      Carrier?         @relation(fields: [carrierId], references: [id])
   lines        OutboundLine[]
   appointment  DockAppointment?
+  picked       Stock[]
+  /// What left on the truck, lot by lot, for traceability: [{ itemId, sku, lot, units, location }]
+  shipped      Json?
   createdAt    DateTime         @default(now())
 }
 
@@ -246,8 +252,18 @@ model DockReceipt {
   /// What the delivery note says vs. what SAM 3.1 counted.
   noteUnits      Int?
   countedUnits   Int?
-  /// [{ box: number, kind: "crushed", bbox: [...] }]
+  /// [{ box: number, note: string }]
   damages        Json?
+  /// Lines read from the delivery note: [{ sku, description, lot, pallets, units }]
+  noteData       Json?
+  notePallets    Int?
+  countedPallets Int?
+  /// Boxes found in the load photo, for the overlay: [{ x, y, w, h, damaged }] in 0..1
+  boxes          Json?
+  /// Who read the note and who counted: "muse-spark", "sam-3.1", "driver", "operator".
+  readBy         String?
+  countedBy      String?
+  signedBy       String?
   signatureUrl   String?
   pdfUrl         String?
   signedAt       DateTime?
@@ -261,6 +277,8 @@ enum Channel {
   EMAIL
   WHATSAPP
   PORTAL
+  /// Voice notes from the warehouse floor.
+  FLOOR
 }
 
 enum MessageStatus {
@@ -313,4 +331,14 @@ model Draft {
   status    DraftStatus @default(PENDING)
   message   Message?    @relation(fields: [messageId], references: [id])
   createdAt DateTime    @default(now())
+}
+
+/// Photos and audio taken on the floor (delivery notes, loads, signatures, voice notes).
+/// Kept in the database so the demo needs no file storage service.
+model Upload {
+  id        String   @id @default(cuid())
+  kind      String
+  mime      String
+  data      Bytes
+  createdAt DateTime @default(now())
 }

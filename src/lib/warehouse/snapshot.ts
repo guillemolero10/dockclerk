@@ -3,6 +3,7 @@
 
 import { db } from "@/lib/db";
 import { madridDayRange } from "@/lib/format";
+import { dispatchLane } from "./lanes";
 import { makeLayout, parseLocation, type WarehouseDims } from "./layout";
 import { allocatePicks } from "./picking";
 
@@ -15,7 +16,8 @@ export type WarehouseSummary = {
   dims: WarehouseDims;
   capacity: number;
   inRacks: number;
-  onFloor: number;
+  receiving: number;
+  toShip: number;
 };
 
 export type SnapshotPallet = {
@@ -28,6 +30,8 @@ export type SnapshotPallet = {
   days: number;
   /** Days left before it expires, only for lot-tracked goods. */
   expiresIn: number | null;
+  /** Outbound it has been picked for. */
+  outbound: string | null;
 };
 
 export type SnapshotOrder = {
@@ -41,11 +45,14 @@ export type SnapshotOrder = {
   pallets: number;
   lines: { sku: string; description: string; pallets: number }[];
   picks: string[];
+  picked: string[];
+  /** Dispatch lane its pallets go to. */
+  lane: number;
   short: number;
   byClerk: boolean;
 };
 
-export type SnapshotPrepared = { id: string; number: number; client: number; consignee: string | null; deadline: string | null; pallets: number; lane: number };
+export type SnapshotPrepared = { id: string; number: number; client: number; consignee: string | null; deadline: string | null; pallets: number };
 
 export type WarehouseSnapshot = {
   warehouses: WarehouseSummary[];
@@ -54,11 +61,20 @@ export type WarehouseSnapshot = {
   items: { sku: string; description: string; client: number; unit: string }[];
   pallets: SnapshotPallet[];
   orders: SnapshotOrder[];
+  /** Picked outbounds waiting in the dispatch lanes of this warehouse. */
   prepared: SnapshotPrepared[];
   truck: { number: number; client: string; plate: string | null; status: string } | null;
   /** Dock doors with a truck at them right now. */
   busyDocks: number[];
 };
+
+const dimsOf = (w: { length: number; width: number; height: number; aisleWidth: number; docks: number }): WarehouseDims => ({
+  length: w.length,
+  width: w.width,
+  height: w.height,
+  aisleWidth: w.aisleWidth,
+  docks: w.docks,
+});
 
 export async function getWarehouseSnapshot(code?: string): Promise<WarehouseSnapshot | null> {
   const now = Date.now();
@@ -77,8 +93,8 @@ export async function getWarehouseSnapshot(code?: string): Promise<WarehouseSnap
       orderBy: [{ deadline: "asc" }, { number: "asc" }],
     }),
     db.outbound.findMany({
-      where: { status: "PREPARED", warehouseId: current.id },
-      include: { consignee: true, lines: true },
+      where: { status: "PREPARED", picked: { some: { warehouseId: current.id } } },
+      include: { consignee: true },
       orderBy: [{ deadline: "asc" }, { number: "asc" }],
     }),
     db.inbound.findFirst({
@@ -91,30 +107,32 @@ export async function getWarehouseSnapshot(code?: string): Promise<WarehouseSnap
   const clientIndex = new Map(clients.map((c, i) => [c.id, i]));
   const itemIndex = new Map(items.map((it, i) => [it.id, i]));
   const codeOf = new Map(warehouses.map((w) => [w.id, w.code]));
+  const layoutOf = new Map(warehouses.map((w) => [w.id, makeLayout(dimsOf(w))]));
+  const stockIn = (warehouseId: string) => stock.filter((s) => s.warehouseId === warehouseId);
 
   const plans = allocatePicks(
     stock.map((s) => ({
-      id: s.id, warehouseId: s.warehouseId, itemId: s.itemId, location: s.location, pallets: s.pallets, expiresAt: s.expiresAt, receivedAt: s.inbound?.date ?? null,
+      id: s.id, warehouseId: s.warehouseId, itemId: s.itemId, location: s.location, pallets: s.pallets,
+      expiresAt: s.expiresAt, receivedAt: s.inbound?.date ?? null, outboundId: s.outboundId,
     })),
     open.map((o) => ({ id: o.id, number: o.number, date: o.date, deadline: o.deadline, lines: o.lines.map((l) => ({ itemId: l.itemId, pallets: l.pallets })) })),
   );
 
-  const dimsOf = (w: (typeof warehouses)[number]): WarehouseDims => ({ length: w.length, width: w.width, height: w.height, aisleWidth: w.aisleWidth, docks: w.docks });
-  const here = stock.filter((s) => s.warehouseId === current.id);
-  const lanes = makeLayout(dimsOf(current)).laneCount.EXP;
+  const here = stockIn(current.id);
+  const count = (list: typeof stock, test: (loc: string) => boolean) => list.filter((s) => test(s.location)).reduce((sum, s) => sum + s.pallets, 0);
 
   return {
     warehouses: warehouses.map((w) => {
-      const mine = stock.filter((s) => s.warehouseId === w.id);
-      const inRacks = mine.filter((s) => parseLocation(s.location)?.kind === "rack").reduce((sum, s) => sum + s.pallets, 0);
+      const mine = stockIn(w.id);
       return {
         code: w.code,
         name: w.name,
         city: w.city,
         dims: dimsOf(w),
-        capacity: makeLayout(dimsOf(w)).capacity,
-        inRacks,
-        onFloor: mine.reduce((sum, s) => sum + s.pallets, 0) - inRacks,
+        capacity: layoutOf.get(w.id)!.capacity,
+        inRacks: count(mine, (loc) => parseLocation(loc)?.kind === "rack"),
+        receiving: count(mine, (loc) => loc.startsWith("REC-")),
+        toShip: count(mine, (loc) => loc.startsWith("EXP-")),
       };
     }),
     current: current.code,
@@ -128,9 +146,10 @@ export async function getWarehouseSnapshot(code?: string): Promise<WarehouseSnap
       units: s.units,
       days: s.inbound ? Math.max(0, Math.floor((now - s.inbound.date.getTime()) / DAY)) : 0,
       expiresIn: s.expiresAt ? Math.ceil((s.expiresAt.getTime() - now) / DAY) : null,
+      outbound: s.outboundId,
     })),
     orders: open.map((o) => {
-      const plan = plans.get(o.id) ?? { warehouseId: null, stockIds: [], short: 0 };
+      const plan = plans.get(o.id) ?? { warehouseId: null, stockIds: [], picked: [], short: 0 };
       return {
         id: o.id,
         number: o.number,
@@ -141,18 +160,19 @@ export async function getWarehouseSnapshot(code?: string): Promise<WarehouseSnap
         pallets: o.lines.reduce((sum, l) => sum + l.pallets, 0),
         lines: o.lines.map((l) => ({ sku: l.item.sku, description: l.item.description, pallets: l.pallets })),
         picks: plan.stockIds,
+        picked: plan.picked,
+        lane: plan.warehouseId ? dispatchLane(layoutOf.get(plan.warehouseId)!, stockIn(plan.warehouseId), o.id) : 1,
         short: plan.short,
         byClerk: o.notes?.startsWith("Alta DockClerk") ?? false,
       };
     }),
-    prepared: prepared.slice(0, lanes).map((o, i) => ({
+    prepared: prepared.map((o) => ({
       id: o.id,
       number: o.number,
       client: clientIndex.get(o.clientId)!,
       consignee: o.consignee?.name ?? null,
       deadline: (o.deadline ?? o.date).toISOString(),
-      pallets: o.lines.reduce((sum, l) => sum + l.pallets, 0),
-      lane: i + 1,
+      pallets: here.filter((s) => s.outboundId === o.id).length,
     })),
     truck: truck ? { number: truck.number, client: truck.client.name, plate: truck.plate, status: truck.status } : null,
     busyDocks: atDock.map((a) => a.dock),

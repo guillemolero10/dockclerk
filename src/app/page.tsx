@@ -10,7 +10,12 @@ async function loadDemoData() {
   try {
     const [customers, nextTruck] = await Promise.all([
       db.client.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
-      db.inbound.findFirst({ where: { status: "EXPECTED" }, orderBy: { date: "asc" }, select: { driverToken: true } }),
+      // The next truck of the day still in progress (coming, unloading or waiting for the signature).
+      db.inbound.findFirst({
+        where: { appointment: { status: { in: ["BOOKED", "ARRIVED"] } } },
+        orderBy: { appointment: { startsAt: "asc" } },
+        select: { driverToken: true },
+      }),
     ]);
     return { customers, driverToken: nextTruck?.driverToken ?? null };
   } catch {

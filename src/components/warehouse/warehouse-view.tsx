@@ -51,14 +51,18 @@ export function WarehouseView({ snapshot, initialPick }: { snapshot: WarehouseSn
     return map;
   }, [orders]);
 
-  // Prepared outbounds are not stock any more; they still take room in the dispatch lanes.
-  const staged = useMemo(
-    () => prepared.flatMap((o) => Array.from({ length: o.pallets }, (_, k) => ({ id: `out:${o.id}:${k}`, loc: `EXP-${o.lane}`, order: o }))),
-    [prepared],
-  );
-  const dispatchLane = Math.min(prepared.length + 1, layout.laneCount.EXP);
+  // Picked outbounds waiting in the dispatch lanes for their truck.
+  const preparedById = useMemo(() => new Map(prepared.map((o) => [o.id, o])), [prepared]);
+  const dispatchLane = order?.lane ?? 1;
   const route = useMemo(
-    () => (order ? pickRoute(layout, order.picks.map((id) => ({ id, loc: palletById.get(id)?.loc ?? "" })), dispatchLane) : null),
+    () =>
+      order
+        ? pickRoute(
+            layout,
+            order.picks.filter((id) => !order.picked.includes(id)).map((id) => ({ id, loc: palletById.get(id)?.loc ?? "" })),
+            dispatchLane,
+          )
+        : null,
     [layout, order, palletById, dispatchLane],
   );
 
@@ -70,11 +74,8 @@ export function WarehouseView({ snapshot, initialPick }: { snapshot: WarehouseSn
       if (mode === "expiry") return expiryColor(p.expiresIn);
       return clientColor(items[p.item].client);
     };
-    return [
-      ...pallets.map((p) => ({ id: p.id, loc: p.loc, color: colorOf(p) })),
-      ...staged.map((s) => ({ id: s.id, loc: s.loc, color: order || mode !== "customer" ? GHOST : clientColor(s.order.client) })),
-    ];
-  }, [pallets, staged, items, mode, order]);
+    return pallets.map((p) => ({ id: p.id, loc: p.loc, color: colorOf(p) }));
+  }, [pallets, items, mode, order]);
 
   // Scene lifecycle: one scene per building shape.
   useEffect(() => {
@@ -147,9 +148,9 @@ export function WarehouseView({ snapshot, initialPick }: { snapshot: WarehouseSn
   const selected = selectedId ? describe(selectedId) : null;
 
   function describe(id: string) {
-    const stagedPallet = staged.find((s) => s.id === id);
-    if (stagedPallet) {
-      return { kind: "staged" as const, loc: stagedPallet.loc, order: stagedPallet.order, client: clients[stagedPallet.order.client] };
+    const shipping = palletById.get(id)?.outbound ? preparedById.get(palletById.get(id)!.outbound!) : undefined;
+    if (shipping) {
+      return { kind: "staged" as const, loc: palletById.get(id)!.loc, order: shipping, client: clients[shipping.client] };
     }
     const p = palletById.get(id);
     if (!p) return null;
@@ -218,8 +219,8 @@ export function WarehouseView({ snapshot, initialPick }: { snapshot: WarehouseSn
             )}
             <div className="mt-3 grid grid-cols-3 gap-2 text-center">
               <Stat label="In racks" value={here.inRacks} />
-              <Stat label="Receiving" value={here.onFloor} />
-              <Stat label="To ship" value={staged.length} />
+              <Stat label="Receiving" value={here.receiving} />
+              <Stat label="To ship" value={here.toShip} />
             </div>
           </div>
         </section>
@@ -261,6 +262,7 @@ export function WarehouseView({ snapshot, initialPick }: { snapshot: WarehouseSn
                     <div className="dock-console m-2 px-3 py-2 text-[12px]">
                       <p className="cond mb-1 flex items-center gap-1.5 text-[11px] text-white/50">
                         <Route size={12} /> Pick route · ≈{route.metres} m · ends at EXP {dispatchLane}
+                        {order.picked.length > 0 && ` · ${order.picked.length}/${order.picks.length} picked`}
                       </p>
                       <ol className="mono space-y-0.5">
                         {route.order.map((id, i) => {

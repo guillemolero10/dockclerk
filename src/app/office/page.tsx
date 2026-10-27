@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Boxes, Inbox, Mail, MessageCircle, Package, Sparkles, Truck, UserRound } from "lucide-react";
+import { ArrowRight, Boxes, Inbox, Mail, MessageCircle, Mic, Package, Sparkles, Truck, UserRound } from "lucide-react";
 import type { Channel } from "@prisma/client";
 import { db } from "@/lib/db";
 import { fmtNumber, madridDayRange, madridHm } from "@/lib/format";
@@ -10,6 +10,7 @@ const CHANNEL: Record<Channel, { label: string; icon: typeof Mail }> = {
   EMAIL: { label: "Email", icon: Mail },
   WHATSAPP: { label: "WhatsApp", icon: MessageCircle },
   PORTAL: { label: "Portal", icon: UserRound },
+  FLOOR: { label: "Floor", icon: Mic },
 };
 
 function timeAgo(date: Date) {
