@@ -6,10 +6,10 @@ import { fmtNumber, madridDayRange } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-const CHANNEL: Record<Channel, { label: string; icon: typeof Mail; tone: string }> = {
-  EMAIL: { label: "Email", icon: Mail, tone: "text-sky-300 bg-sky-400/10 ring-sky-400/20" },
-  WHATSAPP: { label: "WhatsApp", icon: MessageCircle, tone: "text-emerald-300 bg-emerald-400/10 ring-emerald-400/20" },
-  PORTAL: { label: "Portal", icon: UserRound, tone: "text-violet-300 bg-violet-400/10 ring-violet-400/20" },
+const CHANNEL: Record<Channel, { label: string; icon: typeof Mail }> = {
+  EMAIL: { label: "Email", icon: Mail },
+  WHATSAPP: { label: "WhatsApp", icon: MessageCircle },
+  PORTAL: { label: "Portal", icon: UserRound },
 };
 
 function timeAgo(date: Date) {
@@ -54,12 +54,12 @@ export default async function OfficeToday() {
     <main className="mx-auto max-w-6xl px-8 py-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-sm text-zinc-500">{today}</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight text-white">{greeting}, office.</h1>
+          <p className="cond text-sm text-dock-ink/50">{today}</p>
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight text-dock-ink">{greeting}, office.</h1>
         </div>
-        <div className="flex items-center gap-2 rounded-full border border-dock-line bg-white/[0.03] px-3 py-1.5 text-xs text-zinc-400">
-          <span className="dock-live h-2 w-2 rounded-full bg-dock-amber" />
-          AI clerk on standby · {newMessages} messages waiting
+        <div className="flex items-center gap-2 border border-dock-ink bg-white px-3 py-1.5 text-xs">
+          <span className="dock-live h-2 w-2 rounded-full bg-dock-red" />
+          <span className="cond">AI clerk on standby · {newMessages} messages waiting</span>
         </div>
       </header>
 
@@ -71,29 +71,25 @@ export default async function OfficeToday() {
       </section>
 
       <section className="mt-6 grid gap-4 lg:grid-cols-3">
-        <div className="dock-card p-5 lg:col-span-2">
+        <div className="dock-console p-5 lg:col-span-2">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-zinc-300">Waiting in the inbox</h2>
-            <Link href="/office/inbox" className="group flex items-center gap-1.5 rounded-lg bg-dock-amber px-3 py-1.5 text-sm font-medium text-black transition hover:brightness-110">
+            <h2 className="cond text-xs text-white/50">AI clerk · activity log</h2>
+            <Link href="/office/inbox" className="cond group flex items-center gap-1.5 bg-dock-yellow px-3 py-1.5 text-sm font-semibold text-dock-ink transition hover:brightness-95">
               <Sparkles size={15} /> Let the clerk handle it
               <ArrowRight size={15} className="transition group-hover:translate-x-0.5" />
             </Link>
           </div>
-          <ul className="mt-4 divide-y divide-dock-line">
+          <ul className="mono mt-4 space-y-2 text-[13px] leading-relaxed">
             {latestMessages.map((m) => {
               const ch = CHANNEL[m.channel];
               return (
-                <li key={m.id} className="flex items-start gap-3 py-3">
-                  <span className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg ring-1 ${ch.tone}`}>
-                    <ch.icon size={15} />
+                <li key={m.id} className="flex items-start gap-3">
+                  <span className="t shrink-0 text-[11px]">{timeAgo(m.receivedAt)}</span>
+                  <ch.icon size={13} className="mt-0.5 shrink-0 text-white/40" />
+                  <span className="min-w-0 flex-1 truncate">
+                    <span className="tool">{m.client?.name ?? m.fromName}</span>
+                    <span className="text-white/40"> — {m.body}</span>
                   </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-baseline justify-between gap-3">
-                      <p className="truncate text-sm font-medium text-zinc-200">{m.client?.name ?? m.fromName}</p>
-                      <span className="shrink-0 font-mono text-[11px] text-zinc-500">{timeAgo(m.receivedAt)}</span>
-                    </div>
-                    <p className="mt-0.5 line-clamp-1 text-sm text-zinc-500">{m.body}</p>
-                  </div>
                 </li>
               );
             })}
@@ -102,19 +98,19 @@ export default async function OfficeToday() {
 
         <div className="space-y-4">
           <div className="dock-card p-5">
-            <h2 className="text-sm font-medium text-zinc-300">Dock today</h2>
+            <h2 className="cond text-xs text-dock-ink/50">Dock today</h2>
             {trucksToday.length === 0 ? (
-              <p className="mt-3 text-sm text-zinc-500">No trucks expected.</p>
+              <p className="mt-3 text-sm text-dock-ink/50">No trucks expected.</p>
             ) : (
               <ul className="mt-3 space-y-2">
                 {trucksToday.map((t) => (
-                  <li key={t.id} className="flex items-center gap-3 rounded-xl border border-dock-line bg-black/20 p-3">
-                    <Truck size={18} className="text-dock-amber" />
+                  <li key={t.id} className="flex items-center gap-3 border border-dock-line bg-white p-3">
+                    <Truck size={18} className="text-dock-red" />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm text-zinc-200">{t.client.name}</p>
-                      <p className="font-mono text-[11px] text-zinc-500">{t.plate} · {t.carrier?.name}</p>
+                      <p className="truncate text-sm">{t.client.name}</p>
+                      <p className="mono text-[11px] text-dock-ink/50">{t.plate} · {t.carrier?.name}</p>
                     </div>
-                    <span className="rounded-full bg-amber-400/10 px-2 py-0.5 text-[11px] text-amber-300 ring-1 ring-amber-400/20">Expected</span>
+                    <span className="cond bg-dock-yellow px-2 py-0.5 text-[11px] text-dock-ink">Expected</span>
                   </li>
                 ))}
               </ul>
@@ -122,17 +118,17 @@ export default async function OfficeToday() {
           </div>
 
           <div className="dock-card p-5">
-            <h2 className="text-sm font-medium text-zinc-300">Next shipments</h2>
+            <h2 className="cond text-xs text-dock-ink/50">Next shipments</h2>
             <ul className="mt-3 space-y-2.5">
               {nextShipments.map((o) => (
                 <li key={o.id} className="flex items-center justify-between gap-3 text-sm">
                   <div className="min-w-0">
-                    <p className="truncate text-zinc-200">{o.consignee?.name}</p>
-                    <p className="truncate text-xs text-zinc-500">{o.client.name}</p>
+                    <p className="truncate">{o.consignee?.name}</p>
+                    <p className="truncate text-xs text-dock-ink/50">{o.client.name}</p>
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className="font-mono text-zinc-200">{o.lines.reduce((s, l) => s + l.pallets, 0)} plt</p>
-                    <p className="text-[11px] text-zinc-500">{dayLabel(o.date)}</p>
+                    <p className="mono">{o.lines.reduce((s, l) => s + l.pallets, 0)} plt</p>
+                    <p className="cond text-[11px] text-dock-ink/50">{dayLabel(o.date)}</p>
                   </div>
                 </li>
               ))}
@@ -142,18 +138,18 @@ export default async function OfficeToday() {
       </section>
 
       <section className="dock-card mt-4 p-5">
-        <h2 className="text-sm font-medium text-zinc-300">Stock by customer</h2>
+        <h2 className="cond text-xs text-dock-ink/50">Stock by customer</h2>
         <ul className="mt-4 grid gap-x-8 gap-y-3 md:grid-cols-2">
           {stockByClient.map((s) => {
             const pallets = s._sum.pallets ?? 0;
             return (
               <li key={s.clientId}>
                 <div className="flex justify-between text-xs">
-                  <span className="text-zinc-400">{clientName(s.clientId)}</span>
-                  <span className="font-mono text-zinc-300">{fmtNumber(pallets)} plt</span>
+                  <span className="text-dock-ink/60">{clientName(s.clientId)}</span>
+                  <span className="mono">{fmtNumber(pallets)} plt</span>
                 </div>
-                <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/[0.05]">
-                  <div className="h-full rounded-full bg-gradient-to-r from-amber-500 to-dock-amber" style={{ width: `${(pallets / maxClientPallets) * 100}%` }} />
+                <div className="mt-1.5 h-2 overflow-hidden border border-dock-ink/20 bg-white">
+                  <div className="h-full bg-dock-yellow" style={{ width: `${(pallets / maxClientPallets) * 100}%` }} />
                 </div>
               </li>
             );
@@ -166,14 +162,13 @@ export default async function OfficeToday() {
 
 function Kpi({ icon: Icon, label, value, note, accent }: { icon: typeof Mail; label: string; value: number; note: string; accent?: boolean }) {
   return (
-    <div className={`dock-card relative overflow-hidden p-5 ${accent ? "ring-1 ring-dock-amber/30" : ""}`}>
-      {accent && <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-dock-amber to-transparent" />}
+    <div className={`dock-card p-5 ${accent ? "bg-dock-yellow" : ""}`}>
       <div className="flex items-center justify-between">
-        <p className="text-xs text-zinc-500">{label}</p>
-        <Icon size={16} className={accent ? "text-dock-amber" : "text-zinc-600"} />
+        <p className="cond text-[11px] text-dock-ink/60">{label}</p>
+        <Icon size={16} className="text-dock-ink/50" />
       </div>
-      <p className={`mt-3 font-mono text-4xl font-semibold tabular-nums tracking-tight ${accent ? "text-dock-amber" : "text-white"}`}>{fmtNumber(value)}</p>
-      <p className="mt-1 text-xs text-zinc-600">{note}</p>
+      <p className="mono mt-3 text-4xl font-bold tabular-nums tracking-tight text-dock-ink">{fmtNumber(value)}</p>
+      <p className="cond mt-1 text-[11px] text-dock-ink/50">{note}</p>
     </div>
   );
 }

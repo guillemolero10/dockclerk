@@ -8,8 +8,9 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-barlow);
+  --font-cond: var(--font-barlow-condensed);
+  --font-mono: var(--font-mono);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -22,7 +23,17 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-family: var(--font-barlow), system-ui, sans-serif;
+}
+
+.cond {
+  font-family: var(--font-barlow-condensed), system-ui, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.mono {
+  font-family: var(--font-mono), monospace;
 }
 
 /* ---------- "Legacy warehouse software" look (simulated, built for the demo) ---------- */
@@ -92,47 +103,59 @@ body {
   padding: 1px 4px;
 }
 
-/* ---------- DockClerk "control tower" look ---------- */
+/* ---------- DockClerk "warehouse signage" look ----------
+   Floor-level industrial: concrete, black, hazard yellow. The agent's
+   activity log borrows a console/mono feel from a live telemetry panel,
+   without tipping the whole app into a sci-fi dark theme. */
 @theme {
-  --color-dock-bg: #07090d;
-  --color-dock-panel: #0d1117;
-  --color-dock-line: #1c2330;
-  --color-dock-amber: #ffb020;
+  --color-dock-ink: #15130f;
+  --color-dock-concrete: #e7e4da;
+  --color-dock-concrete-2: #efece4;
+  --color-dock-line: #cfcabb;
+  --color-dock-yellow: #ffd100;
+  --color-dock-red: #d23a2a;
 }
 
 .dock-app {
-  background:
-    radial-gradient(1200px 600px at 85% -10%, rgba(255, 176, 32, 0.08), transparent 60%),
-    radial-gradient(900px 500px at -10% 110%, rgba(56, 120, 255, 0.07), transparent 60%),
-    var(--color-dock-bg);
-  color: #e6e8ec;
-  color-scheme: dark;
+  background: var(--color-dock-concrete);
+  background-image: radial-gradient(rgba(21, 19, 15, 0.05) 1px, transparent 1px);
+  background-size: 7px 7px;
+  color: var(--color-dock-ink);
+  color-scheme: light;
 }
 
-/* Fine blueprint grid behind the content, like a warehouse floor plan. */
 .dock-grid {
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
-  background-size: 32px 32px;
+  /* kept as a hook for pages that used to request a grid backdrop; the
+     concrete texture on .dock-app already supplies it */
 }
 
 .dock-card {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015));
-  border: 1px solid var(--color-dock-line);
-  border-radius: 16px;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 20px 40px -24px rgba(0, 0, 0, 0.6);
+  background: var(--color-dock-concrete-2);
+  border: 1.5px solid var(--color-dock-ink);
+  border-radius: 10px;
+  box-shadow: 4px 4px 0 var(--color-dock-ink);
 }
 
 /* Safety stripes, the warehouse signature. */
 .hazard {
-  background: repeating-linear-gradient(-45deg, var(--color-dock-amber) 0 8px, #111 8px 16px);
+  background: repeating-linear-gradient(-45deg, var(--color-dock-yellow) 0 14px, var(--color-dock-ink) 14px 28px);
 }
 
 @keyframes dock-pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
+  50% { opacity: 0.3; }
 }
 .dock-live {
-  animation: dock-pulse 1.6s ease-in-out infinite;
+  animation: dock-pulse 1.3s ease-in-out infinite;
 }
+
+/* Agent activity feed: a console readout stamped onto the signage look. */
+.dock-console {
+  background: var(--color-dock-ink);
+  color: #c8d6c8;
+  border-radius: 10px;
+}
+.dock-console .ok { color: #5dd68a; }
+.dock-console .ask { color: var(--color-dock-yellow); }
+.dock-console .tool { color: #7fb8d6; }
+.dock-console .t { color: #6b6a63; }
