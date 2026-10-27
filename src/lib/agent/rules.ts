@@ -14,7 +14,7 @@ function firstName(fromName: string) {
   return fromName.includes("(") ? fromName.split(/[ (]/)[0] : null;
 }
 
-function hello(fromName: string) {
+export function hello(fromName: string) {
   const name = firstName(fromName);
   return name ? `Hola ${name},` : "Hola,";
 }
@@ -77,10 +77,10 @@ function quantitySegments(text: string) {
 }
 
 function channelLabel(m: Message) {
-  return m.channel === "EMAIL" ? "email" : m.channel === "WHATSAPP" ? "WhatsApp" : "portal request";
+  return m.channel === "EMAIL" ? "email" : m.channel === "WHATSAPP" ? "WhatsApp" : m.channel === "FLOOR" ? "voice note from the floor" : "portal request";
 }
 
-function human(reason: string, steps: Step[]): DraftSeed {
+export function human(reason: string, steps: Step[]): DraftSeed {
   return { kind: "NEEDS_HUMAN", payload: { reason }, doubts: [], steps: [...steps, { kind: "ask", text: `needs you · ${reason}` }], reply: null };
 }
 
@@ -90,6 +90,10 @@ export async function draftMessage(message: Message & { client: Client | null })
   const steps: Step[] = [{ kind: "read", text: `${channelLabel(message)} · ${message.client?.name ?? message.fromName}` }];
 
   // 1. Messages the clerk should not act on alone.
+  if (message.channel === "FLOOR") {
+    steps.push({ kind: "tool", text: "classify → incident reported on the warehouse floor" });
+    return [human("note from the warehouse floor, check it with the operator", steps)];
+  }
   if (!message.client) {
     const sales = /tarifa|oferta|presentamos/.test(t);
     steps.push({ kind: "tool", text: `find_customer("${message.fromName}") → no match` });
@@ -191,46 +195,61 @@ export async function draftMessage(message: Message & { client: Client | null })
     if (!consignees.length) return [human("order with a destination I do not recognise", steps)];
 
     const delivery = parseDelivery(body);
-    if (delivery) steps.push({ kind: "tool", text: `parse_date → ${delivery.at.toLocaleString("en-GB", { weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" })}` });
-
-    const payload: OutboundPayload = {
-      clientId: client.id,
-      clientName: client.name,
-      consigneeId: consignees[0].id,
-      consigneeName: consignees[0].name,
-      deliverBy: delivery?.at.toISOString() ?? null,
-      deliverPhrase: delivery?.phrase ?? "",
-      clientDocRef: message.subject ? `${message.channel === "EMAIL" ? "Email" : "Msg"}: ${message.subject}` : null,
-      lines,
-    };
-    const doubts: Doubt[] = [];
-    if (consignees.length > 1) {
-      doubts.push({
-        field: "consigneeId",
-        question: `Which ${consignees[0].name.split("–")[0].trim()} hub?`,
-        options: consignees.map((c) => ({ label: `${c.name.split("–")[1]?.trim() ?? c.name} · ${c.city}`, value: c.id })),
-      });
-    }
-    for (const l of lines.filter((l) => l.requested > l.available)) {
-      // Never promise what is not on the shelf: default to what is there, let the office decide.
-      if (l.available > 0) l.pallets = l.available;
-      doubts.push({
-        field: `pallets:${l.sku}`,
-        question: `${l.sku}: ${l.requested} asked, ${l.available} in stock`,
-        options: [
-          ...(l.available > 0 ? [{ label: `Ship the ${l.available} in stock`, value: String(l.available) }] : []),
-          { label: `Ship ${l.requested} anyway`, value: String(l.requested) },
-        ],
-      });
-    }
-    steps.push({
-      kind: doubts.length ? "ask" : "ok",
-      text: doubts.length ? `draft outbound ready · ${doubts.length === 1 ? "1 thing" : `${doubts.length} things`} to check` : "draft outbound ready",
-    });
-    return [{ kind: "CREATE_OUTBOUND", payload, doubts, steps, reply: orderReply(payload, message.fromName) }];
+    return [outboundDraft(message, client, lines, consignees, delivery, steps)];
   }
 
   // 6. Anything else goes to a person, never guessed.
   steps.push({ kind: "tool", text: "classify → unclear request" });
   return [human("I am not sure what they are asking for", steps)];
+}
+
+/**
+ * Turns an understood order into a draft for the office: an ambiguous hub or short stock
+ * become yellow doubts, never silent guesses. Shared by the rules and the Muse Spark agent.
+ */
+export function outboundDraft(
+  message: Message,
+  client: Client,
+  lines: OutboundLineDraft[],
+  consignees: { id: string; name: string; city: string }[],
+  delivery: { at: Date; phrase: string } | null,
+  steps: Step[],
+): DraftSeed {
+  if (delivery) steps.push({ kind: "tool", text: `parse_date → ${delivery.at.toLocaleString("en-GB", { weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" })}` });
+
+  const payload: OutboundPayload = {
+    clientId: client.id,
+    clientName: client.name,
+    consigneeId: consignees[0].id,
+    consigneeName: consignees[0].name,
+    deliverBy: delivery?.at.toISOString() ?? null,
+    deliverPhrase: delivery?.phrase ?? "",
+    clientDocRef: message.subject ? `${message.channel === "EMAIL" ? "Email" : "Msg"}: ${message.subject}` : null,
+    lines,
+  };
+  const doubts: Doubt[] = [];
+  if (consignees.length > 1) {
+    doubts.push({
+      field: "consigneeId",
+      question: `Which ${consignees[0].name.split("–")[0].trim()} hub?`,
+      options: consignees.map((c) => ({ label: `${c.name.split("–")[1]?.trim() ?? c.name} · ${c.city}`, value: c.id })),
+    });
+  }
+  for (const l of lines.filter((l) => l.requested > l.available)) {
+    // Never promise what is not on the shelf: default to what is there, let the office decide.
+    if (l.available > 0) l.pallets = l.available;
+    doubts.push({
+      field: `pallets:${l.sku}`,
+      question: `${l.sku}: ${l.requested} asked, ${l.available} in stock`,
+      options: [
+        ...(l.available > 0 ? [{ label: `Ship the ${l.available} in stock`, value: String(l.available) }] : []),
+        { label: `Ship ${l.requested} anyway`, value: String(l.requested) },
+      ],
+    });
+  }
+  steps.push({
+    kind: doubts.length ? "ask" : "ok",
+    text: doubts.length ? `draft outbound ready · ${doubts.length === 1 ? "1 thing" : `${doubts.length} things`} to check` : "draft outbound ready",
+  });
+  return { kind: "CREATE_OUTBOUND", payload, doubts, steps, reply: orderReply(payload, message.fromName) };
 }

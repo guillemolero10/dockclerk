@@ -120,6 +120,9 @@ const carriers: [string, string][] = [
   ["Rutas del Vinalopó", "3367 MNS"],
 ];
 
+// Who usually writes from each customer (same people as in the inbox messages).
+const CONTACTS: Record<string, string> = {"C001": "Marta Pérez", "C002": "Compras Serra Mariola", "C003": "Javier Mira", "C004": "Toni Ferrer", "C005": "Rosa Mollá", "C006": "Granzas del Mediterráneo", "C007": "Laura Gil", "C008": "Pilar Sanz"};
+
 // Two buildings: general goods, and a smaller food & cosmetics one that is nearly full.
 const warehouses: { code: string; name: string; city: string; dims: WarehouseDims; clients: string[] }[] = [
   {
@@ -172,7 +175,7 @@ async function main() {
   const balances: Balance[] = [];
 
   for (const c of clients) {
-    const client = await db.client.create({ data: { code: c.code, name: c.name, type: c.type, email: c.email, phone: c.phone } });
+    const client = await db.client.create({ data: { code: c.code, name: c.name, contact: CONTACTS[c.code], type: c.type, email: c.email, phone: c.phone } });
     warehouseOfClient.set(client.id, warehouseOfCode(c.code));
 
     for (const [sku, description, unit, unitsPerPallet, tracksLot] of c.items) {

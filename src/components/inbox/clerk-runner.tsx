@@ -28,13 +28,16 @@ export function ClerkRunner({ pending }: { pending: Pending[] }) {
     setRunning(true);
     setError(null);
     setLines([]);
+    // Which model is thinking is printed once, not for every message.
+    let brain = "";
     try {
       for (const [i, m] of pending.entries()) {
         setLines((l) => [...l, { kind: "head", text: `[${i + 1}/${pending.length}] ${m.from}` }]);
         const result = await processMessage(m.id);
         // Steps are already computed; pace them so a person can follow the reasoning.
         // The header line already names the sender, so skip the "read" step here.
-        for (const step of result.steps.filter((s) => s.kind !== "read")) {
+        for (const step of result.steps.filter((s) => s.kind !== "read" && !(s.text.startsWith("brain →") && s.text === brain))) {
+          if (step.text.startsWith("brain →")) brain = step.text;
           await wait(140);
           setLines((l) => [...l, step]);
         }

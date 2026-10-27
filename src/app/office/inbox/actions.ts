@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import type { Prisma } from "@prisma/client";
-import { orderReply, draftMessage } from "@/lib/agent/rules";
+import { runClerk } from "@/lib/agent";
+import { orderReply } from "@/lib/agent/rules";
 import type { Doubt, DraftSeed, OutboundPayload, Step } from "@/lib/agent/types";
 import { db } from "@/lib/db";
 import { madridDayRange } from "@/lib/format";
@@ -23,7 +24,7 @@ export async function processMessage(messageId: string): Promise<{ steps: Step[]
 
   await db.message.update({ where: { id: messageId }, data: { status: "PROCESSING" } });
   try {
-    const drafts = await draftMessage(message);
+    const drafts = await runClerk(message);
     await db.$transaction([
       ...drafts.map((d) =>
         db.draft.create({

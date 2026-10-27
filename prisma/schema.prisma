@@ -44,6 +44,8 @@ model Client {
   code      String     @unique
   name      String
   type      ClientType
+  /// Person who usually writes in, e.g. "Marta Pérez".
+  contact   String?
   email     String?
   phone     String?
   items     Item[]
