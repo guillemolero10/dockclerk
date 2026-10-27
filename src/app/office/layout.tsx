@@ -7,7 +7,12 @@ export default async function OfficeLayout({ children }: LayoutProps<"/office">)
   const session = await getSession();
   if (session?.role !== "office") redirect("/");
 
-  const inboxCount = await db.message.count({ where: { status: "NEW" } });
+  // Everything waiting for the office: messages not read yet plus drafts not approved yet.
+  const [newMessages, pendingDrafts] = await Promise.all([
+    db.message.count({ where: { status: "NEW" } }),
+    db.draft.count({ where: { status: "PENDING" } }),
+  ]);
+  const inboxCount = newMessages + pendingDrafts;
 
   return (
     <div className="dock-app flex min-h-screen">
