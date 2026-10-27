@@ -27,6 +27,7 @@ DockClerk takes the reading and the retyping. It never takes the decision: every
 | **Office** | *Enter as office* | **AI inbox**: press *Let the clerk handle it* and watch it read each message, call its tools and draft the outbound. Approve one, then *Light up the pick*: the 3D warehouse shows which pallets to take and the route. |
 | | **Dock** | Day timeline for each door. *Let the clerk schedule them* books every waiting truck without overlaps. |
 | | **Alerts** | Late trucks, orders short of stock, lots about to expire and full buildings. Each alert links to the right screen and comes with a ready-to-send notice for the customer. |
+| | **Analyst** | The weekly report of the second agent: who runs out of stock and when, when a building fills up, which carrier is late on which weekday, which supplier's notes don't match. Each finding comes with its chart, its method and a button that acts on it. Try *30 days* against *6 months* to see why history matters. |
 | | **Lot trace** | Type a lot to see the truck that brought it, the rack it sits in and every customer it went to. This is the answer owed to a customer during a recall. |
 | **Operator** | *Enter as operator* (phone size) | Today's tasks: unload, put away (the app suggests the slot), pick along a route, voice note to the office. |
 | **Driver** | *Driver link* | No app and no account. Photo of the delivery note, *I'm at the gate*, sign with a finger, download the dock receipt. |
@@ -39,6 +40,7 @@ All companies, people and goods in the demo are invented.
 | Model | Job in DockClerk | Code |
 |---|---|---|
 | **Muse Spark Open** (open weights, served on Baseten) | The inbox clerk. It reads a message, decides what it is and calls tools against the warehouse database (`find_item`, `check_stock`, `find_consignee`, `last_shipment`, `parse_date`…) in a loop until it can draft the record. | `src/lib/agent/muse.ts` |
+| **Muse Spark Open** (the analyst) | Reads the week's statistical findings, decides what matters most and writes the report. A guard checks that every figure it writes is in the data. | `src/lib/analyst/narrate.ts` |
 | **Muse Spark** (Meta Model API, vision) | Reads the supplier's delivery note from a phone photo (supplier, note number, lines, lots, pallets) and spots visible damage on the load. | `src/lib/ai/vision.ts` |
 | **SAM 3.1** (Meta Model API) | Segments every box in the photo of the load. The count and numbered outlines go on the dock receipt, so the receipt shows why it says "24". | `src/lib/ai/vision.ts` |
 | **Muse Voice Transcribe** (Meta Model API) | Turns operators' voice notes from the floor into text for the office inbox. | `src/lib/ai/voice.ts` |
@@ -54,6 +56,13 @@ All companies, people and goods in the demo are invented.
 - **three.js** 3D warehouse generated from the building's real measurements (length, width, clear height, forklift aisle width, dock doors). It works out the rows, bays and levels, places one mesh instance per pallet, and colours them by customer, age or expiry. An X-ray mode shows the pick and the route.
 - **Picking:** each outbound leaves from the building that can fill most of it. Lots go out first-expiring-first, everything else first-in-first-out, and the pick route is ordered along the aisles (`src/lib/warehouse/`).
 - **Dock:** 15-minute slots from 06:00 to 20:00 per door, with no overlaps. Inbound doors and outbound doors are kept apart (`src/lib/dock/`).
+- **Analyst:** code does the maths and the model does the judgement.
+  - Stock-out forecasts: weekly damped Holt against a 4-week average, picked per item by a rolling-origin back-test.
+  - Occupancy trends: least squares with an interval on the slope.
+  - ABC slotting, priced in seconds of forklift travel and lift.
+  - Carrier lateness and delivery quality: Fisher exact tests with Benjamini–Hochberg correction and Wilson intervals.
+  - It says what it cannot conclude yet, and why (`src/lib/analyst/`).
+  - Runs every Monday at 07:00 through Vercel Cron.
 - **Floor loop:** the truck arrives, the driver checks in, the operator receives the goods into a lane by the door, the driver signs, the pallets are put away into suggested slots, picked to a dispatch lane and shipped. Every shipped pallet keeps its lot for traceability (`src/lib/ops/floor.ts`).
 
 ```
@@ -65,13 +74,14 @@ src/
   lib/dock/       slots and the day plan
   lib/ops/        floor operations shared by every role
   lib/alerts.ts   lib/trace.ts   lib/clients.ts
-prisma/           schema and seed (invented data, two buildings, ~750 pallets)
+  lib/analyst/    the analyst: data, analyses, statistics, report
+prisma/           schema, seed and six months of simulated history (invented data, two buildings, ~750 pallets)
 ```
 
 ## Real vs. simulated
 
 - **Real:** the agent loop, every model call, the warehouse logic, the 3D, photos and signatures (stored in Postgres), the PDF-ready dock receipt.
-- **Simulated:** the legacy software is a replica built during the hackathon and filled with invented data. No real email or WhatsApp is sent: the inbox is seeded with sample messages.
+- **Simulated:** the legacy software is a replica built during the hackathon and filled with invented data. No real email or WhatsApp is sent: the inbox is seeded with sample messages. The six months of history are simulated (seasons, weekdays, min/max replenishment, FIFO lots), with a few patterns planted on purpose so the analyst always has something to find. They are listed in `prisma/history.ts`.
 
 ## Run locally
 
