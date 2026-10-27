@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BellRing, Boxes, Inbox, LayoutDashboard, LogOut, MonitorCog, Route, Truck } from "lucide-react";
+import { BellRing, Boxes, Building2, Inbox, LayoutDashboard, LogOut, MonitorCog, Route, Truck } from "lucide-react";
 
 const NAV = [
   { href: "/office", label: "Today", icon: LayoutDashboard, exact: true },
@@ -11,6 +11,7 @@ const NAV = [
   { href: "/office/dock", label: "Dock", icon: Truck },
   { href: "/office/alerts", label: "Alerts", icon: BellRing, badgeKey: "alerts" as const },
   { href: "/office/trace", label: "Lot trace", icon: Route },
+  { href: "/office/clients", label: "Customers", icon: Building2 },
 ];
 
 export function OfficeSidebar({ inboxCount, alertCount }: { inboxCount: number; alertCount: number }) {
