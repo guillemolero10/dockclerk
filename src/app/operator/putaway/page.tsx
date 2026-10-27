@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { PutAwayStep } from "@/components/operator/putaway-step";
 import { db } from "@/lib/db";
-import { suggestPutAway } from "@/lib/ops/floor";
+import { planPutAway } from "@/lib/ops/floor";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +16,7 @@ export default async function PutAwayPage({ searchParams }: PageProps<"/operator
     orderBy: [{ location: "asc" }, { id: "asc" }],
   });
   const next = waiting[0];
-  const suggestion = next ? await suggestPutAway(next.id) : null;
+  const plan = next ? await planPutAway(next.id) : null;
 
   return (
     <main className="space-y-4 px-4 py-4">
@@ -30,7 +30,8 @@ export default async function PutAwayPage({ searchParams }: PageProps<"/operator
           warehouse={warehouse.code}
           left={waiting.length}
           pallet={{ id: next.id, from: next.location, sku: next.item.sku, description: next.item.description, lot: next.lot, client: next.client.name, units: next.units }}
-          suggestion={suggestion}
+          suggestion={plan?.slot ?? null}
+          why={plan?.why ?? ""}
         />
       ) : (
         <p className="dock-card bg-white p-5 text-sm text-dock-ink/60">Nothing waiting in the receiving lanes.</p>

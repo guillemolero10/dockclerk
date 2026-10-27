@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { countLoad, readDeliveryNote } from "@/lib/ai/vision";
 import { saveUpload, type Media } from "@/lib/uploads";
 import { dispatchLane, receivingLane, suggestSlot } from "@/lib/warehouse/lanes";
+import { abcClasses, velocitySlot } from "@/lib/warehouse/velocity";
 import { makeLayout } from "@/lib/warehouse/layout";
 import { allocatePicks } from "@/lib/warehouse/picking";
 
@@ -162,11 +163,30 @@ export async function signReceipt(inboundId: string, signature: Media, name: str
 
 /** Best free slot for a pallet waiting in a receiving lane. */
 export async function suggestPutAway(stockId: string, taken: string[] = []) {
+  return (await planPutAway(stockId, taken)).slot;
+}
+
+/**
+ * The slot for a received pallet, and why. By default next to the customer's other goods;
+ * with the velocity rule (switched on from an analyst report), by how fast the item moves:
+ * class A low and near the dock, class C at the back and on top.
+ */
+export async function planPutAway(stockId: string, taken: string[] = []) {
   const pallet = await db.stock.findUniqueOrThrow({ where: { id: stockId }, include: { warehouse: true } });
   const layout = layoutOf(pallet.warehouse);
   const here = await db.stock.findMany({ where: { warehouseId: pallet.warehouseId }, select: { location: true, clientId: true } });
   const occupied = new Set([...here.map((s) => s.location), ...taken]);
-  return suggestSlot(layout, occupied, here.filter((s) => s.clientId === pallet.clientId).map((s) => s.location));
+  if (pallet.warehouse.putaway === "velocity") {
+    const lines = await db.outboundLine.groupBy({
+      by: ["itemId"],
+      where: { outbound: { warehouseId: pallet.warehouseId, date: { gte: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000) }, status: { in: ["PREPARED", "SHIPPED", "CLOSED"] } } },
+      _sum: { pallets: true },
+    });
+    const speed = abcClasses(new Map(lines.map((l) => [l.itemId, l._sum.pallets ?? 0]))).classes.get(pallet.itemId) ?? "C";
+    const why = { A: "Fast mover (class A): low and near the dock", B: "Steady mover (class B): middle of the racks", C: "Slow mover (class C): back and top, to keep the quick slots free" }[speed];
+    return { slot: velocitySlot(layout, occupied, speed), why };
+  }
+  return { slot: suggestSlot(layout, occupied, here.filter((s) => s.clientId === pallet.clientId).map((s) => s.location)), why: "Next to the customer's goods" };
 }
 
 export async function putAway(stockId: string, location: string) {

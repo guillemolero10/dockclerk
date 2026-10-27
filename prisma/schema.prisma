@@ -27,6 +27,8 @@ model Warehouse {
   /// Set by the forklifts it uses (counterbalance, reach truck, VNA).
   aisleWidth   Float
   docks        Int
+  /// Where put-away suggests slots: "customer" (next to the customer's other stock) or "velocity" (fast movers low and near the dock).
+  putaway      String            @default("customer")
   stock        Stock[]
   inbounds     Inbound[]
   outbounds    Outbound[]
@@ -343,4 +345,24 @@ model Upload {
   mime      String
   data      Bytes
   createdAt DateTime @default(now())
+}
+
+/// A report by the analyst agent: the numbers come from code, the story and the priorities from the model.
+model AnalystReport {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  /// Days of history studied.
+  days      Int
+  /// "cron" (Monday 07:00) or "office" (Analyze now).
+  trigger   String
+  /// Who wrote the story: "Muse Spark Open" or "rules".
+  brain     String
+  headline  String
+  summary   String
+  /// Findings in priority order, with evidence, method, chart data and action.
+  findings  Json
+  /// What it could not conclude, and the data it would need.
+  gaps      Json     @default("[]")
+  /// Trace shown in the console panel.
+  steps     Json     @default("[]")
 }

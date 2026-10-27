@@ -11,11 +11,13 @@ export function PutAwayStep({
   left,
   pallet,
   suggestion,
+  why,
 }: {
   warehouse: string;
   left: number;
   pallet: { id: string; from: string; sku: string; description: string; lot: string | null; client: string; units: number };
   suggestion: string | null;
+  why: string;
 }) {
   const router = useRouter();
   const [slot, setSlot] = useState(suggestion ?? "");
@@ -54,7 +56,7 @@ export function PutAwayStep({
           <p className="cond flex items-center justify-center gap-1 text-[11px] text-white/50">
             {suggestion && !editing ? (
               <>
-                <Bot size={12} /> Suggested slot, next to the customer&apos;s goods
+                <Bot size={12} /> Suggested slot · {why}
               </>
             ) : (
               "Slot"

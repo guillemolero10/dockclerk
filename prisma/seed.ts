@@ -2,9 +2,12 @@
 // Every company, person and product here is invented for the demo.
 // Re-running it wipes the demo database and recreates the same data (deterministic).
 
+import { randomUUID } from "node:crypto";
 import { PrismaClient, type ClientType, type Prisma, type Unit } from "@prisma/client";
 import { firstFree, slotMinutes, type Busy } from "../src/lib/dock/slots";
 import { makeLayout, type WarehouseDims } from "../src/lib/warehouse/layout";
+import { runAnalysis } from "../src/lib/analyst";
+import { simulateHistory } from "./history";
 
 const db = new PrismaClient();
 
@@ -138,6 +141,7 @@ const warehouses: { code: string; name: string; city: string; dims: WarehouseDim
 ];
 
 async function wipe() {
+  await db.analystReport.deleteMany();
   await db.dockAppointment.deleteMany();
   await db.draft.deleteMany();
   await db.message.deleteMany();
@@ -163,82 +167,94 @@ async function main() {
   const warehouseOfCode = (clientCode: string) => warehouseRows[warehouses.findIndex((w) => w.clients.includes(clientCode))].id;
   const warehouseOfClient = new Map<string, string>();
 
-  const consigneeRows = [];
+  const consigneeRows: { id: string; code: string }[] = [];
   for (const [code, name, address, city, aliases] of consignees) {
     consigneeRows.push(await db.consignee.create({ data: { code, name, address, city, aliases } }));
   }
-  const carrierRows = [];
+  const carrierRows: { id: string; plate: string | null }[] = [];
   for (const [name, plate] of carriers) carrierRows.push(await db.carrier.create({ data: { name, plate } }));
 
-  // Stock is built from the movements, so balances always match the history.
-  type Balance = { itemId: string; sku: string; clientId: string; unitsPerPallet: number; pallets: number; lot: string | null; inboundId: string };
-  const balances: Balance[] = [];
-
+  const itemRows: { id: string; sku: string; clientId: string; clientCode: string; unitsPerPallet: number; tracksLot: boolean }[] = [];
   for (const c of clients) {
     const client = await db.client.create({ data: { code: c.code, name: c.name, contact: CONTACTS[c.code], type: c.type, email: c.email, phone: c.phone } });
     warehouseOfClient.set(client.id, warehouseOfCode(c.code));
-
     for (const [sku, description, unit, unitsPerPallet, tracksLot] of c.items) {
       const item = await db.item.create({ data: { clientId: client.id, sku, description, unit, unitsPerPallet, tracksLot } });
-
-      // 1-2 inbounds per item over the last 4 weeks.
-      const inboundCount = between(1, 2);
-      for (let i = 0; i < inboundCount; i++) {
-        const pallets = between(15, 45);
-        const carrier = pick(carrierRows);
-        const lot = tracksLot ? `L${between(2600, 2699)}-${between(10, 99)}` : null;
-        const inbound = await db.inbound.create({
-          data: {
-            date: daysAgo(between(8, 28)),
-            clientId: client.id,
-            warehouseId: warehouseOfClient.get(client.id),
-            clientDocRef: `ALB-${between(10000, 99999)}`,
-            supplier: client.name,
-            carrierId: carrier.id,
-            plate: carrier.plate,
-            expectedPallets: pallets,
-            expectedUnits: pallets * unitsPerPallet,
-            receivedPallets: pallets,
-            receivedUnits: pallets * unitsPerPallet,
-            status: "CLOSED",
-            lines: { create: { itemId: item.id, lot, pallets, units: pallets * unitsPerPallet } },
-          },
-        });
-        balances.push({ itemId: item.id, sku, clientId: client.id, unitsPerPallet, pallets, lot, inboundId: inbound.id });
-      }
+      itemRows.push({ id: item.id, sku, clientId: client.id, clientCode: c.code, unitsPerPallet, tracksLot });
     }
   }
-
-  // ~60 outbounds that consume stock, the newest ones still open.
   const clientRows = await db.client.findMany();
-  for (let i = 0; i < 60; i++) {
-    const candidates = balances.filter((b) => b.pallets >= 2);
-    const balance = pick(candidates);
-    const pallets = between(1, Math.min(12, balance.pallets - 1));
-    balance.pallets -= pallets;
-    const age = between(0, 18);
-    const consignee = pick(consigneeRows);
-    // History only: the outbounds waiting in the dispatch lanes are created below, with their pallets.
-    const status = age > 3 ? "CLOSED" : "SHIPPED";
-    // What left on the truck, pallet by pallet, as shipOutbound records it: the lot trail starts here.
-    const shipped = Array.from({ length: pallets }, () => ({
-      itemId: balance.itemId, sku: balance.sku, lot: balance.lot, units: balance.unitsPerPallet, location: "EXP-1", inboundId: balance.inboundId,
-    }));
-    await db.outbound.create({
-      data: {
-        date: daysAgo(age),
-        deadline: new Date(daysAgo(age).getTime() + between(8, 14) * 60 * 60 * 1000),
-        clientId: balance.clientId,
-        warehouseId: warehouseOfClient.get(balance.clientId),
-        clientDocRef: `PED-${between(1000, 9999)}`,
-        consigneeId: consignee.id,
-        carrierId: pick(carrierRows).id,
-        status,
-        shipped,
-        lines: { create: { itemId: balance.itemId, pallets, units: pallets * balance.unitsPerPallet } },
-      },
-    });
-  }
+
+  // Six months of history (prisma/history.ts): the analyst studies it, and today's stock is what it leaves behind.
+  const warehouseCodeOf = (clientCode: string) => warehouses.find((w) => w.clients.includes(clientCode))!.code;
+  const history = simulateHistory({
+    today,
+    rand,
+    carriers: carrierRows.length,
+    items: itemRows.map((it, i) => {
+      const code = warehouseCodeOf(it.clientCode);
+      return { sku: it.sku, clientCode: it.clientCode, lotIndex: i + 1, tracksLot: it.tracksLot, warehouse: code, docks: makeLayout(warehouses.find((w) => w.code === code)!.dims).docks };
+    }),
+  });
+  const itemOf = new Map(itemRows.map((it) => [it.sku, it]));
+  const warehouseIdOf = new Map(warehouseRows.map((w) => [w.code, w.id]));
+  const consigneeIdOf = new Map(consigneeRows.map((c) => [c.code, c.id]));
+  const inboundIdOf = new Map(history.inbounds.map((i) => [i.key, randomUUID()]));
+  const outboundIdOf = new Map(history.outbounds.map((o) => [o.key, randomUUID()]));
+
+  const pastIn = [...history.inbounds].sort((a, b) => a.date.getTime() - b.date.getTime());
+  await db.inbound.createMany({
+    data: pastIn.map((i) => {
+      const it = itemOf.get(i.sku)!;
+      const carrier = carrierRows[i.carrier];
+      return {
+        id: inboundIdOf.get(i.key)!, date: i.date, clientId: it.clientId, warehouseId: warehouseIdOf.get(i.warehouse)!,
+        clientDocRef: `ALB-${between(10000, 99999)}`, supplier: i.supplier, carrierId: carrier.id, plate: carrier.plate,
+        expectedPallets: i.expected, expectedUnits: i.expected * it.unitsPerPallet, receivedPallets: i.pallets, receivedUnits: i.pallets * it.unitsPerPallet,
+        incident: i.incident, status: "CLOSED" as const,
+      };
+    }),
+  });
+  await db.inboundLine.createMany({
+    data: pastIn.map((i) => {
+      const it = itemOf.get(i.sku)!;
+      return { inboundId: inboundIdOf.get(i.key)!, itemId: it.id, lot: i.lot, pallets: i.pallets, units: i.pallets * it.unitsPerPallet };
+    }),
+  });
+
+  const pastOut = [...history.outbounds].sort((a, b) => a.date.getTime() - b.date.getTime() || a.deadline.getTime() - b.deadline.getTime());
+  await db.outbound.createMany({
+    data: pastOut.map((o) => {
+      const it = itemOf.get(o.sku)!;
+      return {
+        id: outboundIdOf.get(o.key)!, date: o.date, deadline: o.deadline, clientId: it.clientId, warehouseId: warehouseIdOf.get(o.warehouse)!,
+        clientDocRef: `PED-${between(1000, 9999)}`, consigneeId: consigneeIdOf.get(o.consignee)!, carrierId: carrierRows[o.carrier].id,
+        status: o.day < -3 ? ("CLOSED" as const) : ("SHIPPED" as const),
+        // What left on the truck, pallet by pallet, as shipOutbound records it: the lot trail.
+        shipped: o.shipped.map((p) => ({ itemId: it.id, sku: p.sku, lot: p.lot, units: it.unitsPerPallet, location: "EXP-1", inboundId: inboundIdOf.get(p.inboundKey)! })),
+      };
+    }),
+  });
+  await db.outboundLine.createMany({
+    data: pastOut.map((o) => {
+      const it = itemOf.get(o.sku)!;
+      return { outboundId: outboundIdOf.get(o.key)!, itemId: it.id, pallets: o.pallets, units: o.pallets * it.unitsPerPallet };
+    }),
+  });
+  await db.dockAppointment.createMany({
+    data: history.slots.map((t) => ({
+      warehouseId: warehouseIdOf.get(t.warehouse)!, dock: t.dock, startsAt: t.start, endsAt: t.end, status: "DONE" as const, arrivedAt: t.arrivedAt,
+      carrierId: carrierRows[t.carrier].id, plate: carrierRows[t.carrier].plate,
+      inboundId: t.inbound ? inboundIdOf.get(t.inbound) : undefined, outboundId: t.outbound ? outboundIdOf.get(t.outbound) : undefined,
+    })),
+  });
+
+  // What is left of each lot is today's stock.
+  type Balance = { itemId: string; sku: string; clientId: string; unitsPerPallet: number; pallets: number; lot: string | null; inboundId: string; received: Date };
+  const balances: Balance[] = history.remaining.map((r) => {
+    const it = itemOf.get(r.sku)!;
+    return { itemId: it.id, sku: r.sku, clientId: it.clientId, unitsPerPallet: it.unitsPerPallet, pallets: r.pallets, lot: r.lot, inboundId: inboundIdOf.get(r.inboundKey)!, received: r.received };
+  });
 
   // Open work for the coming days, fixed on purpose so the demo never depends on luck.
   const upcoming: [string, string, string, number, number, number][] = [
@@ -277,9 +293,15 @@ async function main() {
   for (const [clientCode, sku, consigneeCode, pallets, hour] of preparedToday) {
     const client = clientRows.find((c) => c.code === clientCode)!;
     const item = await db.item.findFirstOrThrow({ where: { clientId: client.id, sku } });
-    const balance = balances.find((b) => b.itemId === item.id && b.pallets >= pallets);
-    if (!balance) throw new Error(`Not enough ${sku} for the prepared outbound`);
-    balance.pallets -= pallets;
+    // Oldest lots first, as the picker would take them.
+    const taken: Balance[] = [];
+    for (const b of balances.filter((x) => x.itemId === item.id)) {
+      while (b.pallets > 0 && taken.length < pallets) {
+        b.pallets--;
+        taken.push(b);
+      }
+    }
+    if (taken.length < pallets) throw new Error(`Not enough ${sku} for the prepared outbound`);
     const outbound = await db.outbound.create({
       data: {
         date: today,
@@ -296,20 +318,22 @@ async function main() {
     // The picked pallets wait in the next dispatch lane of their warehouse.
     const warehouseId = warehouseOfClient.get(client.id)!;
     const lane = new Set(staged.filter((x) => x.warehouseId === warehouseId).map((x) => x.outboundId)).size + 1;
-    for (let i = 0; i < pallets; i++) {
+    for (const b of taken) {
       staged.push({
-        warehouseId, clientId: client.id, itemId: item.id, lot: balance.lot, pallets: 1, units: item.unitsPerPallet,
-        location: `EXP-${lane}`, inboundId: balance.inboundId, outboundId: outbound.id,
+        warehouseId, clientId: client.id, itemId: item.id, lot: b.lot, pallets: 1, units: item.unitsPerPallet,
+        location: `EXP-${lane}`, inboundId: b.inboundId, outboundId: outbound.id,
       });
     }
   }
 
   // Every pallet gets its own rack slot. Customers keep to their own stretch of racking,
   // with the free slots scattered in between like in any real warehouse.
-  const codeOf = new Map(clientRows.map((c) => [c.id, c.code]));
-  const shelfLife: Record<string, [number, number]> = { C004: [120, 400], C007: [300, 700], C008: [60, 240] };
+  // Food and cosmetics carry a best-before date: made three days before it came in, plus the product's shelf life.
+  const shelfLife: Record<string, number> = {
+    "AGUA-15": 540, "REFR-NAR": 300, "HORCH-1L": 240, "CREMA-50": 900, "GEL-750": 900, "CHAMP-400": 900, "COLONIA-1": 900,
+    "TURRON-DUR": 365, "TURRON-BLA": 300, POLVORON: 240, MAZAPAN: 270,
+  };
   const expiringSoon = new Map([["HORCH-1L", 19], ["MAZAPAN", 26]]); // so the expiry alert has something to say
-  const skuOf = new Map((await db.item.findMany({ select: { id: true, sku: true } })).map((i) => [i.id, i.sku]));
   const stockRows: Prisma.StockCreateManyInput[] = [];
   for (const [w, warehouse] of warehouseRows.entries()) {
     const slots = makeLayout(warehouses[w].dims).rackSlotsInFillOrder();
@@ -320,13 +344,12 @@ async function main() {
     let slot = 0;
     let placed = 0;
     for (const b of physical) {
-      const life = shelfLife[codeOf.get(b.clientId)!];
-      const sku = skuOf.get(b.itemId)!;
+      const life = shelfLife[b.sku];
       let expiresAt: Date | null = null;
       if (b.lot && life) {
-        const soon = expiringSoon.get(sku);
-        expiringSoon.delete(sku); // only the oldest lot of that item
-        expiresAt = daysAgo(-(soon ?? between(life[0], life[1])));
+        const soon = expiringSoon.get(b.sku);
+        expiringSoon.delete(b.sku); // only the oldest lot of that item
+        expiresAt = soon ? daysAgo(-soon) : new Date(b.received.getTime() + (life - 3) * DAY);
       }
       for (let i = 0; i < b.pallets; i++) {
         // Skip a slot with the probability that spreads the free space evenly.
@@ -350,7 +373,7 @@ async function main() {
       clientId: granzas.id,
       warehouseId: warehouseOfClient.get(granzas.id),
       clientDocRef: "ALB-58210",
-      supplier: granzas.name,
+      supplier: "Granzas del Mediterráneo – Planta Villena",
       carrierId: carrierRows[1].id,
       plate: carrierRows[1].plate,
       expectedPallets: 5,
@@ -376,7 +399,7 @@ async function main() {
       date: today,
       clientId: toys.id,
       warehouseId: warehouseOfClient.get(toys.id),
-      supplier: "Juguetes Levante, S.L. – Fábrica Onil",
+      supplier: "Juguetes Levante – Fábrica Onil",
       carrierId: carrierRows[0].id,
       plate: carrierRows[0].plate,
       status: "EXPECTED",
@@ -391,7 +414,7 @@ async function main() {
       clientId: drinks.id,
       warehouseId: warehouseOfClient.get(drinks.id),
       clientDocRef: "ALB-61877",
-      supplier: "Bebidas Montgó, S.A. – Planta de Pedreguer",
+      supplier: "Bebidas Montgó – Planta de Pedreguer",
       carrierId: carrierRows[4].id,
       plate: carrierRows[4].plate,
       expectedPallets: 18,
@@ -402,10 +425,14 @@ async function main() {
   await seedDock({ warehouseRows, morning, expectedToys, expectedDrinks, carrierRows });
   await seedInbox(clientRows);
 
+  // This week's report, as the Monday run would have left it.
+  await runAnalysis(182, "cron");
+
   const counts = await Promise.all([
     db.client.count(), db.consignee.count(), db.item.count(), db.inbound.count(), db.outbound.count(), db.stock.count(), db.message.count(),
+    db.dockAppointment.count(),
   ]);
-  console.log(`Seeded: ${counts[0]} clients, ${counts[1]} consignees, ${counts[2]} items, ${counts[3]} inbounds, ${counts[4]} outbounds, ${counts[5]} stock rows, ${counts[6]} messages`);
+  console.log(`Seeded: ${counts[0]} clients, ${counts[1]} consignees, ${counts[2]} items, ${counts[3]} inbounds, ${counts[4]} outbounds, ${counts[5]} stock rows, ${counts[6]} messages, ${counts[7]} dock slots, 1 analyst report`);
 }
 
 // Today's and tomorrow's dock plan. Some trucks are left without a slot on purpose,

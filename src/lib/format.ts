@@ -28,3 +28,9 @@ export const madridDay = (ymd: string) => madridDayRange(new Date(`${ymd}T12:00:
 /** "09:30" in Madrid. */
 export const madridHm = (date: Date) =>
   date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "Europe/Madrid" });
+
+/** First name to greet a contact by, only when the contact is a person ("Marta Pérez"), not a department ("Compras Serra Mariola"). */
+export function firstName(contact: string | null | undefined) {
+  const words = contact?.trim().split(/\s+/) ?? [];
+  return words.length === 2 && /^[A-ZÁÉÍÓÚÑ]/.test(words[1]) ? words[0] : "";
+}

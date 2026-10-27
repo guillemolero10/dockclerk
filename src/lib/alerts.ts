@@ -2,7 +2,7 @@
 // No model involved: every alert is a plain query, so the list is always right and instant.
 
 import { db } from "@/lib/db";
-import { fmtDate, madridDayRange, madridHm } from "@/lib/format";
+import { firstName, fmtDate, madridDayRange, madridHm } from "@/lib/format";
 import { allocatePicks } from "@/lib/warehouse/picking";
 import { makeLayout } from "@/lib/warehouse/layout";
 
@@ -95,7 +95,7 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
       detail: `${i.client.name} announced ${i.expectedPallets ?? "?"} pallets for ${fmtDate(i.date)}. Ask the customer whether it is still coming.`,
       href: `/office/legacy/inbounds`,
       action: "See the delivery",
-      notice: `Hola${i.client.contact ? ` ${i.client.contact.split(" ")[0]}` : ""}, la entrada Nº ${i.number} (${i.expectedPallets ?? "?"} palés) estaba prevista para el ${fmtDate(i.date)} y no ha llegado. ¿Sigue en pie o la anulamos? Un saludo.`,
+      notice: `Hola${firstName(i.client.contact) ? ` ${firstName(i.client.contact)}` : ""}, la entrada Nº ${i.number} (${i.expectedPallets ?? "?"} palés) estaba prevista para el ${fmtDate(i.date)} y no ha llegado. ¿Sigue en pie o la anulamos? Un saludo.`,
     });
   }
 
@@ -119,7 +119,7 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
         detail: `${o.client.name} → ${to}: ${total} ordered, ${total - plan.short} in stock. Ship part or wait for the next delivery.`,
         href: `/office/warehouse?pick=${o.id}`,
         action: "See it in 3D",
-        notice: `Hola${o.client.contact ? ` ${o.client.contact.split(" ")[0]}` : ""}, para la salida Nº ${o.number} a ${to} nos pedís ${total} palés y ahora mismo tenéis ${total - plan.short} en stock. ¿Enviamos lo que hay o esperamos a la próxima entrada? Un saludo.`,
+        notice: `Hola${firstName(o.client.contact) ? ` ${firstName(o.client.contact)}` : ""}, para la salida Nº ${o.number} a ${to} nos pedís ${total} palés y ahora mismo tenéis ${total - plan.short} en stock. ¿Enviamos lo que hay o esperamos a la próxima entrada? Un saludo.`,
       });
       continue;
     }
@@ -217,7 +217,7 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
       detail: `${s.client.name} · ${plural(pallets, "pallet")} in ${w} · best before ${fmtDate(s.expiresAt)}. It goes out first on the next order (FEFO).`,
       href: `/office/warehouse?w=${w}&color=expiry`,
       action: "See it in 3D",
-      notice: `Hola${s.client.contact ? ` ${s.client.contact.split(" ")[0]}` : ""}, os avisamos de que el lote ${s.lot} de ${s.item.sku} (${s.item.description}) caduca el ${fmtDate(s.expiresAt)}. Tenéis ${plural(pallets, "palé", "palés")} en almacén. Saldrá primero en el próximo pedido; si queréis darle salida antes, decidnos a dónde. Un saludo.`,
+      notice: `Hola${firstName(s.client.contact) ? ` ${firstName(s.client.contact)}` : ""}, os avisamos de que el lote ${s.lot} de ${s.item.sku} (${s.item.description}) caduca el ${fmtDate(s.expiresAt)}. Tenéis ${plural(pallets, "palé", "palés")} en almacén. Saldrá primero en el próximo pedido; si queréis darle salida antes, decidnos a dónde. Un saludo.`,
     });
   }
 

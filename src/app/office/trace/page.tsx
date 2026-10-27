@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowDownToLine, ArrowRight, ArrowUpFromLine, CheckCircle2, FileText, Search, TriangleAlert, Warehouse } from "lucide-react";
 import { CopyNotice } from "@/components/alerts/copy-notice";
-import { fmtDate, fmtNumber } from "@/lib/format";
+import { firstName, fmtDate, fmtNumber } from "@/lib/format";
 import { findLots, lotsAtRisk, traceLot, type LotOption, type LotTrace } from "@/lib/trace";
 
 export const dynamic = "force-dynamic";
@@ -70,7 +70,7 @@ function LotList({ title, lots }: { title: string; lots: LotOption[] }) {
 }
 
 function Trail({ t }: { t: LotTrace }) {
-  const first = t.contact?.split(" ")[0];
+  const first = firstName(t.contact);
   const notice = [
     `Hola${first ? ` ${first}` : ""}, os pasamos la trazabilidad del lote ${t.lot} de ${t.sku} (${t.description}).`,
     `Entrada: ${t.came.map((c) => `${c.pallets} palés el ${fmtDate(c.date)} (entrada Nº ${c.number}${c.docRef ? `, albarán ${c.docRef}` : ""})`).join("; ") || "sin registro"}.`,
