@@ -14,6 +14,25 @@ datasource db {
 
 // ---------- Master data of the legacy software ----------
 
+/// A building of the 3PL. The rack layout is worked out from these measurements.
+model Warehouse {
+  id         String     @id @default(cuid())
+  code       String     @unique
+  name       String
+  city       String
+  /// Inside measurements in metres: dock wall to back wall, side to side, clear height.
+  length     Float
+  width      Float
+  height     Float
+  /// Set by the forklifts it uses (counterbalance, reach truck, VNA).
+  aisleWidth Float
+  docks      Int
+  stock      Stock[]
+  inbounds   Inbound[]
+  outbounds  Outbound[]
+  createdAt  DateTime   @default(now())
+}
+
 enum ClientType {
   RAW_MATERIAL
   FINISHED_GOODS
@@ -79,8 +98,10 @@ model Item {
 /// One row per pallet position: rack slots like "C-07-3" (row-position-level)
 /// or floor lanes by the docks like "REC-2" (received, waiting for a slot).
 model Stock {
-  id        String    @id @default(cuid())
-  clientId  String
+  id          String    @id @default(cuid())
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+  clientId    String
   itemId    String
   lot       String?
   expiresAt DateTime?
@@ -107,6 +128,9 @@ model Inbound {
   number            Int            @unique @default(autoincrement())
   date              DateTime
   clientId          String
+  /// Where it is unloaded.
+  warehouseId       String?
+  warehouse         Warehouse?     @relation(fields: [warehouseId], references: [id])
   /// The supplier's delivery note number.
   clientDocRef      String?
   supplier          String?
@@ -152,6 +176,9 @@ model Outbound {
   date         DateTime
   deadline     DateTime?
   clientId     String
+  /// Set once it is picked; until then the warehouse that can fill it is worked out live.
+  warehouseId  String?
+  warehouse    Warehouse?     @relation(fields: [warehouseId], references: [id])
   clientDocRef String?
   consigneeId  String?
   carrierId    String?

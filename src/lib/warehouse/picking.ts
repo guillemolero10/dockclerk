@@ -1,11 +1,13 @@
 // Which pallets each open outbound should take. Pure function, shared by the
 // office 3D view and the operator's picking list so both always agree.
 //
-// Rule: first expiring first out for lots, otherwise first in first out;
+// Rules: an outbound leaves from one warehouse, the one that can fill most of it;
+// inside it, first expiring first out for lots, otherwise first in first out;
 // ties go to the lower location so the route stays short.
 
 export type PickableStock = {
   id: string;
+  warehouseId: string;
   itemId: string;
   location: string;
   pallets: number;
@@ -21,7 +23,7 @@ export type OpenOrder = {
   lines: { itemId: string; pallets: number }[];
 };
 
-export type PickPlan = { stockIds: string[]; short: number };
+export type PickPlan = { warehouseId: string | null; stockIds: string[]; short: number };
 
 const time = (d: Date | null, fallback: number) => (d ? d.getTime() : fallback);
 
@@ -39,6 +41,7 @@ export function allocatePicks(stock: PickableStock[], orders: OpenOrder[]): Map<
         a.location.localeCompare(b.location),
     );
   }
+  const warehouses = [...new Set(stock.map((s) => s.warehouseId))].sort();
 
   // The most urgent order gets first pick.
   const queue = [...orders].sort(
@@ -46,14 +49,23 @@ export function allocatePicks(stock: PickableStock[], orders: OpenOrder[]): Map<
   );
 
   const taken = new Set<string>();
+  const free = (itemId: string, warehouseId: string) =>
+    (byItem.get(itemId) ?? []).filter((s) => s.warehouseId === warehouseId && !taken.has(s.id));
+
   const plans = new Map<string, PickPlan>();
   for (const order of queue) {
-    const plan: PickPlan = { stockIds: [], short: 0 };
+    let best: string | null = null;
+    let bestFill = 0;
+    for (const w of warehouses) {
+      const fill = order.lines.reduce((sum, l) => sum + Math.min(l.pallets, free(l.itemId, w).reduce((p, s) => p + s.pallets, 0)), 0);
+      if (fill > bestFill) [best, bestFill] = [w, fill];
+    }
+
+    const plan: PickPlan = { warehouseId: best, stockIds: [], short: 0 };
     for (const line of order.lines) {
       let missing = line.pallets;
-      for (const s of byItem.get(line.itemId) ?? []) {
+      for (const s of best ? free(line.itemId, best) : []) {
         if (missing <= 0) break;
-        if (taken.has(s.id)) continue;
         taken.add(s.id);
         plan.stockIds.push(s.id);
         missing -= s.pallets;

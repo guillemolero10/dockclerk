@@ -14,8 +14,8 @@ export default async function StockPage({ searchParams }: PageProps<"/office/leg
   const [rows, clients] = await Promise.all([
     db.stock.findMany({
       where,
-      orderBy: [{ client: { name: "asc" } }, { item: { sku: "asc" } }],
-      include: { client: true, item: true },
+      orderBy: [{ client: { name: "asc" } }, { item: { sku: "asc" } }, { location: "asc" }],
+      include: { client: true, item: true, warehouse: true },
     }),
     db.client.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
   ]);
@@ -29,7 +29,7 @@ export default async function StockPage({ searchParams }: PageProps<"/office/leg
         <thead>
           <tr>
             <th>Cliente</th><th>Artículo</th><th>Descripción</th><th>Lote</th>
-            <th className="text-right">Palés</th><th className="text-right">Cantidad</th><th>Ubicación</th>
+            <th className="text-right">Palés</th><th className="text-right">Cantidad</th><th>Almacén</th><th>Ubicación</th>
           </tr>
         </thead>
         <tbody>
@@ -41,6 +41,7 @@ export default async function StockPage({ searchParams }: PageProps<"/office/leg
               <td>{r.lot}</td>
               <td className="text-right">{fmtNumber(r.pallets)}</td>
               <td className="text-right">{fmtNumber(r.units)} {UNIT_LABEL[r.item.unit]}</td>
+              <td>{r.warehouse.code}</td>
               <td>{r.location}</td>
             </tr>
           ))}

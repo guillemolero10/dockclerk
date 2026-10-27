@@ -136,6 +136,18 @@ body {
   box-shadow: 4px 4px 0 var(--color-dock-ink);
 }
 
+.dock-input {
+  width: 100%;
+  border: 1.5px solid var(--color-dock-ink);
+  background: #fff;
+  padding: 6px 10px;
+  font-size: 14px;
+}
+.dock-input:focus {
+  outline: 3px solid var(--color-dock-yellow);
+  outline-offset: 0;
+}
+
 /* Safety stripes, the warehouse signature. */
 .hazard {
   background: repeating-linear-gradient(-45deg, var(--color-dock-yellow) 0 14px, var(--color-dock-ink) 14px 28px);

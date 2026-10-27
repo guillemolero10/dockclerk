@@ -3,7 +3,7 @@
 // Re-running it wipes the demo database and recreates the same data (deterministic).
 
 import { PrismaClient, type ClientType, type Prisma, type Unit } from "@prisma/client";
-import { rackSlotsInFillOrder } from "../src/lib/warehouse/layout";
+import { makeLayout, type WarehouseDims } from "../src/lib/warehouse/layout";
 
 const db = new PrismaClient();
 
@@ -119,6 +119,20 @@ const carriers: [string, string][] = [
   ["Rutas del Vinalopó", "3367 MNS"],
 ];
 
+// Two buildings: general goods, and a smaller food & cosmetics one that is nearly full.
+const warehouses: { code: string; name: string; city: string; dims: WarehouseDims; clients: string[] }[] = [
+  {
+    code: "N1", name: "Nave 1 · Carga general", city: "Elche",
+    dims: { length: 28, width: 24, height: 8, aisleWidth: 3.0, docks: 4 },
+    clients: ["C001", "C002", "C003", "C005", "C006"],
+  },
+  {
+    code: "N2", name: "Nave 2 · Alimentación y cosmética", city: "Novelda",
+    dims: { length: 28, width: 14, height: 8, aisleWidth: 3.0, docks: 2 },
+    clients: ["C004", "C007", "C008"],
+  },
+];
+
 async function wipe() {
   await db.draft.deleteMany();
   await db.message.deleteMany();
@@ -132,10 +146,17 @@ async function wipe() {
   await db.client.deleteMany();
   await db.consignee.deleteMany();
   await db.carrier.deleteMany();
+  await db.warehouse.deleteMany();
 }
 
 async function main() {
   await wipe();
+
+  const warehouseRows = await Promise.all(
+    warehouses.map((w) => db.warehouse.create({ data: { code: w.code, name: w.name, city: w.city, ...w.dims } })),
+  );
+  const warehouseOfCode = (clientCode: string) => warehouseRows[warehouses.findIndex((w) => w.clients.includes(clientCode))].id;
+  const warehouseOfClient = new Map<string, string>();
 
   const consigneeRows = [];
   for (const [code, name, address, city, aliases] of consignees) {
@@ -150,6 +171,7 @@ async function main() {
 
   for (const c of clients) {
     const client = await db.client.create({ data: { code: c.code, name: c.name, type: c.type, email: c.email, phone: c.phone } });
+    warehouseOfClient.set(client.id, warehouseOfCode(c.code));
 
     for (const [sku, description, unit, unitsPerPallet, tracksLot] of c.items) {
       const item = await db.item.create({ data: { clientId: client.id, sku, description, unit, unitsPerPallet, tracksLot } });
@@ -164,6 +186,7 @@ async function main() {
           data: {
             date: daysAgo(between(8, 28)),
             clientId: client.id,
+            warehouseId: warehouseOfClient.get(client.id),
             clientDocRef: `ALB-${between(10000, 99999)}`,
             supplier: client.name,
             carrierId: carrier.id,
@@ -195,6 +218,7 @@ async function main() {
         date: daysAgo(age),
         deadline: new Date(daysAgo(age).getTime() + between(8, 14) * 60 * 60 * 1000),
         clientId: balance.clientId,
+        warehouseId: warehouseOfClient.get(balance.clientId),
         clientDocRef: `PED-${between(1000, 9999)}`,
         consigneeId: consignee.id,
         carrierId: pick(carrierRows).id,
@@ -248,6 +272,7 @@ async function main() {
         date: today,
         deadline: new Date(today.getTime() + hour * 60 * 60 * 1000),
         clientId: client.id,
+        warehouseId: warehouseOfClient.get(client.id),
         clientDocRef: `PED-${between(1000, 9999)}`,
         consigneeId: consigneeRows.find((c) => c.code === consigneeCode)!.id,
         carrierId: carrierRows[2].id,
@@ -263,28 +288,33 @@ async function main() {
   const shelfLife: Record<string, [number, number]> = { C004: [120, 400], C007: [300, 700], C008: [60, 240] };
   const expiringSoon = new Map([["HORCH-1L", 19], ["MAZAPAN", 26]]); // so the expiry alert has something to say
   const skuOf = new Map((await db.item.findMany({ select: { id: true, sku: true } })).map((i) => [i.id, i.sku]));
-  const slots = rackSlotsInFillOrder();
-  const physical = balances.filter((b) => b.pallets > 0);
-  const total = physical.reduce((sum, b) => sum + b.pallets, 0);
-  if (total > slots.length) throw new Error(`Racks too small: ${total} pallets for ${slots.length} slots`);
-
   const stockRows: Prisma.StockCreateManyInput[] = [];
-  let slot = 0;
-  for (const b of physical) {
-    const life = shelfLife[codeOf.get(b.clientId)!];
-    const sku = skuOf.get(b.itemId)!;
-    let expiresAt: Date | null = null;
-    if (b.lot && life) {
-      const soon = expiringSoon.get(sku);
-      expiringSoon.delete(sku); // only the oldest lot of that item
-      expiresAt = daysAgo(-(soon ?? between(life[0], life[1])));
-    }
-    for (let i = 0; i < b.pallets; i++) {
-      // Skip a slot with the probability that spreads the free space evenly.
-      while (slots.length - slot > total - stockRows.length && rand() < (slots.length - slot - (total - stockRows.length)) / (slots.length - slot)) slot++;
-      stockRows.push({
-        clientId: b.clientId, itemId: b.itemId, lot: b.lot, expiresAt, pallets: 1, units: b.unitsPerPallet, location: slots[slot++], inboundId: b.inboundId,
-      });
+  for (const [w, warehouse] of warehouseRows.entries()) {
+    const slots = makeLayout(warehouses[w].dims).rackSlotsInFillOrder();
+    const physical = balances.filter((b) => b.pallets > 0 && warehouseOfClient.get(b.clientId) === warehouse.id);
+    const total = physical.reduce((sum, b) => sum + b.pallets, 0);
+    if (total > slots.length) throw new Error(`${warehouse.code} too small: ${total} pallets for ${slots.length} slots`);
+
+    let slot = 0;
+    let placed = 0;
+    for (const b of physical) {
+      const life = shelfLife[codeOf.get(b.clientId)!];
+      const sku = skuOf.get(b.itemId)!;
+      let expiresAt: Date | null = null;
+      if (b.lot && life) {
+        const soon = expiringSoon.get(sku);
+        expiringSoon.delete(sku); // only the oldest lot of that item
+        expiresAt = daysAgo(-(soon ?? between(life[0], life[1])));
+      }
+      for (let i = 0; i < b.pallets; i++) {
+        // Skip a slot with the probability that spreads the free space evenly.
+        while (slots.length - slot > total - placed && rand() < (slots.length - slot - (total - placed)) / (slots.length - slot)) slot++;
+        stockRows.push({
+          warehouseId: warehouse.id, clientId: b.clientId, itemId: b.itemId, lot: b.lot, expiresAt,
+          pallets: 1, units: b.unitsPerPallet, location: slots[slot++], inboundId: b.inboundId,
+        });
+        placed++;
+      }
     }
   }
   await db.stock.createMany({ data: stockRows });
@@ -296,6 +326,7 @@ async function main() {
     data: {
       date: new Date(today.getTime() + (7 * 60 + 40) * 60 * 1000),
       clientId: granzas.id,
+      warehouseId: warehouseOfClient.get(granzas.id),
       clientDocRef: "ALB-58210",
       supplier: granzas.name,
       carrierId: carrierRows[1].id,
@@ -310,6 +341,7 @@ async function main() {
   });
   await db.stock.createMany({
     data: Array.from({ length: 5 }, () => ({
+      warehouseId: warehouseOfClient.get(granzas.id)!,
       clientId: granzas.id, itemId: masterbatch.id, lot: "L2698-41", pallets: 1, units: masterbatch.unitsPerPallet, location: "REC-3", inboundId: morning.id,
     })),
   });
@@ -321,6 +353,7 @@ async function main() {
     data: {
       date: today,
       clientId: toys.id,
+      warehouseId: warehouseOfClient.get(toys.id),
       supplier: "Juguetes Levante, S.L. – Fábrica Onil",
       carrierId: carrierRows[0].id,
       plate: carrierRows[0].plate,

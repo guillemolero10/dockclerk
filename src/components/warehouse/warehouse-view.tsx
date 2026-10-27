@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Bot, Crosshair, Route, X } from "lucide-react";
-import { LANE_COUNT, RACK_CAPACITY, parseLocation } from "@/lib/warehouse/layout";
+import { AlertTriangle, Bot, Crosshair, Plus, Route, Ruler, X } from "lucide-react";
+import { FORKLIFTS, makeLayout, parseLocation } from "@/lib/warehouse/layout";
 import { AGE_BUCKETS, EXPIRY_BUCKETS, GHOST, NO_EXPIRY, PICK, ageColor, clientColor, expiryColor } from "@/lib/warehouse/palette";
 import { pickRoute } from "@/lib/warehouse/route";
 import type { SnapshotOrder, WarehouseSnapshot } from "@/lib/warehouse/snapshot";
@@ -28,15 +29,21 @@ export function WarehouseView({ snapshot, initialPick }: { snapshot: WarehouseSn
   const router = useRouter();
   const mount = useRef<HTMLDivElement>(null);
   const scene = useRef<WarehouseScene | null>(null);
-  const [ready, setReady] = useState(false);
+  // Bumped each time a scene is built, so the effects below feed the new one.
+  const [sceneVersion, setSceneVersion] = useState(0);
   const [failed, setFailed] = useState(false);
   const [mode, setMode] = useState<Mode>("customer");
   const [pickId, setPickId] = useState<string | null>(initialPick);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hover, setHover] = useState<{ id: string; x: number; y: number } | null>(null);
 
-  const { clients, items, pallets, orders, prepared } = snapshot;
-  const order = orders.find((o) => o.id === pickId) ?? null;
+  const { warehouses, clients, items, pallets, orders, prepared } = snapshot;
+  const here = warehouses.find((w) => w.code === snapshot.current)!;
+  const dimsKey = JSON.stringify(here.dims);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- rebuilt only when the measurements change
+  const layout = useMemo(() => makeLayout(here.dims), [dimsKey]);
+
+  const order = orders.find((o) => o.id === pickId && o.warehouse === here.code) ?? null;
   const palletById = useMemo(() => new Map(pallets.map((p) => [p.id, p])), [pallets]);
   const reservedBy = useMemo(() => {
     const map = new Map<string, SnapshotOrder>();
@@ -49,10 +56,10 @@ export function WarehouseView({ snapshot, initialPick }: { snapshot: WarehouseSn
     () => prepared.flatMap((o) => Array.from({ length: o.pallets }, (_, k) => ({ id: `out:${o.id}:${k}`, loc: `EXP-${o.lane}`, order: o }))),
     [prepared],
   );
-  const dispatchLane = Math.min(prepared.length + 1, LANE_COUNT);
+  const dispatchLane = Math.min(prepared.length + 1, layout.laneCount.EXP);
   const route = useMemo(
-    () => (order ? pickRoute(order.picks.map((id) => ({ id, loc: palletById.get(id)?.loc ?? "" })), dispatchLane) : null),
-    [order, palletById, dispatchLane],
+    () => (order ? pickRoute(layout, order.picks.map((id) => ({ id, loc: palletById.get(id)?.loc ?? "" })), dispatchLane) : null),
+    [layout, order, palletById, dispatchLane],
   );
 
   const scenePallets = useMemo<ScenePallet[]>(() => {
@@ -69,19 +76,19 @@ export function WarehouseView({ snapshot, initialPick }: { snapshot: WarehouseSn
     ];
   }, [pallets, staged, items, mode, order]);
 
-  // Scene lifecycle.
+  // Scene lifecycle: one scene per building shape.
   useEffect(() => {
     let disposed = false;
     let instance: WarehouseScene | null = null;
     import("./scene")
       .then(({ WarehouseScene }) => {
         if (disposed || !mount.current) return;
-        instance = new WarehouseScene(mount.current);
+        instance = new WarehouseScene(mount.current, layout);
         instance.onHover = (id, x, y) => setHover(id ? { id, x, y } : null);
         instance.onPick = (id) => setSelectedId(id);
         instance.setLeftInset(PANEL_INSET);
         scene.current = instance;
-        setReady(true);
+        setSceneVersion((v) => v + 1);
       })
       .catch(() => setFailed(true));
     return () => {
@@ -89,21 +96,21 @@ export function WarehouseView({ snapshot, initialPick }: { snapshot: WarehouseSn
       instance?.dispose();
       scene.current = null;
     };
-  }, []);
+  }, [layout]);
 
   useEffect(() => {
-    if (ready) scene.current?.setPallets(scenePallets);
-  }, [ready, scenePallets]);
+    if (sceneVersion) scene.current?.setPallets(scenePallets);
+  }, [sceneVersion, scenePallets]);
 
   const routeKey = route ? route.order.join(",") : "";
   useEffect(() => {
-    if (ready) scene.current?.setPicks(route?.order ?? [], route?.path ?? []);
+    if (sceneVersion) scene.current?.setPicks(route?.order ?? [], route?.path ?? []);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the route itself changes
-  }, [ready, routeKey]);
+  }, [sceneVersion, routeKey]);
 
   useEffect(() => {
-    if (ready) scene.current?.setSelected(selectedId);
-  }, [ready, selectedId]);
+    if (sceneVersion) scene.current?.setSelected(selectedId);
+  }, [sceneVersion, selectedId]);
 
   // Live: pick up what the office approves and the floor moves.
   useEffect(() => {
@@ -113,19 +120,23 @@ export function WarehouseView({ snapshot, initialPick }: { snapshot: WarehouseSn
     return () => clearInterval(timer);
   }, [router]);
 
-  function choose(id: string | null) {
-    setPickId(id);
+  function choose(o: SnapshotOrder | null) {
+    if (o?.warehouse && o.warehouse !== here.code) {
+      router.push(`/office/warehouse?w=${o.warehouse}&pick=${o.id}`);
+      return;
+    }
+    setPickId(o?.id ?? null);
     setSelectedId(null);
     const url = new URL(window.location.href);
-    if (id) url.searchParams.set("pick", id);
+    url.searchParams.set("w", here.code);
+    if (o) url.searchParams.set("pick", o.id);
     else url.searchParams.delete("pick");
     window.history.replaceState(null, "", url);
   }
 
-  const inRacks = pallets.filter((p) => parseLocation(p.loc)?.kind === "rack").length;
-  const receiving = pallets.length - inRacks;
-  const occupancy = inRacks / RACK_CAPACITY;
+  const occupancy = here.inRacks / here.capacity;
   const hot = occupancy >= OCCUPANCY_ALERT;
+  const forklift = FORKLIFTS.find((f) => f.aisle === here.dims.aisleWidth)?.label ?? `${here.dims.aisleWidth} m aisles`;
 
   const hovered = hover ? describe(hover.id) : null;
   const selected = selectedId ? describe(selectedId) : null;
@@ -149,49 +160,81 @@ export function WarehouseView({ snapshot, initialPick }: { snapshot: WarehouseSn
         <div className="absolute inset-0 grid place-items-center text-sm text-dock-ink/60">The 3D view needs WebGL, which this browser does not offer.</div>
       )}
 
-      {/* Header: live occupancy */}
       <div className="pointer-events-none absolute left-5 top-5 flex w-[330px] flex-col gap-3">
+        {/* One tab per building */}
+        <nav className="pointer-events-auto flex gap-1.5">
+          {warehouses.map((w) => {
+            const active = w.code === here.code;
+            const full = w.inRacks / w.capacity;
+            return (
+              <Link
+                key={w.code}
+                href={`/office/warehouse?w=${w.code}`}
+                className={`cond flex flex-1 items-center justify-between gap-2 border-[1.5px] border-dock-ink px-2.5 py-1.5 text-xs ${active ? "bg-dock-ink text-dock-yellow" : "bg-white hover:bg-dock-concrete-2"}`}
+              >
+                {w.code}
+                <span className={`mono text-[11px] ${full >= OCCUPANCY_ALERT ? (active ? "text-red-300" : "text-dock-red") : active ? "text-white/60" : "text-dock-ink/50"}`}>
+                  {Math.round(full * 100)}%
+                </span>
+              </Link>
+            );
+          })}
+          <Link href="/office/warehouse/setup" className="grid w-9 place-items-center border-[1.5px] border-dashed border-dock-ink bg-white hover:bg-dock-yellow" title="Add a warehouse">
+            <Plus size={15} />
+          </Link>
+        </nav>
+
+        {/* Header: building and live occupancy */}
         <section className="dock-card pointer-events-auto overflow-hidden bg-white">
           <div className="flex items-center gap-2 border-b-[1.5px] border-dock-ink px-4 py-2.5">
             <span className="dock-live h-2 w-2 rounded-full bg-dock-red" />
-            <span className="cond text-[11px] text-dock-ink/60">Live · Nave 1</span>
-            <span className="cond ml-auto text-[11px] text-dock-ink/40">{RACK_CAPACITY} rack slots</span>
+            <span className="cond text-[11px] text-dock-ink/60">Live · {here.city}</span>
+            <Link href={`/office/warehouse/setup?code=${here.code}`} className="cond ml-auto flex items-center gap-1 text-[11px] text-dock-ink/50 hover:text-dock-ink">
+              <Ruler size={12} /> Measurements
+            </Link>
           </div>
           <div className="px-4 pb-3 pt-2.5">
-            <h1 className="text-2xl font-semibold tracking-tight">Warehouse</h1>
-            <div className="mt-2 flex items-baseline justify-between">
-              <span className="cond text-[11px] text-dock-ink/50">Occupancy</span>
+            <h1 className="text-xl font-semibold leading-tight tracking-tight">{here.name}</h1>
+            <p className="mono mt-1 text-[11px] text-dock-ink/50">
+              {here.dims.length} × {here.dims.width} m · {here.dims.height} m clear · {here.dims.docks} docks · {forklift}
+            </p>
+            <div className="mt-2.5 flex items-baseline justify-between">
+              <span className="cond text-[11px] text-dock-ink/50">Occupancy · {here.capacity} slots</span>
               <span className={`mono text-lg font-semibold ${hot ? "text-dock-red" : ""}`}>{Math.round(occupancy * 100)}%</span>
             </div>
             <div className="relative mt-1 h-2.5 border-[1.5px] border-dock-ink bg-dock-concrete-2">
-              <div className={`h-full ${hot ? "bg-dock-red" : "bg-dock-ink"}`} style={{ width: `${occupancy * 100}%` }} />
+              <div className={`h-full ${hot ? "bg-dock-red" : "bg-dock-ink"}`} style={{ width: `${Math.min(1, occupancy) * 100}%` }} />
               <div className="absolute -top-1 h-4 w-0.5 bg-dock-ink" style={{ left: `${OCCUPANCY_ALERT * 100}%` }} title="Alert threshold" />
             </div>
             {hot && (
               <p className="mt-2 flex items-center gap-1.5 text-xs text-dock-red">
-                <AlertTriangle size={13} /> Above {OCCUPANCY_ALERT * 100}%: {RACK_CAPACITY - inRacks} free slots left
+                <AlertTriangle size={13} /> Above {OCCUPANCY_ALERT * 100}%: {here.capacity - here.inRacks} free slots left
               </p>
             )}
             <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-              <Stat label="In racks" value={inRacks} />
-              <Stat label="Receiving" value={receiving} />
+              <Stat label="In racks" value={here.inRacks} />
+              <Stat label="Receiving" value={here.onFloor} />
               <Stat label="To ship" value={staged.length} />
             </div>
           </div>
         </section>
 
-        {/* Outbounds waiting to be picked */}
-        <section className="dock-card pointer-events-auto flex max-h-[calc(100vh-330px)] flex-col overflow-hidden bg-white">
+        {/* Outbounds waiting to be picked, in every building */}
+        <section className="dock-card pointer-events-auto flex max-h-[calc(100vh-390px)] flex-col overflow-hidden bg-white">
           <h2 className="cond flex items-center gap-2 border-b-[1.5px] border-dock-ink px-4 py-2 text-xs">
             To pick <span className="mono bg-dock-ink px-1.5 text-[11px] text-dock-yellow">{orders.length}</span>
             <span className="ml-auto normal-case tracking-normal text-dock-ink/40">tap one to light it up</span>
           </h2>
           <ul className="overflow-y-auto">
             {orders.map((o) => {
-              const active = o.id === pickId;
+              const active = o.id === order?.id;
+              const elsewhere = o.warehouse !== here.code;
               return (
                 <li key={o.id} className="border-b border-dock-line last:border-0">
-                  <button onClick={() => choose(active ? null : o.id)} className={`w-full px-4 py-2 text-left text-sm transition-colors ${active ? "bg-dock-yellow" : "hover:bg-dock-concrete-2"}`}>
+                  <button
+                    onClick={() => choose(active ? null : o)}
+                    className={`w-full px-4 py-2 text-left text-sm transition-colors ${active ? "bg-dock-yellow" : "hover:bg-dock-concrete-2"} ${elsewhere ? "opacity-60" : ""}`}
+                  >
                     <span className="flex items-center gap-2">
                       <span className="h-2.5 w-2.5 shrink-0" style={{ background: clientColor(o.client) }} />
                       <span className="mono text-xs font-semibold">Nº {o.number}</span>
@@ -200,6 +243,7 @@ export function WarehouseView({ snapshot, initialPick }: { snapshot: WarehouseSn
                           <Bot size={11} /> AI
                         </span>
                       )}
+                      <span className="mono border border-dock-ink/30 px-1 text-[10px]">{o.warehouse ?? "—"}</span>
                       <span className="mono ml-auto text-xs">{o.pallets} plt</span>
                     </span>
                     <span className="mt-0.5 block truncate font-medium">{clients[o.client].name}</span>
@@ -260,7 +304,7 @@ export function WarehouseView({ snapshot, initialPick }: { snapshot: WarehouseSn
       </div>
 
       {/* Legend */}
-      <div className="dock-card absolute bottom-5 right-5 max-w-[420px] bg-white px-4 py-2.5 text-xs">
+      <div className={`dock-card absolute bottom-5 right-5 max-w-[420px] bg-white px-4 py-2.5 text-xs ${pallets.length ? "" : "hidden"}`}>
         <div className="flex flex-wrap gap-x-4 gap-y-1.5">
           {order ? (
             <>
@@ -268,7 +312,10 @@ export function WarehouseView({ snapshot, initialPick }: { snapshot: WarehouseSn
               <Swatch color={GHOST} label="Everything else" />
             </>
           ) : mode === "customer" ? (
-            clients.map((c, i) => <Swatch key={c.code} color={clientColor(i)} label={c.name.replace(/,? S\.[AL]\.$/, "")} />)
+            clients
+              .map((c, i) => ({ c, i }))
+              .filter(({ i }) => pallets.some((p) => items[p.item].client === i))
+              .map(({ c, i }) => <Swatch key={c.code} color={clientColor(i)} label={c.name.replace(/,? S\.[AL]\.$/, "")} />)
           ) : mode === "age" ? (
             AGE_BUCKETS.map((b) => <Swatch key={b.label} color={b.color} label={b.label} />)
           ) : (
@@ -313,7 +360,7 @@ export function WarehouseView({ snapshot, initialPick }: { snapshot: WarehouseSn
                 </dl>
                 {parseLocation(selected.loc)?.kind === "floor" && <p className="text-xs text-dock-ink/60">On the receiving floor, waiting for a rack slot.</p>}
                 {selected.reserved && (
-                  <button onClick={() => choose(selected.reserved!.id)} className="cond w-full bg-dock-ink px-3 py-1.5 text-left text-xs text-dock-yellow">
+                  <button onClick={() => choose(selected.reserved)} className="cond w-full bg-dock-ink px-3 py-1.5 text-left text-xs text-dock-yellow">
                     Reserved for outbound Nº {selected.reserved.number} → {selected.reserved.consignee}
                   </button>
                 )}

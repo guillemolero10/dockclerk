@@ -1,125 +1,168 @@
-// Floor plan of the demo warehouse, shared by the seed, the server and the 3D view.
-// Units are metres. x runs across the rack rows, z from the back wall (negative)
-// to the dock wall (positive), y is up.
+// Floor plan of a warehouse, worked out from the real measurements of the building.
+// Shared by the seed, the server and the 3D view. Units are metres: x runs across
+// the rack rows, z from the back wall (negative) to the dock wall (positive), y is up.
 //
 //   back wall
-//   A | aisle | B C | aisle | D E | aisle | F G | aisle | H      ← 8 rack rows, 21 positions deep, 5 levels
-//   ─────────────────── cross aisle ───────────────────
-//   REC-1..4 (received, waiting for a slot)    EXP-1..4 (picked, waiting for the truck)
-//   [dock 1]  [dock 2]                          [dock 3]  [dock 4]
+//   A | aisle | B C | aisle | D E | ... | aisle | last      ← as many rows as the width allows
+//   ─────────────── cross aisle ───────────────
+//   REC lanes (received, waiting for a slot)    EXP lanes (picked, waiting for the truck)
+//   [inbound docks]                              [outbound docks]
 
-export const ROWS = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
-export type RowLetter = (typeof ROWS)[number];
-export const POSITIONS = 21; // 7 bays of 3 pallets
-export const LEVELS = 5;
-export const RACK_CAPACITY = ROWS.length * POSITIONS * LEVELS;
-
+// Pallet racking, the same in every building.
 export const SLOT_W = 0.95; // pallet pitch along a row
 export const LEVEL_H = 1.45;
 export const RACK_D = 1.1;
-export const AISLE_W = 3.2;
-export const BAY = 3;
-
+export const BAY = 3; // pallets per beam
 const BACK_TO_BACK = 0.1;
-const WIDTH = 2 * RACK_D + 3 * (2 * RACK_D + BACK_TO_BACK) + 4 * AISLE_W;
+const WALL_GAP = 0.6;
+const BACK_GAP = 1.2;
 
-/** Left edge of each row, and which side its pallets face (+1 = towards +x). */
-const ROW_GEOMETRY: Record<RowLetter, { x0: number; face: 1 | -1 }> = (() => {
-  const out = {} as Record<RowLetter, { x0: number; face: 1 | -1 }>;
-  let x = -WIDTH / 2;
-  ROWS.forEach((row, i) => {
-    out[row] = { x0: x, face: i % 2 === 0 ? 1 : -1 };
-    x += RACK_D;
-    // After an even-indexed row comes an aisle; after an odd one, its back-to-back partner.
-    x += i % 2 === 0 ? AISLE_W : BACK_TO_BACK;
-  });
-  return out;
-})();
-
-export function rowCenterX(row: RowLetter) {
-  return ROW_GEOMETRY[row].x0 + RACK_D / 2;
-}
-
-export function rowFace(row: RowLetter) {
-  return ROW_GEOMETRY[row].face;
-}
-
-/** x of the centre line of the aisle that serves this row. */
-export function aisleX(row: RowLetter) {
-  const g = ROW_GEOMETRY[row];
-  return g.face === 1 ? g.x0 + RACK_D + AISLE_W / 2 : g.x0 - AISLE_W / 2;
-}
-
-export const AISLE_XS = [0, 2, 4, 6].map((i) => aisleX(ROWS[i]));
-
-export function positionZ(position: number) {
-  return -(position - 0.5) * SLOT_W;
-}
-
-export const RACK_DEPTH_Z = POSITIONS * SLOT_W;
+// Staging floor between the racks and the dock wall.
 export const CROSS_AISLE_Z = 1.7;
-
-// Floor lanes by the docks.
+export const LANE_Z0 = 3.9;
 export const LANE_PITCH = 1.05;
 export const LANE_SLOTS = 7;
-export const LANE_Z0 = 3.9;
-export const LANE_COUNT = 4;
-// Two lanes per dock door, receiving on the left, dispatch on the right.
-const REC_X = [-9.6, -8.1, -6.0, -4.5];
-export function laneX(zone: "REC" | "EXP", lane: number) {
-  const x = REC_X[lane - 1];
-  return zone === "REC" ? x : -REC_X[LANE_COUNT - lane];
-}
+const LANE_HALF = 0.75;
+const DOCK_SPACING = 3.6;
 export const DOCK_Z = LANE_Z0 + LANE_SLOTS * LANE_PITCH + 0.9;
-export const DOCKS = [
-  { n: 1, x: (laneX("REC", 1) + laneX("REC", 2)) / 2, kind: "in" as const },
-  { n: 2, x: (laneX("REC", 3) + laneX("REC", 4)) / 2, kind: "in" as const },
-  { n: 3, x: (laneX("EXP", 1) + laneX("EXP", 2)) / 2, kind: "out" as const },
-  { n: 4, x: (laneX("EXP", 3) + laneX("EXP", 4)) / 2, kind: "out" as const },
-];
+const STAGING_DEPTH = DOCK_Z;
 
-export const BOUNDS = {
-  minX: -WIDTH / 2 - 1.2,
-  maxX: WIDTH / 2 + 1.2,
-  minZ: -RACK_DEPTH_Z - 1.2,
-  maxZ: DOCK_Z,
+export type WarehouseDims = {
+  /** Inside length, dock wall to back wall. */
+  length: number;
+  /** Inside width. */
+  width: number;
+  /** Clear height under the roof beams. */
+  height: number;
+  /** Set by the forklifts the warehouse uses. */
+  aisleWidth: number;
+  docks: number;
 };
 
+export const FORKLIFTS = [
+  { label: "Counterbalance forklift", aisle: 3.6 },
+  { label: "Reach truck", aisle: 3.0 },
+  { label: "Very narrow aisle (VNA)", aisle: 1.9 },
+];
+
+export const LIMITS = {
+  // Whole metres, so the form's 0.5 m steps land on valid values.
+  length: { min: Math.ceil(STAGING_DEPTH + BACK_GAP + BAY * SLOT_W), max: 160 },
+  width: { min: 9, max: 120 },
+  height: { min: 3, max: 14 },
+  docks: { min: 2, max: 12 },
+};
+
+export const ROW_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+
 export type Location =
-  | { kind: "rack"; row: RowLetter; position: number; level: number }
+  | { kind: "rack"; row: string; position: number; level: number }
   | { kind: "floor"; zone: "REC" | "EXP"; lane: number };
 
-export function rackCode(row: RowLetter, position: number, level: number) {
+export function rackCode(row: string, position: number, level: number) {
   return `${row}-${String(position).padStart(2, "0")}-${level}`;
 }
 
 export function parseLocation(code: string): Location | null {
-  const rack = /^([A-H])-(\d{2})-(\d)$/.exec(code);
-  if (rack) return { kind: "rack", row: rack[1] as RowLetter, position: Number(rack[2]), level: Number(rack[3]) };
-  const floor = /^(REC|EXP)-(\d)$/.exec(code);
+  const rack = /^([A-Z])-(\d{2})-(\d)$/.exec(code);
+  if (rack) return { kind: "rack", row: rack[1], position: Number(rack[2]), level: Number(rack[3]) };
+  const floor = /^(REC|EXP)-(\d{1,2})$/.exec(code);
   if (floor) return { kind: "floor", zone: floor[1] as "REC" | "EXP", lane: Number(floor[2]) };
   return null;
 }
 
-/** Centre of the pallet's footprint, at floor/beam height. */
-export function rackSlotPosition(row: RowLetter, position: number, level: number) {
-  return { x: rowCenterX(row), y: (level - 1) * LEVEL_H, z: positionZ(position) };
-}
+export type Layout = ReturnType<typeof makeLayout>;
 
-/** Pallets in a floor lane line up from the cross aisle towards the dock, then stack two high. */
-export function laneSlotPosition(zone: "REC" | "EXP", lane: number, index: number) {
-  const along = index % LANE_SLOTS;
-  const tier = Math.floor(index / LANE_SLOTS);
-  return { x: laneX(zone, lane), y: tier * 1.25, z: LANE_Z0 + (along + 0.5) * LANE_PITCH };
-}
+export function makeLayout(dims: WarehouseDims) {
+  const { width, length, height, aisleWidth } = dims;
 
-/** Every rack slot in the order a person would fill the warehouse: row by row, front to back, bottom to top. */
-export function rackSlotsInFillOrder() {
-  const slots: string[] = [];
-  for (const row of ROWS) {
-    for (let p = 1; p <= POSITIONS; p++) {
-      for (let l = 1; l <= LEVELS; l++) slots.push(rackCode(row, p, l));
-    }
-  }
-  return slots;
+  // Rows: one against each side wall, back-to-back pairs in between, an aisle serving each pair of faces.
+  const aisles = Math.max(1, Math.min(13, Math.floor((width - 2 * WALL_GAP + BACK_TO_BACK) / (aisleWidth + 2 * RACK_D + BACK_TO_BACK))));
+  const rows = ROW_LETTERS.slice(0, aisles * 2);
+  const used = 2 * RACK_D + (aisles - 1) * (2 * RACK_D + BACK_TO_BACK) + aisles * aisleWidth;
+  const geometry = new Map<string, { x0: number; face: 1 | -1 }>();
+  let x = -used / 2;
+  rows.forEach((row, i) => {
+    geometry.set(row, { x0: x, face: i % 2 === 0 ? 1 : -1 });
+    x += RACK_D + (i % 2 === 0 ? aisleWidth : BACK_TO_BACK);
+  });
+
+  // Positions: whole bays that fit between the cross aisle and the back wall.
+  const backZ = DOCK_Z - length;
+  const bays = Math.max(1, Math.floor((-backZ - BACK_GAP) / (SLOT_W * BAY)));
+  const positions = Math.min(99, bays * BAY);
+  const levels = Math.max(1, Math.min(9, Math.floor((height - 0.6) / LEVEL_H)));
+
+  // Docks: inbound on the left half, outbound on the right, two floor lanes each.
+  const inbound = Math.ceil(dims.docks / 2);
+  const outbound = Math.floor(dims.docks / 2);
+  const spacing = (n: number) => Math.min(DOCK_SPACING, (width / 2 - WALL_GAP) / n);
+  const dockRow = (n: number, center: number) => Array.from({ length: n }, (_, i) => center + (i - (n - 1) / 2) * spacing(n));
+  const docks = [
+    ...dockRow(inbound, -width / 4).map((dx, i) => ({ n: i + 1, x: dx, kind: "in" as const })),
+    ...dockRow(outbound, width / 4).map((dx, i) => ({ n: inbound + i + 1, x: dx, kind: "out" as const })),
+  ];
+  const lanes = {
+    REC: docks.filter((d) => d.kind === "in").flatMap((d) => [d.x - LANE_HALF, d.x + LANE_HALF]),
+    EXP: docks.filter((d) => d.kind === "out").flatMap((d) => [d.x - LANE_HALF, d.x + LANE_HALF]),
+  };
+
+  const rowCenterX = (row: string) => geometry.get(row)!.x0 + RACK_D / 2;
+  const rowFace = (row: string) => geometry.get(row)!.face;
+  const aisleX = (row: string) => {
+    const g = geometry.get(row)!;
+    return g.face === 1 ? g.x0 + RACK_D + aisleWidth / 2 : g.x0 - aisleWidth / 2;
+  };
+  const positionZ = (position: number) => -(position - 0.5) * SLOT_W;
+  const laneX = (zone: "REC" | "EXP", lane: number) => lanes[zone][lane - 1];
+
+  return {
+    dims,
+    rows,
+    positions,
+    levels,
+    capacity: rows.length * positions * levels,
+    aisleXs: rows.filter((_, i) => i % 2 === 0).map(aisleX),
+    rackDepthZ: positions * SLOT_W,
+    rackTop: levels * LEVEL_H,
+    docks,
+    laneCount: { REC: lanes.REC.length, EXP: lanes.EXP.length },
+    bounds: { minX: -width / 2, maxX: width / 2, minZ: backZ, maxZ: DOCK_Z },
+    rowCenterX,
+    rowFace,
+    aisleX,
+    positionZ,
+    laneX,
+
+    /** Whether a location code exists in this building. */
+    contains(code: string) {
+      const loc = parseLocation(code);
+      if (!loc) return false;
+      if (loc.kind === "floor") return loc.lane >= 1 && loc.lane <= lanes[loc.zone].length;
+      return geometry.has(loc.row) && loc.position >= 1 && loc.position <= positions && loc.level >= 1 && loc.level <= levels;
+    },
+
+    /** Centre of the pallet's footprint, at floor/beam height. */
+    rackSlotPosition(row: string, position: number, level: number) {
+      return { x: rowCenterX(row), y: (level - 1) * LEVEL_H, z: positionZ(position) };
+    },
+
+    /** Pallets in a floor lane line up from the cross aisle towards the dock, then stack two high. */
+    laneSlotPosition(zone: "REC" | "EXP", lane: number, index: number) {
+      const along = index % LANE_SLOTS;
+      const tier = Math.floor(index / LANE_SLOTS);
+      return { x: laneX(zone, lane), y: tier * 1.25, z: LANE_Z0 + (along + 0.5) * LANE_PITCH };
+    },
+
+    /** Every rack slot in the order a person would fill the warehouse: row by row, front to back, bottom to top. */
+    rackSlotsInFillOrder() {
+      const slots: string[] = [];
+      for (const row of rows) {
+        for (let p = 1; p <= positions; p++) {
+          for (let l = 1; l <= levels; l++) slots.push(rackCode(row, p, l));
+        }
+      }
+      return slots;
+    },
+  };
 }

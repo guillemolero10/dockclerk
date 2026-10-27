@@ -1,30 +1,30 @@
 // Picking route over the floor plan: leave the dispatch lane, sweep the aisles
 // that have something to pick (in and back out, deepest pallet last), return.
 
-import { CROSS_AISLE_Z, LANE_Z0, aisleX, laneX, parseLocation, positionZ } from "./layout";
+import { CROSS_AISLE_Z, LANE_Z0, parseLocation, type Layout } from "./layout";
 
 export type RoutePoint = [x: number, z: number];
 
-export function pickRoute(picks: { id: string; loc: string }[], dispatchLane = 1) {
+export function pickRoute(layout: Layout, picks: { id: string; loc: string }[], dispatchLane = 1) {
   type Stop = { x: number; picks: { id: string; z: number }[]; floor: boolean };
   const stops = new Map<string, Stop>();
   for (const p of picks) {
-    const loc = parseLocation(p.loc);
-    if (!loc) continue;
+    if (!layout.contains(p.loc)) continue;
+    const loc = parseLocation(p.loc)!;
     if (loc.kind === "rack") {
-      const x = aisleX(loc.row);
+      const x = layout.aisleX(loc.row);
       const key = `aisle:${x}`;
       if (!stops.has(key)) stops.set(key, { x, picks: [], floor: false });
-      stops.get(key)!.picks.push({ id: p.id, z: positionZ(loc.position) });
+      stops.get(key)!.picks.push({ id: p.id, z: layout.positionZ(loc.position) });
     } else {
-      const x = laneX(loc.zone, loc.lane);
+      const x = layout.laneX(loc.zone, loc.lane);
       const key = `lane:${loc.zone}${loc.lane}`;
       if (!stops.has(key)) stops.set(key, { x, picks: [], floor: true });
       stops.get(key)!.picks.push({ id: p.id, z: LANE_Z0 });
     }
   }
 
-  const home = laneX("EXP", dispatchLane);
+  const home = layout.laneX("EXP", Math.min(dispatchLane, layout.laneCount.EXP));
   // Sweep from the dispatch side across the building.
   const ordered = [...stops.values()].sort((a, b) => b.x - a.x);
   const order: string[] = [];
