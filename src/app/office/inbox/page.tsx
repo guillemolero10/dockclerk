@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowUpRight, RotateCcw } from "lucide-react";
+import { ArrowUpRight, Boxes, RotateCcw } from "lucide-react";
 import type { DraftKind } from "@prisma/client";
 import { ClerkRunner } from "@/components/inbox/clerk-runner";
 import { DraftCard, type DraftView } from "@/components/inbox/draft-card";
@@ -89,9 +89,14 @@ export default async function InboxPage() {
                     <span className="text-dock-ink/50"> — {d.message?.body}</span>
                   </span>
                   {created.outboundId && (
-                    <Link href={`/office/legacy/outbounds/${created.outboundId}`} className="cond flex items-center gap-1 bg-dock-yellow px-2 py-0.5 text-[11px] font-semibold">
-                      Outbound Nº {created.outboundNumber} in your software <ArrowUpRight size={12} />
-                    </Link>
+                    <>
+                      <Link href={`/office/warehouse?pick=${created.outboundId}`} className="cond flex items-center gap-1 bg-dock-ink px-2 py-0.5 text-[11px] font-semibold text-dock-yellow">
+                        <Boxes size={12} /> Light up the pick
+                      </Link>
+                      <Link href={`/office/legacy/outbounds/${created.outboundId}`} className="cond flex items-center gap-1 bg-dock-yellow px-2 py-0.5 text-[11px] font-semibold">
+                        Outbound Nº {created.outboundNumber} in your software <ArrowUpRight size={12} />
+                      </Link>
+                    </>
                   )}
                 </li>
               );

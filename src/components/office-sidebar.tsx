@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Inbox, LayoutDashboard, LogOut, MonitorCog, Truck } from "lucide-react";
+import { Boxes, Inbox, LayoutDashboard, LogOut, MonitorCog, Truck } from "lucide-react";
 
 const NAV = [
   { href: "/office", label: "Today", icon: LayoutDashboard, exact: true },
   { href: "/office/inbox", label: "AI inbox", icon: Inbox, badgeKey: "inbox" as const },
+  { href: "/office/warehouse", label: "Warehouse 3D", icon: Boxes },
   { href: "/office/dock", label: "Dock", icon: Truck },
 ];
 

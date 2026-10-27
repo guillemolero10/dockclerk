@@ -76,11 +76,14 @@ model Item {
 }
 
 /// Current balance: goods of a client stored in the warehouse.
+/// One row per pallet position: rack slots like "C-07-3" (row-position-level)
+/// or floor lanes by the docks like "REC-2" (received, waiting for a slot).
 model Stock {
-  id        String  @id @default(cuid())
+  id        String    @id @default(cuid())
   clientId  String
   itemId    String
   lot       String?
+  expiresAt DateTime?
   pallets   Int
   units     Int
   location  String

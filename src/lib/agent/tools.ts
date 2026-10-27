@@ -53,10 +53,19 @@ export async function findItem(clientId: string, fragment: string) {
   return best;
 }
 
-/** Pallets and units this customer has of an item right now. */
+/**
+ * Pallets and units of an item free to promise right now: what is on the shelves
+ * minus what open outbounds have already claimed (it stays on the shelf until picked).
+ */
 export async function checkStock(clientId: string, itemId: string) {
-  const agg = await db.stock.aggregate({ where: { clientId, itemId }, _sum: { pallets: true, units: true } });
-  return { pallets: agg._sum.pallets ?? 0, units: agg._sum.units ?? 0 };
+  const [onHand, reserved] = await Promise.all([
+    db.stock.aggregate({ where: { clientId, itemId }, _sum: { pallets: true, units: true } }),
+    db.outboundLine.aggregate({ where: { itemId, outbound: { clientId, status: "REQUESTED" } }, _sum: { pallets: true, units: true } }),
+  ]);
+  return {
+    pallets: Math.max(0, (onHand._sum.pallets ?? 0) - (reserved._sum.pallets ?? 0)),
+    units: Math.max(0, (onHand._sum.units ?? 0) - (reserved._sum.units ?? 0)),
+  };
 }
 
 /** Most recent shipment of this customer to a destination, if any in the last 10 days. */

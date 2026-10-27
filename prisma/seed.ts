@@ -2,7 +2,8 @@
 // Every company, person and product here is invented for the demo.
 // Re-running it wipes the demo database and recreates the same data (deterministic).
 
-import { PrismaClient, type ClientType, type Unit } from "@prisma/client";
+import { PrismaClient, type ClientType, type Prisma, type Unit } from "@prisma/client";
+import { rackSlotsInFillOrder } from "../src/lib/warehouse/layout";
 
 const db = new PrismaClient();
 
@@ -213,10 +214,9 @@ async function main() {
     ["C005", "TOALLA-BL", "D0700", 3, 2, 13],
   ];
   for (const [clientCode, sku, consigneeCode, pallets, inDays, hour] of upcoming) {
+    // Still on the shelves until someone picks them: the 3D view lights them up.
     const client = clientRows.find((c) => c.code === clientCode)!;
     const item = await db.item.findFirstOrThrow({ where: { clientId: client.id, sku } });
-    const balance = balances.find((b) => b.itemId === item.id && b.pallets > pallets);
-    if (balance) balance.pallets -= pallets; // reserved stock leaves the balance
     const date = daysAgo(-inDays);
     await db.outbound.create({
       data: {
@@ -232,21 +232,87 @@ async function main() {
     });
   }
 
-  const aisles = ["A", "B", "C", "D", "E"];
-  for (const b of balances) {
-    if (b.pallets <= 0) continue;
-    await db.stock.create({
+  // Picked this morning and waiting in the dispatch lanes for their trucks: off the shelves already.
+  const preparedToday: [string, string, string, number, number][] = [
+    ["C006", "PVC-BLA", "D0802", 6, 16],
+    ["C005", "SABANA-90", "D0951", 4, 18],
+  ];
+  for (const [clientCode, sku, consigneeCode, pallets, hour] of preparedToday) {
+    const client = clientRows.find((c) => c.code === clientCode)!;
+    const item = await db.item.findFirstOrThrow({ where: { clientId: client.id, sku } });
+    const balance = balances.find((b) => b.itemId === item.id && b.pallets >= pallets);
+    if (!balance) throw new Error(`Not enough ${sku} for the prepared outbound`);
+    balance.pallets -= pallets;
+    await db.outbound.create({
       data: {
-        clientId: b.clientId,
-        itemId: b.itemId,
-        lot: b.lot,
-        pallets: b.pallets,
-        units: b.pallets * b.unitsPerPallet,
-        location: `${pick(aisles)}-${String(between(1, 30)).padStart(2, "0")}-${between(1, 4)}`,
-        inboundId: b.inboundId,
+        date: today,
+        deadline: new Date(today.getTime() + hour * 60 * 60 * 1000),
+        clientId: client.id,
+        clientDocRef: `PED-${between(1000, 9999)}`,
+        consigneeId: consigneeRows.find((c) => c.code === consigneeCode)!.id,
+        carrierId: carrierRows[2].id,
+        status: "PREPARED",
+        lines: { create: { itemId: item.id, pallets, units: pallets * item.unitsPerPallet } },
       },
     });
   }
+
+  // Every pallet gets its own rack slot. Customers keep to their own stretch of racking,
+  // with the free slots scattered in between like in any real warehouse.
+  const codeOf = new Map(clientRows.map((c) => [c.id, c.code]));
+  const shelfLife: Record<string, [number, number]> = { C004: [120, 400], C007: [300, 700], C008: [60, 240] };
+  const expiringSoon = new Map([["HORCH-1L", 19], ["MAZAPAN", 26]]); // so the expiry alert has something to say
+  const skuOf = new Map((await db.item.findMany({ select: { id: true, sku: true } })).map((i) => [i.id, i.sku]));
+  const slots = rackSlotsInFillOrder();
+  const physical = balances.filter((b) => b.pallets > 0);
+  const total = physical.reduce((sum, b) => sum + b.pallets, 0);
+  if (total > slots.length) throw new Error(`Racks too small: ${total} pallets for ${slots.length} slots`);
+
+  const stockRows: Prisma.StockCreateManyInput[] = [];
+  let slot = 0;
+  for (const b of physical) {
+    const life = shelfLife[codeOf.get(b.clientId)!];
+    const sku = skuOf.get(b.itemId)!;
+    let expiresAt: Date | null = null;
+    if (b.lot && life) {
+      const soon = expiringSoon.get(sku);
+      expiringSoon.delete(sku); // only the oldest lot of that item
+      expiresAt = daysAgo(-(soon ?? between(life[0], life[1])));
+    }
+    for (let i = 0; i < b.pallets; i++) {
+      // Skip a slot with the probability that spreads the free space evenly.
+      while (slots.length - slot > total - stockRows.length && rand() < (slots.length - slot - (total - stockRows.length)) / (slots.length - slot)) slot++;
+      stockRows.push({
+        clientId: b.clientId, itemId: b.itemId, lot: b.lot, expiresAt, pallets: 1, units: b.unitsPerPallet, location: slots[slot++], inboundId: b.inboundId,
+      });
+    }
+  }
+  await db.stock.createMany({ data: stockRows });
+
+  // Unloaded at 7:40 this morning, still on the floor of the receiving lane until put away.
+  const granzas = clientRows.find((c) => c.code === "C006")!;
+  const masterbatch = await db.item.findFirstOrThrow({ where: { clientId: granzas.id, sku: "MB-ROJO" } });
+  const morning = await db.inbound.create({
+    data: {
+      date: new Date(today.getTime() + (7 * 60 + 40) * 60 * 1000),
+      clientId: granzas.id,
+      clientDocRef: "ALB-58210",
+      supplier: granzas.name,
+      carrierId: carrierRows[1].id,
+      plate: carrierRows[1].plate,
+      expectedPallets: 5,
+      expectedUnits: 5 * masterbatch.unitsPerPallet,
+      receivedPallets: 5,
+      receivedUnits: 5 * masterbatch.unitsPerPallet,
+      status: "RECEIVED",
+      lines: { create: { itemId: masterbatch.id, lot: "L2698-41", pallets: 5, units: 5 * masterbatch.unitsPerPallet } },
+    },
+  });
+  await db.stock.createMany({
+    data: Array.from({ length: 5 }, () => ({
+      clientId: granzas.id, itemId: masterbatch.id, lot: "L2698-41", pallets: 1, units: masterbatch.unitsPerPallet, location: "REC-3", inboundId: morning.id,
+    })),
+  });
 
   // Today's expected truck for the dock demo. Quantities arrive later with the driver's photo
   // of the delivery note, through the driver link created with it.
