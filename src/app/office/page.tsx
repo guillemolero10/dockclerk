@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { ArrowRight, Boxes, Inbox, Mail, MessageCircle, Mic, Package, Sparkles, Truck, UserRound } from "lucide-react";
+import { ArrowRight, BellRing, Boxes, Inbox, Mail, MessageCircle, Mic, Package, Sparkles, Truck, UserRound } from "lucide-react";
 import type { Channel } from "@prisma/client";
+import { getAlerts } from "@/lib/alerts";
 import { db } from "@/lib/db";
 import { fmtNumber, madridDayRange, madridHm } from "@/lib/format";
 
@@ -31,7 +32,7 @@ function dayLabel(date: Date) {
 export default async function OfficeToday() {
   const { start: startOfToday, end: endOfToday } = madridDayRange();
 
-  const [newMessages, latestMessages, trucksToday, nextShipments, stockTotals, stockByClient, clients] = await Promise.all([
+  const [newMessages, latestMessages, trucksToday, nextShipments, stockTotals, stockByClient, clients, alerts] = await Promise.all([
     db.message.count({ where: { status: "NEW" } }),
     db.message.findMany({ where: { status: "NEW" }, orderBy: { receivedAt: "desc" }, take: 6, include: { client: true } }),
     db.dockAppointment.findMany({
@@ -48,7 +49,9 @@ export default async function OfficeToday() {
     db.stock.aggregate({ _sum: { pallets: true } }),
     db.stock.groupBy({ by: ["clientId"], _sum: { pallets: true }, orderBy: { _sum: { pallets: "desc" } } }),
     db.client.findMany({ select: { id: true, name: true } }),
+    getAlerts(),
   ]);
+  const urgent = alerts.filter((a) => a.level === "red");
 
   const upcoming = trucksToday.filter((t) => t.status === "BOOKED" || t.status === "ARRIVED");
   const totalPallets = stockTotals._sum.pallets ?? 0;
@@ -77,6 +80,27 @@ export default async function OfficeToday() {
         <Kpi icon={Package} label="Shipments to prepare" value={nextShipments.length} note="next 48 hours" />
         <Kpi icon={Boxes} label="Pallets in storage" value={totalPallets} note={`${stockByClient.length} customers`} />
       </section>
+
+      {urgent.length > 0 && (
+        <Link href="/office/alerts" className="dock-card group mt-6 flex items-stretch overflow-hidden bg-white hover:bg-dock-concrete-2">
+          <span className="grid w-14 shrink-0 place-items-center bg-dock-red text-white">
+            <BellRing size={20} />
+          </span>
+          <span className="min-w-0 flex-1 px-4 py-3">
+            <span className="cond block text-[11px] text-dock-red">
+              {urgent.length} {urgent.length === 1 ? "alert" : "alerts"} to act on now
+            </span>
+            {urgent.slice(0, 3).map((a) => (
+              <span key={a.id} className="block truncate text-sm font-medium">
+                {a.title}
+              </span>
+            ))}
+          </span>
+          <span className="cond flex items-center gap-1.5 px-4 text-sm">
+            All alerts <ArrowRight size={15} className="transition group-hover:translate-x-0.5" />
+          </span>
+        </Link>
+      )}
 
       <section className="mt-6 grid gap-4 lg:grid-cols-3">
         <div className="dock-console p-5 lg:col-span-2">

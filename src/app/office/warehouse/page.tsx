@@ -1,14 +1,15 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { WarehouseView } from "@/components/warehouse/warehouse-view";
+import { WarehouseView, type Mode } from "@/components/warehouse/warehouse-view";
 import { getWarehouseSnapshot } from "@/lib/warehouse/snapshot";
 
 export const dynamic = "force-dynamic";
 
 export default async function WarehousePage({ searchParams }: PageProps<"/office/warehouse">) {
-  const { w, pick } = await searchParams;
+  const { w, pick, color } = await searchParams;
   const code = typeof w === "string" ? w : undefined;
   const pickId = typeof pick === "string" ? pick : null;
+  const mode: Mode = color === "age" || color === "expiry" ? color : "customer";
 
   const snapshot = await getWarehouseSnapshot(code);
   if (!snapshot) {
@@ -30,5 +31,5 @@ export default async function WarehousePage({ searchParams }: PageProps<"/office
     redirect(`/office/warehouse?w=${order.warehouse}&pick=${pickId}`);
   }
 
-  return <WarehouseView key={snapshot.current} snapshot={snapshot} initialPick={pickId} />;
+  return <WarehouseView key={snapshot.current} snapshot={snapshot} initialPick={pickId} initialMode={mode} />;
 }

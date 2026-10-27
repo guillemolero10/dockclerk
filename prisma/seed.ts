@@ -114,7 +114,7 @@ const consignees: [string, string, string, string, string[]][] = [
 
 const carriers: [string, string][] = [
   ["Transportes Hermanos Sempere", "4821 KLM"],
-  ["Trans-Ibi Express", "7310 JHG"],
+  ["Rápidos Carrasqueta", "7310 JHG"],
   ["Logística Foia de Castalla", "1955 LPR"],
   ["Autónomo – Vicente Pastor", "9042 GTB"],
   ["Rutas del Vinalopó", "3367 MNS"],
@@ -171,7 +171,7 @@ async function main() {
   for (const [name, plate] of carriers) carrierRows.push(await db.carrier.create({ data: { name, plate } }));
 
   // Stock is built from the movements, so balances always match the history.
-  type Balance = { itemId: string; clientId: string; unitsPerPallet: number; pallets: number; lot: string | null; inboundId: string };
+  type Balance = { itemId: string; sku: string; clientId: string; unitsPerPallet: number; pallets: number; lot: string | null; inboundId: string };
   const balances: Balance[] = [];
 
   for (const c of clients) {
@@ -204,7 +204,7 @@ async function main() {
             lines: { create: { itemId: item.id, lot, pallets, units: pallets * unitsPerPallet } },
           },
         });
-        balances.push({ itemId: item.id, clientId: client.id, unitsPerPallet, pallets, lot, inboundId: inbound.id });
+        balances.push({ itemId: item.id, sku, clientId: client.id, unitsPerPallet, pallets, lot, inboundId: inbound.id });
       }
     }
   }
@@ -218,6 +218,12 @@ async function main() {
     balance.pallets -= pallets;
     const age = between(0, 18);
     const consignee = pick(consigneeRows);
+    // History only: the outbounds waiting in the dispatch lanes are created below, with their pallets.
+    const status = age > 3 ? "CLOSED" : "SHIPPED";
+    // What left on the truck, pallet by pallet, as shipOutbound records it: the lot trail starts here.
+    const shipped = Array.from({ length: pallets }, () => ({
+      itemId: balance.itemId, sku: balance.sku, lot: balance.lot, units: balance.unitsPerPallet, location: "EXP-1", inboundId: balance.inboundId,
+    }));
     await db.outbound.create({
       data: {
         date: daysAgo(age),
@@ -227,7 +233,8 @@ async function main() {
         clientDocRef: `PED-${between(1000, 9999)}`,
         consigneeId: consignee.id,
         carrierId: pick(carrierRows).id,
-        status: age > 3 ? "CLOSED" : age > 0 ? "SHIPPED" : pick(["PREPARED", "SHIPPED"] as const),
+        status,
+        shipped,
         lines: { create: { itemId: balance.itemId, pallets, units: pallets * balance.unitsPerPallet } },
       },
     });

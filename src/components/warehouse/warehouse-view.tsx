@@ -10,7 +10,7 @@ import { pickRoute } from "@/lib/warehouse/route";
 import type { SnapshotOrder, WarehouseSnapshot } from "@/lib/warehouse/snapshot";
 import type { ScenePallet, WarehouseScene } from "./scene";
 
-type Mode = "customer" | "age" | "expiry";
+export type Mode = "customer" | "age" | "expiry";
 const MODES: { id: Mode; label: string }[] = [
   { id: "customer", label: "Customer" },
   { id: "age", label: "Days in storage" },
@@ -25,14 +25,14 @@ function when(iso: string | null) {
   return new Date(iso).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" });
 }
 
-export function WarehouseView({ snapshot, initialPick }: { snapshot: WarehouseSnapshot; initialPick: string | null }) {
+export function WarehouseView({ snapshot, initialPick, initialMode = "customer" }: { snapshot: WarehouseSnapshot; initialPick: string | null; initialMode?: Mode }) {
   const router = useRouter();
   const mount = useRef<HTMLDivElement>(null);
   const scene = useRef<WarehouseScene | null>(null);
   // Bumped each time a scene is built, so the effects below feed the new one.
   const [sceneVersion, setSceneVersion] = useState(0);
   const [failed, setFailed] = useState(false);
-  const [mode, setMode] = useState<Mode>("customer");
+  const [mode, setMode] = useState<Mode>(initialMode);
   const [pickId, setPickId] = useState<string | null>(initialPick);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hover, setHover] = useState<{ id: string; x: number; y: number } | null>(null);
@@ -353,7 +353,15 @@ export function WarehouseView({ snapshot, initialPick }: { snapshot: WarehouseSn
                 </p>
                 <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
                   <dt className="cond text-dock-ink/50">Lot</dt>
-                  <dd className="mono">{selected.pallet.lot ?? "—"}</dd>
+                  <dd className="mono">
+                    {selected.pallet.lot ? (
+                      <Link href={`/office/trace?lot=${encodeURIComponent(selected.pallet.lot)}`} className="underline" title="Trace this lot">
+                        {selected.pallet.lot}
+                      </Link>
+                    ) : (
+                      "—"
+                    )}
+                  </dd>
                   <dt className="cond text-dock-ink/50">Quantity</dt>
                   <dd className="mono">
                     {selected.pallet.units} {UNIT[selected.item.unit]}

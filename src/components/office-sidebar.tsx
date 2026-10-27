@@ -2,16 +2,18 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Boxes, Inbox, LayoutDashboard, LogOut, MonitorCog, Truck } from "lucide-react";
+import { BellRing, Boxes, Inbox, LayoutDashboard, LogOut, MonitorCog, Route, Truck } from "lucide-react";
 
 const NAV = [
   { href: "/office", label: "Today", icon: LayoutDashboard, exact: true },
   { href: "/office/inbox", label: "AI inbox", icon: Inbox, badgeKey: "inbox" as const },
   { href: "/office/warehouse", label: "Warehouse 3D", icon: Boxes },
   { href: "/office/dock", label: "Dock", icon: Truck },
+  { href: "/office/alerts", label: "Alerts", icon: BellRing, badgeKey: "alerts" as const },
+  { href: "/office/trace", label: "Lot trace", icon: Route },
 ];
 
-export function OfficeSidebar({ inboxCount }: { inboxCount: number }) {
+export function OfficeSidebar({ inboxCount, alertCount }: { inboxCount: number; alertCount: number }) {
   const pathname = usePathname();
   const isActive = (href: string, exact?: boolean) => (exact ? pathname === href : pathname.startsWith(href));
 
@@ -29,6 +31,7 @@ export function OfficeSidebar({ inboxCount }: { inboxCount: number }) {
       <nav className="flex-1 space-y-1 px-3">
         {NAV.map(({ href, label, icon: Icon, exact, badgeKey }) => {
           const active = isActive(href, exact);
+          const badge = badgeKey === "inbox" ? inboxCount : badgeKey === "alerts" ? alertCount : 0;
           return (
             <Link
               key={href}
@@ -39,9 +42,9 @@ export function OfficeSidebar({ inboxCount }: { inboxCount: number }) {
             >
               <Icon size={17} className={active ? "text-dock-ink" : "text-white/40 group-hover:text-white/70"} />
               <span className="flex-1">{label}</span>
-              {badgeKey === "inbox" && inboxCount > 0 && (
+              {badge > 0 && (
                 <span className={`mono rounded-full px-1.5 text-[11px] font-semibold ${active ? "bg-dock-ink text-dock-yellow" : "bg-dock-red text-white"}`}>
-                  {inboxCount}
+                  {badge}
                 </span>
               )}
             </Link>
