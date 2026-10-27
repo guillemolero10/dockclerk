@@ -232,6 +232,8 @@ function space(
     const growing = fit.slope - 1.96 * fit.seSlope > 0;
     steps.push({ kind: "tool", text: `space ${w.code}: ${now}/${capacity} pallets, trend ${fit.slope >= 0 ? "+" : ""}${fit.slope.toFixed(2)} a day (±${(1.96 * fit.seSlope).toFixed(2)})` });
     if (!growing) continue;
+    // Already full: the alerts say so today, a "full in N weeks" forecast would not make sense.
+    if (now >= capacity) continue;
     const daysToFull = (capacity - now) / fit.slope;
     if (daysToFull > 90) continue;
     const fast = (capacity - now) / (fit.slope + 1.96 * fit.seSlope);

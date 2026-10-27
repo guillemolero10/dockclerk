@@ -62,7 +62,7 @@ All companies, people and goods in the demo are invented.
   - ABC slotting, priced in seconds of forklift travel and lift.
   - Carrier lateness and delivery quality: Fisher exact tests with Benjamini–Hochberg correction and Wilson intervals.
   - It says what it cannot conclude yet, and why (`src/lib/analyst/`).
-  - Runs every Monday at 07:00 through Vercel Cron.
+  - Runs every Monday at 07:00 through Vercel Cron (the route needs `CRON_SECRET`).
 - **Floor loop:** the truck arrives, the driver checks in, the operator receives the goods into a lane by the door, the driver signs, the pallets are put away into suggested slots, picked to a dispatch lane and shipped. Every shipped pallet keeps its lot for traceability (`src/lib/ops/floor.ts`).
 
 ```
@@ -80,7 +80,7 @@ prisma/           schema, seed and six months of simulated history (invented dat
 
 ## Real vs. simulated
 
-- **Real:** the agent loop, every model call, the warehouse logic, the 3D, photos and signatures (stored in Postgres), the PDF-ready dock receipt.
+- **Real:** the agent loop, the warehouse logic, the 3D, photos and signatures (stored in Postgres), the PDF-ready dock receipt. The model calls (Muse Spark, SAM 3.1, Voice) are wired to the Meta and Baseten APIs; without keys the rules engine stands in.
 - **Simulated:** the legacy software is a replica built during the hackathon and filled with invented data. No real email or WhatsApp is sent: the inbox is seeded with sample messages. The six months of history are simulated (seasons, weekdays, min/max replenishment, FIFO lots), with a few patterns planted on purpose so the analyst always has something to find. They are listed in `prisma/history.ts`.
 
 ## Run locally

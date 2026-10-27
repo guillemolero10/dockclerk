@@ -14,7 +14,13 @@ async function requireOffice() {
 export async function analyzeNow(days: number) {
   await requireOffice();
   const window = WINDOWS.includes(days as (typeof WINDOWS)[number]) ? days : 182;
-  const id = await runAnalysis(window, "office");
+  // Pressing the button again within two minutes opens the same report instead of paying the model twice.
+  const recent = await db.analystReport.findFirst({
+    where: { trigger: "office", days: window, createdAt: { gte: new Date(Date.now() - 2 * 60 * 1000) } },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+  const id = recent?.id ?? (await runAnalysis(window, "office"));
   revalidatePath("/office/analyst");
   redirect(`/office/analyst?r=${id}`);
 }
@@ -22,6 +28,7 @@ export async function analyzeNow(days: number) {
 /** Put-away rule of a warehouse: "velocity" (fast movers low and near the dock) or "customer". */
 export async function setPutawayRule(warehouseId: string, rule: "velocity" | "customer") {
   await requireOffice();
+  if (rule !== "velocity" && rule !== "customer") return;
   await db.warehouse.update({ where: { id: warehouseId }, data: { putaway: rule } });
   revalidatePath("/office/analyst");
   revalidatePath("/operator", "layout");

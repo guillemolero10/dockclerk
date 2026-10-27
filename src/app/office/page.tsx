@@ -49,7 +49,11 @@ export default async function OfficeToday() {
     db.stock.aggregate({ _sum: { pallets: true } }),
     db.stock.groupBy({ by: ["clientId"], _sum: { pallets: true }, orderBy: { _sum: { pallets: "desc" } } }),
     db.client.findMany({ select: { id: true, name: true } }),
-    getAlerts(),
+    // Same as the sidebar badge: the day view does not go down with the alerts.
+    getAlerts().catch((error) => {
+      console.error("Alerts failed", error);
+      return [];
+    }),
   ]);
   const urgent = alerts.filter((a) => a.level === "red");
 
