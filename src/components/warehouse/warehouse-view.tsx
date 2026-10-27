@@ -108,6 +108,11 @@ export function WarehouseView({ snapshot, initialPick }: { snapshot: WarehouseSn
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the route itself changes
   }, [sceneVersion, routeKey]);
 
+  const busyKey = snapshot.busyDocks.join(",");
+  useEffect(() => {
+    if (sceneVersion) scene.current?.setBusyDocks(busyKey ? busyKey.split(",").map(Number) : []);
+  }, [sceneVersion, busyKey]);
+
   useEffect(() => {
     if (sceneVersion) scene.current?.setSelected(selectedId);
   }, [sceneVersion, selectedId]);

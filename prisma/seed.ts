@@ -3,6 +3,7 @@
 // Re-running it wipes the demo database and recreates the same data (deterministic).
 
 import { PrismaClient, type ClientType, type Prisma, type Unit } from "@prisma/client";
+import { firstFree, slotMinutes, type Busy } from "../src/lib/dock/slots";
 import { makeLayout, type WarehouseDims } from "../src/lib/warehouse/layout";
 
 const db = new PrismaClient();
@@ -134,6 +135,7 @@ const warehouses: { code: string; name: string; city: string; dims: WarehouseDim
 ];
 
 async function wipe() {
+  await db.dockAppointment.deleteMany();
   await db.draft.deleteMany();
   await db.message.deleteMany();
   await db.dockReceipt.deleteMany();
@@ -349,7 +351,7 @@ async function main() {
   // Today's expected truck for the dock demo. Quantities arrive later with the driver's photo
   // of the delivery note, through the driver link created with it.
   const toys = clientRows.find((c) => c.code === "C001")!;
-  await db.inbound.create({
+  const expectedToys = await db.inbound.create({
     data: {
       date: today,
       clientId: toys.id,
@@ -361,12 +363,108 @@ async function main() {
     },
   });
 
+  // A second truck expected today, at the food warehouse.
+  const drinks = clientRows.find((c) => c.code === "C004")!;
+  const expectedDrinks = await db.inbound.create({
+    data: {
+      date: today,
+      clientId: drinks.id,
+      warehouseId: warehouseOfClient.get(drinks.id),
+      clientDocRef: "ALB-61877",
+      supplier: "Bebidas Montgó, S.A. – Planta de Pedreguer",
+      carrierId: carrierRows[4].id,
+      plate: carrierRows[4].plate,
+      expectedPallets: 18,
+      status: "EXPECTED",
+    },
+  });
+
+  await seedDock({ warehouseRows, morning, expectedToys, expectedDrinks, carrierRows });
   await seedInbox(clientRows);
 
   const counts = await Promise.all([
     db.client.count(), db.consignee.count(), db.item.count(), db.inbound.count(), db.outbound.count(), db.stock.count(), db.message.count(),
   ]);
   console.log(`Seeded: ${counts[0]} clients, ${counts[1]} consignees, ${counts[2]} items, ${counts[3]} inbounds, ${counts[4]} outbounds, ${counts[5]} stock rows, ${counts[6]} messages`);
+}
+
+// Today's and tomorrow's dock plan. Some trucks are left without a slot on purpose,
+// so the clerk has something to schedule in the demo.
+async function seedDock({
+  warehouseRows,
+  morning,
+  expectedToys,
+  expectedDrinks,
+  carrierRows,
+}: {
+  warehouseRows: { id: string; code: string }[];
+  morning: { id: string; warehouseId: string | null };
+  expectedToys: { id: string; warehouseId: string | null };
+  expectedDrinks: { id: string; warehouseId: string | null; expectedPallets: number | null };
+  carrierRows: { id: string; plate: string | null }[];
+}) {
+  const MIN = 60 * 1000;
+  const at = (dayOffset: number, h: number, m = 0) => new Date(today.getTime() + dayOffset * DAY + (h * 60 + m) * MIN);
+  const busy = new Map<string, Busy[]>(warehouseRows.map((w) => [w.id, []]));
+  const doors = (warehouseId: string, kind: "in" | "out") =>
+    makeLayout(warehouses[warehouseRows.findIndex((w) => w.id === warehouseId)].dims).docks.filter((d) => d.kind === kind).map((d) => d.n);
+
+  async function book(
+    warehouseId: string,
+    kind: "in" | "out",
+    link: { inboundId: string } | { outboundId: string },
+    from: Date,
+    minutes: number,
+    extra: { status?: "BOOKED" | "DONE"; carrier?: { id: string; plate: string | null }; dock?: number } = {},
+  ) {
+    const dayStart = new Date(from);
+    dayStart.setHours(0, 0, 0, 0);
+    const slot = firstFree(busy.get(warehouseId)!, extra.dock ? [extra.dock] : doors(warehouseId, kind), dayStart.getTime(), from.getTime(), minutes);
+    if (!slot) throw new Error("Seed dock plan does not fit");
+    busy.get(warehouseId)!.push(slot);
+    await db.dockAppointment.create({
+      data: {
+        warehouseId,
+        dock: slot.dock,
+        startsAt: new Date(slot.start),
+        endsAt: new Date(slot.end),
+        ...link,
+        status: extra.status ?? "BOOKED",
+        arrivedAt: extra.status === "DONE" ? new Date(slot.start + 4 * MIN) : null,
+        carrierId: extra.carrier?.id,
+        plate: extra.carrier?.plate,
+      },
+    });
+  }
+
+  // Done this morning.
+  await book(morning.warehouseId!, "in", { inboundId: morning.id }, at(0, 7, 30), slotMinutes("in", 5), { status: "DONE", carrier: carrierRows[1], dock: 2 });
+  const shippedToday = await db.outbound.findMany({ where: { status: "SHIPPED", date: { gte: today, lt: at(1, 0) } }, include: { lines: true } });
+  for (const o of shippedToday) {
+    const pallets = o.lines.reduce((sum, l) => sum + l.pallets, 0);
+    await book(o.warehouseId!, "out", { outboundId: o.id }, at(0, 6, 30), slotMinutes("out", pallets), { status: "DONE" });
+  }
+
+  // Still to come today.
+  // Never in the past, so the demo does not open with a late truck whatever time the data is reset.
+  const halfHour = 30 * MIN;
+  const soon = (h: number) => new Date(Math.min(at(0, 19).getTime(), Math.max(at(0, h).getTime(), Math.ceil((Date.now() + halfHour) / halfHour) * halfHour)));
+  await book(expectedToys.warehouseId!, "in", { inboundId: expectedToys.id }, soon(10), slotMinutes("in", null), { carrier: carrierRows[0], dock: 1 });
+  await book(expectedDrinks.warehouseId!, "in", { inboundId: expectedDrinks.id }, new Date(soon(12).getTime() + halfHour), slotMinutes("in", expectedDrinks.expectedPallets), { carrier: carrierRows[4] });
+  // The first prepared outbound is booked; the second still needs a door.
+  const preparedToday = await db.outbound.findMany({ where: { status: "PREPARED" }, include: { lines: true }, orderBy: { deadline: "asc" }, take: 1 });
+  for (const o of preparedToday) {
+    const pallets = o.lines.reduce((sum, l) => sum + l.pallets, 0);
+    await book(o.warehouseId!, "out", { outboundId: o.id }, new Date(o.deadline!.getTime() - 3 * 60 * MIN), slotMinutes("out", pallets));
+  }
+
+  // Tomorrow: two pick-ups already booked, the rest waits for the clerk.
+  for (const sku of ["BOTA-INV", "TURRON-DUR"]) {
+    const o = await db.outbound.findFirstOrThrow({ where: { status: "REQUESTED", lines: { some: { item: { sku } } } }, include: { lines: true, client: true } });
+    const warehouseId = warehouseRows[warehouses.findIndex((w) => w.clients.includes(o.client.code))].id;
+    const pallets = o.lines.reduce((sum, l) => sum + l.pallets, 0);
+    await book(warehouseId, "out", { outboundId: o.id }, new Date(o.deadline!.getTime() - 3 * 60 * MIN), slotMinutes("out", pallets));
+  }
 }
 
 async function seedInbox(clientRows: { id: string; code: string; name: string; email: string | null }[]) {

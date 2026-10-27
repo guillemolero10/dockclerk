@@ -18,3 +18,13 @@ export function madridDayRange(date = new Date()) {
   const start = new Date(new Date(`${ymd}T00:00:00Z`).getTime() - hours * 60 * 60 * 1000);
   return { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000) };
 }
+
+/** "2026-10-27": the Madrid calendar day of an instant. */
+export const madridYmd = (date = new Date()) => date.toLocaleDateString("en-CA", { timeZone: "Europe/Madrid" });
+
+/** Range of a Madrid calendar day given as "2026-10-27". */
+export const madridDay = (ymd: string) => madridDayRange(new Date(`${ymd}T12:00:00Z`));
+
+/** "09:30" in Madrid. */
+export const madridHm = (date: Date) =>
+  date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "Europe/Madrid" });

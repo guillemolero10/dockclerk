@@ -56,6 +56,8 @@ export type WarehouseSnapshot = {
   orders: SnapshotOrder[];
   prepared: SnapshotPrepared[];
   truck: { number: number; client: string; plate: string | null; status: string } | null;
+  /** Dock doors with a truck at them right now. */
+  busyDocks: number[];
 };
 
 export async function getWarehouseSnapshot(code?: string): Promise<WarehouseSnapshot | null> {
@@ -65,7 +67,7 @@ export async function getWarehouseSnapshot(code?: string): Promise<WarehouseSnap
   if (!warehouses.length) return null;
   const current = warehouses.find((w) => w.code === code) ?? warehouses[0];
 
-  const [clients, items, stock, open, prepared, truck] = await Promise.all([
+  const [clients, items, stock, open, prepared, truck, atDock] = await Promise.all([
     db.client.findMany({ orderBy: { code: "asc" }, select: { id: true, code: true, name: true } }),
     db.item.findMany({ orderBy: { sku: "asc" }, select: { id: true, sku: true, description: true, clientId: true, unit: true } }),
     db.stock.findMany({ include: { inbound: { select: { date: true } } } }),
@@ -83,6 +85,7 @@ export async function getWarehouseSnapshot(code?: string): Promise<WarehouseSnap
       where: { status: { in: ["EXPECTED", "RECEIVING"] }, warehouseId: current.id, date: { gte: today.start, lt: today.end } },
       include: { client: true },
     }),
+    db.dockAppointment.findMany({ where: { warehouseId: current.id, status: "ARRIVED" }, select: { dock: true } }),
   ]);
 
   const clientIndex = new Map(clients.map((c, i) => [c.id, i]));
@@ -152,5 +155,6 @@ export async function getWarehouseSnapshot(code?: string): Promise<WarehouseSnap
       lane: i + 1,
     })),
     truck: truck ? { number: truck.number, client: truck.client.name, plate: truck.plate, status: truck.status } : null,
+    busyDocks: atDock.map((a) => a.dock),
   };
 }

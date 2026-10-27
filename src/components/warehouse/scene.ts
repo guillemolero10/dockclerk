@@ -52,6 +52,13 @@ export class WarehouseScene {
   private selectBox: THREE.LineSegments;
   private selectPin: THREE.Group;
   private markers = new THREE.Group();
+  private trucks = new THREE.Group();
+  private truckGeometry = this.track(new THREE.BoxGeometry(2.5, 3, 4.4));
+  private truckEdges = this.track(new THREE.EdgesGeometry(this.truckGeometry));
+  private truckMaterial = this.track(new THREE.MeshLambertMaterial({ color: "#f4f2ec" }));
+  private chassisGeometry = this.track(new THREE.BoxGeometry(2.1, 0.5, 4.4));
+  private chassisMaterial = this.track(new THREE.MeshLambertMaterial({ color: INK }));
+  private inkLine = this.track(new THREE.LineBasicMaterial({ color: INK }));
 
   private pallets: (ScenePallet & { pos: THREE.Vector3; h: number })[] = [];
   private byId = new Map<string, number>();
@@ -165,7 +172,7 @@ export class WarehouseScene {
     cone.castShadow = true;
     this.selectPin.add(cone);
     this.selectPin.visible = false;
-    this.scene.add(this.selectPin, this.markers);
+    this.scene.add(this.selectPin, this.markers, this.trucks);
 
     const el = this.renderer.domElement;
     el.addEventListener("pointermove", this.handleMove);
@@ -234,6 +241,24 @@ export class WarehouseScene {
     // Frame the pallets and the walk to them from the dispatch lane.
     const points = ids.map((id) => this.pallets[this.byId.get(id) ?? -1]?.pos).filter(Boolean);
     if (points.length) this.frame([...points, ...route.map(([x, z]) => new THREE.Vector3(x, 0, z))]);
+  }
+
+  /** Trucks backed up to these dock doors. */
+  setBusyDocks(docks: number[]) {
+    for (const child of [...this.trucks.children]) this.trucks.remove(child);
+    for (const n of docks) {
+      const dock = this.layout.docks.find((d) => d.n === n);
+      if (!dock) continue;
+      // Only the rear of the trailer shows, backed against the leveller.
+      const trailer = new THREE.Mesh(this.truckGeometry, this.truckMaterial);
+      trailer.position.set(dock.x, 2.75, DOCK_Z + 0.4 + 2.2);
+      trailer.castShadow = trailer.receiveShadow = true;
+      const edges = new THREE.LineSegments(this.truckEdges, this.inkLine);
+      edges.position.copy(trailer.position);
+      const chassis = new THREE.Mesh(this.chassisGeometry, this.chassisMaterial);
+      chassis.position.set(dock.x, 0.75, DOCK_Z + 0.4 + 2.2);
+      this.trucks.add(trailer, edges, chassis);
+    }
   }
 
   setSelected(id: string | null) {

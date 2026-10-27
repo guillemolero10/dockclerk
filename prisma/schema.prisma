@@ -16,21 +16,22 @@ datasource db {
 
 /// A building of the 3PL. The rack layout is worked out from these measurements.
 model Warehouse {
-  id         String     @id @default(cuid())
-  code       String     @unique
-  name       String
-  city       String
+  id           String            @id @default(cuid())
+  code         String            @unique
+  name         String
+  city         String
   /// Inside measurements in metres: dock wall to back wall, side to side, clear height.
-  length     Float
-  width      Float
-  height     Float
+  length       Float
+  width        Float
+  height       Float
   /// Set by the forklifts it uses (counterbalance, reach truck, VNA).
-  aisleWidth Float
-  docks      Int
-  stock      Stock[]
-  inbounds   Inbound[]
-  outbounds  Outbound[]
-  createdAt  DateTime   @default(now())
+  aisleWidth   Float
+  docks        Int
+  stock        Stock[]
+  inbounds     Inbound[]
+  outbounds    Outbound[]
+  appointments DockAppointment[]
+  createdAt    DateTime          @default(now())
 }
 
 enum ClientType {
@@ -65,11 +66,12 @@ model Consignee {
 }
 
 model Carrier {
-  id        String     @id @default(cuid())
-  name      String
-  plate     String?
-  inbounds  Inbound[]
-  outbounds Outbound[]
+  id           String            @id @default(cuid())
+  name         String
+  plate        String?
+  inbounds     Inbound[]
+  outbounds    Outbound[]
+  appointments DockAppointment[]
 }
 
 enum Unit {
@@ -102,16 +104,16 @@ model Stock {
   warehouseId String
   warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
   clientId    String
-  itemId    String
-  lot       String?
-  expiresAt DateTime?
-  pallets   Int
-  units     Int
-  location  String
-  inboundId String?
-  client    Client   @relation(fields: [clientId], references: [id])
-  item      Item     @relation(fields: [itemId], references: [id])
-  inbound   Inbound? @relation(fields: [inboundId], references: [id])
+  itemId      String
+  lot         String?
+  expiresAt   DateTime?
+  pallets     Int
+  units       Int
+  location    String
+  inboundId   String?
+  client      Client    @relation(fields: [clientId], references: [id])
+  item        Item      @relation(fields: [itemId], references: [id])
+  inbound     Inbound?  @relation(fields: [inboundId], references: [id])
 }
 
 // ---------- Operations ----------
@@ -124,32 +126,33 @@ enum InboundStatus {
 }
 
 model Inbound {
-  id                String         @id @default(cuid())
-  number            Int            @unique @default(autoincrement())
-  date              DateTime
-  clientId          String
+  id              String           @id @default(cuid())
+  number          Int              @unique @default(autoincrement())
+  date            DateTime
+  clientId        String
   /// Where it is unloaded.
-  warehouseId       String?
-  warehouse         Warehouse?     @relation(fields: [warehouseId], references: [id])
+  warehouseId     String?
+  warehouse       Warehouse?       @relation(fields: [warehouseId], references: [id])
   /// The supplier's delivery note number.
-  clientDocRef      String?
-  supplier          String?
-  carrierId         String?
-  plate             String?
-  expectedPallets   Int?
-  expectedUnits     Int?
-  receivedPallets   Int?
-  receivedUnits     Int?
-  incident          String?
-  status            InboundStatus  @default(EXPECTED)
+  clientDocRef    String?
+  supplier        String?
+  carrierId       String?
+  plate           String?
+  expectedPallets Int?
+  expectedUnits   Int?
+  receivedPallets Int?
+  receivedUnits   Int?
+  incident        String?
+  status          InboundStatus    @default(EXPECTED)
   /// Secret token for the driver's link (no login, no app).
-  driverToken       String         @unique @default(cuid())
-  client            Client         @relation(fields: [clientId], references: [id])
-  carrier           Carrier?       @relation(fields: [carrierId], references: [id])
-  lines             InboundLine[]
-  stock             Stock[]
-  receipt           DockReceipt?
-  createdAt         DateTime       @default(now())
+  driverToken     String           @unique @default(cuid())
+  client          Client           @relation(fields: [clientId], references: [id])
+  carrier         Carrier?         @relation(fields: [carrierId], references: [id])
+  lines           InboundLine[]
+  stock           Stock[]
+  receipt         DockReceipt?
+  appointment     DockAppointment?
+  createdAt       DateTime         @default(now())
 }
 
 model InboundLine {
@@ -171,24 +174,25 @@ enum OutboundStatus {
 }
 
 model Outbound {
-  id           String         @id @default(cuid())
-  number       Int            @unique @default(autoincrement())
+  id           String           @id @default(cuid())
+  number       Int              @unique @default(autoincrement())
   date         DateTime
   deadline     DateTime?
   clientId     String
   /// Set once it is picked; until then the warehouse that can fill it is worked out live.
   warehouseId  String?
-  warehouse    Warehouse?     @relation(fields: [warehouseId], references: [id])
+  warehouse    Warehouse?       @relation(fields: [warehouseId], references: [id])
   clientDocRef String?
   consigneeId  String?
   carrierId    String?
   notes        String?
-  status       OutboundStatus @default(REQUESTED)
-  client       Client         @relation(fields: [clientId], references: [id])
-  consignee    Consignee?     @relation(fields: [consigneeId], references: [id])
-  carrier      Carrier?       @relation(fields: [carrierId], references: [id])
+  status       OutboundStatus   @default(REQUESTED)
+  client       Client           @relation(fields: [clientId], references: [id])
+  consignee    Consignee?       @relation(fields: [consigneeId], references: [id])
+  carrier      Carrier?         @relation(fields: [carrierId], references: [id])
   lines        OutboundLine[]
-  createdAt    DateTime       @default(now())
+  appointment  DockAppointment?
+  createdAt    DateTime         @default(now())
 }
 
 model OutboundLine {
@@ -201,22 +205,54 @@ model OutboundLine {
   item       Item     @relation(fields: [itemId], references: [id])
 }
 
+enum AppointmentStatus {
+  BOOKED
+  ARRIVED
+  DONE
+  NO_SHOW
+}
+
+/// A truck's slot at a dock door. Two slots never overlap on the same door.
+model DockAppointment {
+  id          String            @id @default(cuid())
+  warehouseId String
+  dock        Int
+  startsAt    DateTime
+  endsAt      DateTime
+  /// Exactly one of them: a truck coming to unload, or one coming to load.
+  inboundId   String?           @unique
+  outboundId  String?           @unique
+  carrierId   String?
+  plate       String?
+  status      AppointmentStatus @default(BOOKED)
+  arrivedAt   DateTime?
+  /// "office" or "clerk": who booked it.
+  bookedBy    String            @default("office")
+  warehouse   Warehouse         @relation(fields: [warehouseId], references: [id])
+  inbound     Inbound?          @relation(fields: [inboundId], references: [id], onDelete: Cascade)
+  outbound    Outbound?         @relation(fields: [outboundId], references: [id], onDelete: Cascade)
+  carrier     Carrier?          @relation(fields: [carrierId], references: [id])
+  createdAt   DateTime          @default(now())
+
+  @@index([warehouseId, startsAt])
+}
+
 /// Proof of delivery at the dock: photos, AI count, damages and driver signature.
 model DockReceipt {
-  id              String   @id @default(cuid())
-  inboundId       String   @unique
-  noteImageUrl    String?
-  palletImageUrl  String?
+  id             String    @id @default(cuid())
+  inboundId      String    @unique
+  noteImageUrl   String?
+  palletImageUrl String?
   /// What the delivery note says vs. what SAM 3.1 counted.
-  noteUnits       Int?
-  countedUnits    Int?
+  noteUnits      Int?
+  countedUnits   Int?
   /// [{ box: number, kind: "crushed", bbox: [...] }]
-  damages         Json?
-  signatureUrl    String?
-  pdfUrl          String?
-  signedAt        DateTime?
-  inbound         Inbound  @relation(fields: [inboundId], references: [id], onDelete: Cascade)
-  createdAt       DateTime @default(now())
+  damages        Json?
+  signatureUrl   String?
+  pdfUrl         String?
+  signedAt       DateTime?
+  inbound        Inbound   @relation(fields: [inboundId], references: [id], onDelete: Cascade)
+  createdAt      DateTime  @default(now())
 }
 
 // ---------- The AI clerk ----------

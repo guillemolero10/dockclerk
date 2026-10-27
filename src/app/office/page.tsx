@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowRight, Boxes, Inbox, Mail, MessageCircle, Package, Sparkles, Truck, UserRound } from "lucide-react";
 import type { Channel } from "@prisma/client";
 import { db } from "@/lib/db";
-import { fmtNumber, madridDayRange } from "@/lib/format";
+import { fmtNumber, madridDayRange, madridHm } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +18,11 @@ function timeAgo(date: Date) {
   return `${Math.round(minutes / 60)} h ago`;
 }
 
+/** Booked truck more than 15 minutes past its slot. */
+function isLate(slot: { status: string; startsAt: Date }) {
+  return slot.status === "BOOKED" && Date.now() > slot.startsAt.getTime() + 15 * 60000;
+}
+
 function dayLabel(date: Date) {
   return date.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "Europe/Madrid" });
 }
@@ -28,9 +33,10 @@ export default async function OfficeToday() {
   const [newMessages, latestMessages, trucksToday, nextShipments, stockTotals, stockByClient, clients] = await Promise.all([
     db.message.count({ where: { status: "NEW" } }),
     db.message.findMany({ where: { status: "NEW" }, orderBy: { receivedAt: "desc" }, take: 6, include: { client: true } }),
-    db.inbound.findMany({
-      where: { date: { gte: startOfToday, lt: endOfToday }, status: { in: ["EXPECTED", "RECEIVING"] } },
-      include: { client: true, carrier: true },
+    db.dockAppointment.findMany({
+      where: { startsAt: { gte: startOfToday, lt: endOfToday }, status: { not: "NO_SHOW" } },
+      orderBy: { startsAt: "asc" },
+      include: { warehouse: true, inbound: { include: { client: true } }, outbound: { include: { client: true } } },
     }),
     db.outbound.findMany({
       where: { status: "REQUESTED" },
@@ -43,6 +49,7 @@ export default async function OfficeToday() {
     db.client.findMany({ select: { id: true, name: true } }),
   ]);
 
+  const upcoming = trucksToday.filter((t) => t.status === "BOOKED" || t.status === "ARRIVED");
   const totalPallets = stockTotals._sum.pallets ?? 0;
   const maxClientPallets = Math.max(...stockByClient.map((s) => s._sum.pallets ?? 0), 1);
   const clientName = (id: string) => clients.find((c) => c.id === id)?.name ?? "";
@@ -65,7 +72,7 @@ export default async function OfficeToday() {
 
       <section className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Kpi icon={Inbox} label="Messages to handle" value={newMessages} note="email · WhatsApp · portal" accent />
-        <Kpi icon={Truck} label="Trucks expected today" value={trucksToday.length} note="dock receiving" />
+        <Kpi icon={Truck} label="Trucks at the docks today" value={trucksToday.length} note={`${trucksToday.filter((t) => t.status === "DONE").length} done · ${trucksToday.filter((t) => t.status === "ARRIVED").length} at the dock`} />
         <Kpi icon={Package} label="Shipments to prepare" value={nextShipments.length} note="next 48 hours" />
         <Kpi icon={Boxes} label="Pallets in storage" value={totalPallets} note={`${stockByClient.length} customers`} />
       </section>
@@ -98,21 +105,35 @@ export default async function OfficeToday() {
 
         <div className="space-y-4">
           <div className="dock-card p-5">
-            <h2 className="cond text-xs text-dock-ink/50">Dock today</h2>
-            {trucksToday.length === 0 ? (
-              <p className="mt-3 text-sm text-dock-ink/50">No trucks expected.</p>
+            <div className="flex items-center justify-between">
+              <h2 className="cond text-xs text-dock-ink/50">Dock today</h2>
+              <Link href="/office/dock" className="cond flex items-center gap-1 text-[11px] text-dock-ink/50 hover:text-dock-ink">
+                Open dock <ArrowRight size={12} />
+              </Link>
+            </div>
+            {upcoming.length === 0 ? (
+              <p className="mt-3 text-sm text-dock-ink/50">No more trucks today.</p>
             ) : (
               <ul className="mt-3 space-y-2">
-                {trucksToday.map((t) => (
-                  <li key={t.id} className="flex items-center gap-3 border border-dock-line bg-white p-3">
-                    <Truck size={18} className="text-dock-red" />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm">{t.client.name}</p>
-                      <p className="mono text-[11px] text-dock-ink/50">{t.plate} · {t.carrier?.name}</p>
-                    </div>
-                    <span className="cond bg-dock-yellow px-2 py-0.5 text-[11px] text-dock-ink">Expected</span>
-                  </li>
-                ))}
+                {upcoming.slice(0, 4).map((t) => {
+                  const late = isLate(t);
+                  return (
+                    <li key={t.id} className="flex items-center gap-3 border border-dock-line bg-white p-3">
+                      <span className="mono w-11 text-sm font-semibold">{madridHm(t.startsAt)}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm">{(t.inbound ?? t.outbound)!.client.name}</p>
+                        <p className="mono text-[11px] text-dock-ink/50">
+                          {t.inboundId ? "Unloading" : "Loading"} · {t.warehouse.code} dock {t.dock}
+                        </p>
+                      </div>
+                      <span
+                        className={`cond px-2 py-0.5 text-[11px] ${t.status === "ARRIVED" ? "bg-dock-ink text-dock-yellow" : late ? "bg-dock-red text-white" : "bg-dock-yellow text-dock-ink"}`}
+                      >
+                        {t.status === "ARRIVED" ? "At dock" : late ? "Late" : "Booked"}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
