@@ -8,6 +8,8 @@ import { db } from "@/lib/db";
 import { resetInbox } from "./actions";
 
 export const dynamic = "force-dynamic";
+// The clerk's server action runs under this page: room for the model (25 s budget in agent/muse.ts) plus the rules fallback.
+export const maxDuration = 60;
 
 // Orders first: they are the ones that create work in the warehouse.
 const ORDER: Record<DraftKind, number> = { CREATE_OUTBOUND: 0, CREATE_INBOUND: 1, REPLY_ONLY: 2, NEEDS_HUMAN: 3 };

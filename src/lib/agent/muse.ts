@@ -15,33 +15,44 @@ const SYSTEM = `You are DockClerk, the back-office clerk of "Almacenes del Vinal
 You read ONE message from a customer (email, WhatsApp or portal, usually in Spanish) and decide what the office should do.
 You can only read the warehouse software through tools. You never write to it: a person approves your draft.
 
-Call one tool at a time by answering with JSON {"tool": "<name>", "args": {...}}:
+Ask for tools by answering with JSON {"calls": [{"tool": "<name>", "args": {...}}, ...]}.
+Ask for every lookup you can already do in the same turn (for example find_item for each product together with find_consignee and parse_date). check_stock needs the SKU, so it comes in the next turn.
 - find_item {"text": "product as the customer wrote it"} -> the best matching SKU of this customer
 - check_stock {"sku": "PELUCHE-30"} -> pallets and units free to promise right now
 - find_consignee {"text": "destination as written"} -> matching delivery points (there may be several)
-- last_shipment {"text": "destination as written"} -> most recent outbound of this customer to it
+- last_shipment {"text": "destination as written"} -> most recent outbound of this customer to it; only to answer "where is my order?"
 - inbounds_this_month {} -> this customer's deliveries received this month
 - parse_date {"text": "delivery phrase, e.g. 'mañana antes de las 10'"} -> exact date and time
 
 When you know the answer, reply with JSON {"final": {...}} using exactly one of:
 - {"kind": "CREATE_OUTBOUND", "lines": [{"sku": "...", "pallets": 12}], "destination": "destination as written", "when": "delivery phrase as written, or null"}
-- {"kind": "REPLY_ONLY", "answer": "reply in Spanish for the customer: starts with 'Hola <first name>,', gives the real numbers from the tools, ends with 'Un saludo.'"}
+- {"kind": "REPLY_ONLY", "answer": "one or two plain Spanish sentences with the real numbers from the tools (pallets and units, not the product description). No greeting and no sign-off: the office adds them."}
 - {"kind": "NEEDS_HUMAN", "reason": "short reason in English"}
 
 Rules:
-- Billing, changes to existing orders, the customer's own truck collecting goods, complaints and anything unclear -> NEEDS_HUMAN.
+- Billing, changes to existing orders, the customer's own truck collecting goods, complaints, and any message where you cannot tell what the customer wants -> NEEDS_HUMAN.
+- An order that is clear about the products and quantities is always CREATE_OUTBOUND, even if find_consignee returns several delivery points of the same company (for example two hubs): put the destination as written and the office picks the right hub in a yellow field. Do not send it to a person for that.
 - Never invent SKUs, quantities, dates or stock: only use what the tools return.
+- If a lookup comes back empty (for example last_shipment finds nothing), do not tell the customer there is nothing: NEEDS_HUMAN, the office checks it.
+- Write "palés" (not "palets").
 - If an order asks for more than is in stock, still use CREATE_OUTBOUND with the quantity asked; the office decides.
 - Answer with JSON only, no prose.`;
 
 type ToolCall = { tool: string; args?: Record<string, unknown> };
+type Turn = Partial<ToolCall> & { calls?: ToolCall[]; final?: Final };
 type Final =
   | { kind: "CREATE_OUTBOUND"; lines: { sku: string; pallets: number }[]; destination: string; when: string | null }
   | { kind: "REPLY_ONLY"; answer: string }
   | { kind: "NEEDS_HUMAN"; reason: string };
 
-const MAX_TURNS = 8;
+const MAX_TURNS = 6;
+const MAX_CALLS_PER_TURN = 6;
+// Whole budget for one message (model + database). Past it the rules answer instead, so the demo never hangs.
+const DEADLINE_MS = Number(process.env.AGENT_TIMEOUT_MS) || 25_000;
 const short = (value: unknown) => JSON.stringify(value).slice(0, 900);
+
+/** Numbers written in a text; "1.360" (Spanish thousands) counts as 1360. */
+const figures = (text: string) => (text.replace(/(\d)\.(?=\d{3}\b)/g, "$1").match(/\d+(?:,\d+)?/g) ?? []).map((n) => String(Number(n.replace(",", "."))));
 
 export async function draftWithMuse(message: Message & { client: Client }): Promise<DraftSeed[]> {
   const p = providers.agent();
@@ -89,6 +100,7 @@ export async function draftWithMuse(message: Message & { client: Client }): Prom
     },
   };
 
+  const todayText = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Madrid" });
   const conversation: ChatMessage[] = [
     { role: "system", content: SYSTEM },
     {
@@ -96,7 +108,7 @@ export async function draftWithMuse(message: Message & { client: Client }): Prom
       content: [
         `Customer: ${client.name} (${client.code}). Contact: ${message.fromName}. Channel: ${message.channel}.`,
         message.subject ? `Subject: ${message.subject}` : "",
-        `Today: ${new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Madrid" })}.`,
+        `Today: ${todayText}.`,
         `Message:\n${message.body ?? ""}`,
       ]
         .filter(Boolean)
@@ -104,28 +116,58 @@ export async function draftWithMuse(message: Message & { client: Client }): Prom
     },
   ];
 
+  const started = Date.now();
+  const used = { calls: 0, tokens: 0, costUsd: 0 };
+  const evidence: string[] = []; // everything the tools returned: the only source of figures for a text reply
+  const finish = (seed: DraftSeed) => {
+    seed.steps.push({ kind: "tool", text: `${p.name} · ${used.calls} calls · ${used.tokens.toLocaleString("en-US")} tokens · ≈ $${used.costUsd.toFixed(3)} · ${((Date.now() - started) / 1000).toFixed(1)}s` });
+    return [seed];
+  };
+
   for (let turn = 0; turn < MAX_TURNS; turn++) {
-    const answer = await chat(p, conversation, { json: true, maxTokens: 700 });
-    const parsed = parseJson<ToolCall & { final?: Final }>(answer.content);
+    const left = DEADLINE_MS - (Date.now() - started);
+    if (left < 2_000) throw new Error(`${p.name} took longer than ${DEADLINE_MS / 1000}s`);
+    const answer = await chat(p, conversation, { json: true, maxTokens: 700, timeoutMs: left });
+    used.calls++;
+    used.tokens += answer.usage.prompt + answer.usage.completion;
+    used.costUsd += answer.usage.costUsd;
+    const parsed = parseJson<Turn>(answer.content);
     conversation.push({ role: "assistant", content: answer.content ?? "" });
 
-    if (parsed.final) return [await settle(message, client, parsed.final, steps)];
-    const run = tools[parsed.tool];
-    const result = run ? await run(parsed.args ?? {}) : { error: `unknown tool ${parsed.tool}` };
-    conversation.push({ role: "user", content: `Result of ${parsed.tool}: ${short(result)}` });
+    if (parsed.final) return finish(await settle(message, client, parsed.final, steps, [...evidence, message.body ?? "", todayText]));
+    const requested = (parsed.calls ?? (parsed.tool ? [{ tool: parsed.tool, args: parsed.args }] : [])).slice(0, MAX_CALLS_PER_TURN);
+    if (!requested.length) throw new Error(`${p.name} answered with neither a tool nor a decision`);
+    const results: string[] = [];
+    for (const call of requested) {
+      const run = tools[call.tool];
+      const result = run ? await run(call.args ?? {}) : { error: `unknown tool ${call.tool}` };
+      evidence.push(JSON.stringify(result));
+      results.push(`Result of ${call.tool}: ${short(result)}`);
+    }
+    conversation.push({ role: "user", content: results.join("\n") });
   }
-  return [human("the model did not reach a decision", steps)];
+  // No decision after all the turns: the rules take it from here (runClerk catches this).
+  throw new Error(`${p.name} did not reach a decision in ${MAX_TURNS} turns`);
 }
 
 /** Rebuilds the model's decision with code: only real SKUs, live stock, every ambiguity a doubt. */
-async function settle(message: Message & { client: Client }, client: Client, final: Final, steps: Step[]): Promise<DraftSeed> {
+async function settle(message: Message & { client: Client }, client: Client, final: Final, steps: Step[], evidence: string[]): Promise<DraftSeed> {
   if (final.kind === "NEEDS_HUMAN") return human(final.reason || "the model asked for a person", steps);
 
   if (final.kind === "REPLY_ONLY") {
-    const reply = final.answer?.trim() || "";
-    if (!reply) return human("empty answer from the model", steps);
+    const answer = (final.answer ?? "")
+      .replace(/\s+/g, " ")
+      .replace(/^Hola[^,]*,\s*/, "")
+      .replace(/\s*Un saludo\.?$/, "")
+      .replace(/^[A-ZÁÉÍÓÚ](?=[a-záéíóúñ])/, (c) => c.toLowerCase()) // continues the greeting: "Hola Marta, te quedan..."
+      .trim();
+    if (!answer) return human("empty answer from the model", steps);
+    // Same guard as the analyst: every figure in the text must come from the software, or the rules answer instead.
+    const known = new Set(figures(evidence.join(" ")));
+    const invented = figures(answer).filter((n) => !known.has(n));
+    if (invented.length) throw new Error(`reply has figures that no tool returned: ${invented.join(", ")}`);
     steps.push({ kind: "ok", text: "reply drafted with live data" });
-    return { kind: "REPLY_ONLY", payload: { answer: reply.replace(/^Hola[^,]*,\s*/, "").slice(0, 200) }, doubts: [], steps, reply: reply.startsWith("Hola") ? reply : `${hello(message.fromName)} ${reply}` };
+    return { kind: "REPLY_ONLY", payload: { answer: answer.slice(0, 200) }, doubts: [], steps, reply: `${hello(message.fromName)} ${answer} Un saludo.` };
   }
 
   const lines: OutboundLineDraft[] = [];
