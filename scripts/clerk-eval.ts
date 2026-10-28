@@ -177,6 +177,8 @@ async function main() {
     const cost = spend.costUsd - before.costUsd;
     console.log(`Muse Spark Open: ${score.muse.ok}/${n} correct (${score.muse.errors} errors) · ${Math.round(score.muse.ms / n)} ms per message · $${cost.toFixed(4)} total, $${(cost / n).toFixed(4)} per message`);
   }
+  // Exit 1 when any case fails (the model's errors count as failures too, they are not "correct").
+  if (score.rules.ok < n || (!onlyRules && score.muse.ok < n)) process.exitCode = 1;
 }
 
 main()

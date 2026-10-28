@@ -37,7 +37,7 @@ step() { # step "name" command...
   NAMES+=("$name"); SECS+=("$((SECONDS - t0))")
   if [ $code -eq 0 ]; then RESULTS+=("PASS"); else RESULTS+=("FAIL($code)"); FAILS=$((FAILS + 1)); fi
 }
-# clerk-eval always exits 0, so read its score lines ("Rules: 17/17 correct", "Muse Spark Open: 17/17 correct") instead.
+# clerk-eval now exits 1 on a failing case, but keep reading its score lines ("Rules: 17/17 correct", "Muse Spark Open: 17/17 correct") instead.
 eval_scores() {
   local out; out=$(mktemp)
   "$@" 2>&1 | tee "$out"
