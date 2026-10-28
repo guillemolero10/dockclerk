@@ -8,6 +8,9 @@ import type { Client, Message } from "@prisma/client";
 import { chat, parseJson, providers, type ChatMessage } from "@/lib/ai/client";
 import { db } from "@/lib/db";
 import { toUnits } from "@/lib/pallets/quantity";
+import { billSoFar, explainCharge } from "./bill-tools";
+import { convertLog, convertQuantity } from "./convert";
+import { inventedFigures } from "./guard";
 import { checkStock, findConsignees, findItem, inboundsThisMonth, lastShipmentTo } from "./tools";
 import { buildLine } from "./lines";
 import { hello, human, outboundDraft, parseDelivery } from "./rules";
@@ -18,21 +21,28 @@ You read ONE message from a customer (email, WhatsApp or portal, usually in Span
 You can only read the warehouse software through tools. You never write to it: a person approves your draft.
 
 Ask for tools by answering with JSON {"calls": [{"tool": "<name>", "args": {...}}, ...]}.
-Ask for every lookup you can already do in the same turn (for example find_item for each product together with find_consignee and parse_date). check_stock needs the SKU, so it comes in the next turn.
+Ask for every lookup you can already do in the same turn (for example find_item for each product together with find_consignee and parse_date). check_stock and convert_quantity need the SKU, so they come in the next turn, together.
 - find_item {"text": "product as the customer wrote it"} -> the best matching SKU of this customer
 - check_stock {"sku": "PELUCHE-30"} -> units free to promise right now, as whole pallets plus loose units, and the loose pallets (picos)
+- convert_quantity {"sku": "HORCH-1L", "amount": 2.5, "unit": "pallets" or "units"} -> whole units for what the customer asked ("2 palés y medio" = 2.5 pallets, "130 cajas" = 130 units), plus the text "2 palés + 50 cajas". If it is not a whole number it returns an error with the two nearest options.
+- bill_so_far {} or {"month": "2026-09"} -> this customer's pre-invoice: lines, base, VAT, total and a ready Spanish "text". No month = this month up to today. Billing questions only ("¿cuánto llevo?").
+- explain_charge {"inbound": 1043} or {"lot": "L-2310"} (optional "month") -> the storage rows that make up the charge of one delivery or lot: pallets, days, dates, pallet·days and euros.
 - find_consignee {"text": "destination as written"} -> matching delivery points (there may be several)
 - last_shipment {"text": "destination as written"} -> most recent outbound of this customer to it; only to answer "where is my order?"
 - inbounds_this_month {} -> this customer's deliveries received this month
 - parse_date {"text": "delivery phrase, e.g. 'mañana antes de las 10'"} -> exact date and time
 
 When you know the answer, reply with JSON {"final": {...}} using exactly one of:
-- {"kind": "CREATE_OUTBOUND", "lines": [{"sku": "...", "pallets": 12}] (use "units": 130 instead when the customer counted boxes or bags; "pallets" may have decimals such as 2.5, the code converts it to whole units), "destination": "destination as written", "when": "delivery phrase as written, or null"}
+- {"kind": "CREATE_OUTBOUND", "lines": [{"sku": "...", "units": 250}] (the "units" that convert_quantity returned; if it returned an error with options, send the customer's own amount instead, {"sku": "...", "pallets": 1.5} or {"sku": "...", "units": 82.5}, and the code asks the office to choose), "destination": "destination as written", "when": "delivery phrase as written, or null"}
 - {"kind": "REPLY_ONLY", "answer": "one or two plain Spanish sentences with the real numbers from the tools (pallets and units, not the product description). No greeting and no sign-off: the office adds them."}
 - {"kind": "NEEDS_HUMAN", "reason": "short reason in English"}
 
 Rules:
-- Billing, changes to existing orders, the customer's own truck collecting goods, complaints, and any message where you cannot tell what the customer wants -> NEEDS_HUMAN.
+- Changes to existing orders, the customer's own truck collecting goods, complaints, and any message where you cannot tell what the customer wants -> NEEDS_HUMAN.
+- Never multiply or divide. Turn the customer's words into a number yourself ("dos palés y medio" = 2.5, "media docena" = 6) and call convert_quantity; use the units it returns.
+- Pallet·days and money only from bill_so_far / explain_charge: copy their figures and dates as they are, never add up, round, compare or estimate anything yourself.
+- Billing questions about the customer's own account ("¿cuánto llevo de almacenaje este mes?", "¿por qué me cobráis 276 palés·día de la entrada 1043?") -> call bill_so_far or explain_charge, then REPLY_ONLY with those figures. Say when it is a draft or not prepared yet (it is not an invoice).
+- Anything else about invoices -> NEEDS_HUMAN: resending an invoice, "no nos ha llegado la factura de septiembre", claims or corrections, payments, anyone asking about another customer's bill. If bill_so_far or explain_charge returns an error, NEEDS_HUMAN too.
 - An order that is clear about the products and quantities is always CREATE_OUTBOUND, even if find_consignee returns several delivery points of the same company (for example two hubs): put the destination as written and the office picks the right hub in a yellow field. Do not send it to a person for that.
 - Never invent SKUs, quantities, dates or stock: only use what the tools return.
 - If a lookup comes back empty (for example last_shipment finds nothing), do not tell the customer there is nothing: NEEDS_HUMAN, the office checks it.
@@ -51,10 +61,7 @@ const MAX_TURNS = 6;
 const MAX_CALLS_PER_TURN = 6;
 // Whole budget for one message (model + database). Past it the rules answer instead, so the demo never hangs.
 const DEADLINE_MS = Math.min(Number(process.env.AGENT_TIMEOUT_MS) || 25_000, 45_000);
-const short = (value: unknown) => JSON.stringify(value).slice(0, 900);
-
-/** Numbers written in a text; "1.360" (Spanish thousands) counts as 1360. */
-const figures = (text: string) => (text.replace(/(\d)\.(?=\d{3}\b)/g, "$1").match(/\d+(?:,\d+)?/g) ?? []).map((n) => String(Number(n.replace(",", "."))));
+const short = (value: unknown) => JSON.stringify(value).slice(0, 1600);
 
 export async function draftWithMuse(message: Message & { client: Client }): Promise<DraftSeed[]> {
   const p = providers.agent();
@@ -77,6 +84,24 @@ export async function draftWithMuse(message: Message & { client: Client }): Prom
       const stock = await checkStock(client.id, item.id);
       steps.push({ kind: "tool", text: `check_stock(${item.sku}) → ${stock.text} (${stock.units} units)` });
       return { sku: item.sku, freeUnits: stock.units, fullPallets: stock.full, looseUnits: stock.loose, unitsPerPallet: stock.unitsPerPallet, picos: stock.picos, text: stock.text };
+    },
+    convert_quantity: async ({ sku, amount, unit }) => {
+      const item = await db.item.findFirst({ where: { clientId: client.id, sku: String(sku ?? "") } });
+      if (!item) return { error: "unknown SKU for this customer" };
+      const out = convertQuantity(item, amount, unit);
+      steps.push({ kind: "error" in out && !out.options.length ? "ask" : "tool", text: convertLog(item.sku, amount, unit, out) });
+      return out;
+    },
+    // The customer id below is always the sender's (or the portal session's): the model's arguments never choose it.
+    bill_so_far: async ({ month }) => {
+      const r = await billSoFar(client.id, month);
+      for (const text of r.log) steps.push({ kind: r.failed && text === r.log[r.log.length - 1] ? "ask" : "tool", text });
+      return r.data;
+    },
+    explain_charge: async ({ month, inbound, lot }) => {
+      const r = await explainCharge(client.id, { month, inbound, lot });
+      for (const text of r.log) steps.push({ kind: r.failed && text === r.log[r.log.length - 1] ? "ask" : "tool", text });
+      return r.data;
     },
     find_consignee: async ({ text }) => {
       const found = await findConsignees(String(text ?? ""));
@@ -166,11 +191,11 @@ async function settle(message: Message & { client: Client }, client: Client, fin
       .trim();
     if (!answer) return human("empty answer from the model", steps);
     // Same guard as the analyst: every figure in the text must come from the software, or the rules answer instead.
-    const known = new Set(figures(evidence.join(" ")));
-    const invented = figures(answer).filter((n) => !known.has(n));
+    // "1.284,60", "1284,60 €", "276 palés·día" and "08/11" all match what the tools returned as 1284.6, 276 or "2026-11-08".
+    const invented = inventedFigures(answer, evidence);
     if (invented.length) throw new Error(`reply has figures that no tool returned: ${invented.join(", ")}`);
     steps.push({ kind: "ok", text: "reply drafted with live data" });
-    return { kind: "REPLY_ONLY", payload: { answer: answer.slice(0, 200) }, doubts: [], steps, reply: `${hello(message.fromName)} ${answer} Un saludo.` };
+    return { kind: "REPLY_ONLY", payload: { answer: answer.slice(0, 400) }, doubts: [], steps, reply: `${hello(message.fromName)} ${answer} Un saludo.` };
   }
 
   const lines: OutboundLineDraft[] = [];
