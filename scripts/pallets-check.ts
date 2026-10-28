@@ -116,6 +116,35 @@ const CASES: Case[] = [
     const plans = allocatePicks(stock, [o1, o2]);
     return same({ first: plans.get("O1")!.split, second: plans.get("O2")!.shortUnits }, { first: [{ stockId: "a", units: 30 }], second: 20 });
   } },
+  { name: "P8 recoger fila a fila en cualquier orden (como la PDA, recargando cada vez): siempre 250 y nada se pierde", check: () => {
+    // The 250 of horchata: three rows of 100 and a pico of 50 somewhere else. Every order of picking must end with exactly 250 on the order.
+    for (const seed of [0, 1, 2, 3, 4, 5]) {
+      let stock = [row(100, { id: "r1" }), row(100, { id: "r2" }), row(100, { id: "r3" }), row(50, { id: "pico" })];
+      const total = stock.reduce((a, s) => a + s.units, 0);
+      for (let step = 0; step < 10; step++) {
+        const plan = planOf(stock, order(250));
+        const todo = plan.stockIds.filter((id) => !plan.picked.includes(id));
+        if (!todo.length) break;
+        const id = todo[(seed + step) % todo.length]; // a different walk each seed
+        const only: PickPlan = { ...plan, stockIds: [id], picked: [], split: plan.split.filter((p) => p.stockId === id) };
+        stock = applyPlan(stock, only, "O1");
+      }
+      const onOrder = stock.filter((s) => s.outboundId === "O1").reduce((a, s) => a + s.units, 0);
+      const all = stock.reduce((a, s) => a + s.units, 0);
+      const left = planOf(stock, order(250));
+      if (onOrder !== 250 || all !== total || left.shortUnits !== 0 || left.stockIds.length !== left.picked.length) {
+        return `seed ${seed}: on order ${onOrder}, total ${all}/${total}, short ${left.shortUnits}, still to pick ${left.stockIds.length - left.picked.length}`;
+      }
+    }
+    return null;
+  } },
+  { name: "P9 pedido de 60 con filas 12+40+40: coge el pico, un lleno y 8 del tercero; quedan 32 en su hueco", check: () => {
+    const stock = [row(12, { id: "pico" }), row(40, { id: "f1" }), row(40, { id: "f2" })];
+    const p = planOf(stock, order(60));
+    const after = applyPlan(stock, p, "O1");
+    const leftover = after.find((s) => s.id === "f2");
+    return same({ split: p.split, f2: leftover?.units, picked: after.filter((s) => s.outboundId).reduce((a, s) => a + s.units, 0) }, { split: [{ stockId: "f2", units: 8 }], f2: 32, picked: 60 });
+  } },
 ];
 
 let failed = 0;
