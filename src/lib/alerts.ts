@@ -3,6 +3,7 @@
 
 import { db } from "@/lib/db";
 import { firstName, fmtDate, madridDayRange, madridHm } from "@/lib/format";
+import { describeUnits, unitWordFor } from "@/lib/pallets/quantity";
 import { allocatePicks } from "@/lib/warehouse/picking";
 import { makeLayout } from "@/lib/warehouse/layout";
 
@@ -47,7 +48,7 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
   const [warehouses, stock, open, prepared, late, overdue, unbooked, incidents, recentOut] = await Promise.all([
     db.warehouse.findMany({ orderBy: { code: "asc" } }),
     db.stock.findMany({ include: { inbound: { select: { date: true, number: true } }, item: true, client: true } }),
-    db.outbound.findMany({ where: { status: "REQUESTED" }, include: { lines: true, client: true, consignee: true, appointment: true } }),
+    db.outbound.findMany({ where: { status: "REQUESTED" }, include: { lines: { include: { item: true } }, client: true, consignee: true, appointment: true } }),
     db.outbound.findMany({ where: { status: "PREPARED" }, include: { client: true, consignee: true, appointment: true } }),
     db.dockAppointment.findMany({
       where: { status: "BOOKED", startsAt: { gte: today.start, lt: new Date(t - LATE_MINUTES * 60000) } },
@@ -112,15 +113,25 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
     const deadline = o.deadline ?? o.date;
     const to = o.consignee?.name.split("–")[0].trim() ?? "—";
     if (plan && plan.short > 0) {
+      // In the item's own unit ("2 palés + 20 cajas"), not in pallet positions: a loose pallet is not a pallet.
+      const lacking = plan.shortLines.map((s) => {
+        const line = o.lines.find((l) => l.itemId === s.itemId)!;
+        const word = unitWordFor(line.item.unit);
+        return {
+          sku: line.item.sku,
+          ask: describeUnits(line.units, line.item.unitsPerPallet, word),
+          have: describeUnits(Math.max(0, line.units - s.units), line.item.unitsPerPallet, word),
+        };
+      });
       alerts.push({
         id: `short-${o.id}`,
         level: "red",
         kind: "stock",
         title: `Outbound Nº ${o.number} is ${plural(plan.short, "pallet")} short`,
-        detail: `${o.client.name} → ${to}: ${total} ordered, ${total - plan.short} in stock. Ship part or wait for the next delivery.`,
+        detail: `${o.client.name} → ${to}: ${lacking.map((l) => `${l.sku} ${l.ask} ordered, ${l.have} in stock`).join("; ")}. Ship part or wait for the next delivery.`,
         href: `/office/warehouse?pick=${o.id}`,
         action: "See it in 3D",
-        notice: `Hola${firstName(o.client.contact) ? ` ${firstName(o.client.contact)}` : ""}, para la salida Nº ${o.number} a ${to} nos pedís ${total} palés y ahora mismo tenéis ${total - plan.short} en stock. ¿Enviamos lo que hay o esperamos a la próxima entrada? Un saludo.`,
+        notice: `Hola${firstName(o.client.contact) ? ` ${firstName(o.client.contact)}` : ""}, para la salida Nº ${o.number} a ${to} nos pedís ${lacking.map((l) => `${l.ask} de ${l.sku}`).join(" y ")} y ahora mismo tenéis ${lacking.map((l) => `${l.have} de ${l.sku}`).join(" y ")} en stock. ¿Enviamos lo que hay o esperamos a la próxima entrada? Un saludo.`,
       });
       continue;
     }

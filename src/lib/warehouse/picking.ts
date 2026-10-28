@@ -41,6 +41,8 @@ export type PickPlan = {
   shortUnits: number;
   /** Same shortage in pallet positions (⌈shortUnits / units per pallet⌉), for screens that count pallets. */
   short: number;
+  /** The shortage by item, for screens that name what is missing. */
+  shortLines: { itemId: string; units: number }[];
 };
 
 const time = (d: Date | null, fallback: number) => (d ? d.getTime() : fallback);
@@ -91,7 +93,7 @@ export function allocatePicks(stock: PickableStock[], orders: OpenOrder[]): Map<
       }
     }
 
-    const plan: PickPlan = { warehouseId: best, stockIds: picked.map((s) => s.id), picked: picked.map((s) => s.id), split: [], shortUnits: 0, short: 0 };
+    const plan: PickPlan = { warehouseId: best, stockIds: picked.map((s) => s.id), picked: picked.map((s) => s.id), split: [], shortUnits: 0, short: 0, shortLines: [] };
     for (const line of order.lines) {
       let missing = line.units - pickedOf(line.itemId);
       for (const s of best ? free(line.itemId, best) : []) {
@@ -107,6 +109,7 @@ export function allocatePicks(stock: PickableStock[], orders: OpenOrder[]): Map<
       }
       if (missing > 0) {
         plan.shortUnits += missing;
+        plan.shortLines.push({ itemId: line.itemId, units: missing });
         plan.short += Math.ceil(missing / (perPallet.get(line.itemId) ?? 1));
       }
     }

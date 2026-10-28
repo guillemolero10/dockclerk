@@ -6,6 +6,7 @@
 // Exit code 1 if any case fails, so it can run before recording the video.
 
 import { describeUnits, readQuantity, splitUnits, toUnits } from "../src/lib/pallets/quantity";
+import { planRestore, type LaneRow } from "../src/lib/warehouse/restore";
 import { allocatePicks, type OpenOrder, type PickableStock, type PickPlan } from "../src/lib/warehouse/picking";
 
 type Case = { name: string; check: () => string | null };
@@ -31,6 +32,18 @@ const row = (units: number, o: Partial<PickableStock> = {}): PickableStock => ({
   expiresAt: null, receivedAt: day(1 + seq), outboundId: null, ...o,
 });
 const order = (units: number, itemId = "I1", id = "O1"): OpenOrder => ({ id, number: 1, date: day(20), deadline: null, lines: [{ itemId, units }] });
+
+const lrow = (id: string, units: number, location: string, o: Partial<LaneRow> = {}): LaneRow => ({
+  id, warehouseId: "W1", itemId: "H", clientId: "C1", lot: "L1", expiresAt: day(28), inboundId: "IN1", units, location, ...o,
+});
+const freeSlot = (n = 99) => {
+  let i = 0;
+  return (_r: LaneRow, taken: Set<string>) => {
+    for (; i < n; i++) if (!taken.has(`Z-0${i}-1`)) return `Z-0${i}-1`;
+    return null;
+  };
+};
+const per = new Map([["H", 100]]);
 const planOf = (stock: PickableStock[], o: OpenOrder) => allocatePicks(stock, [o]).get(o.id)!;
 
 /** What pickPallet does to the rows, without a database: whole rows move, split rows give up units to a new row. */
@@ -144,6 +157,33 @@ const CASES: Case[] = [
     const after = applyPlan(stock, p, "O1");
     const leftover = after.find((s) => s.id === "f2");
     return same({ split: p.split, f2: leftover?.units, picked: after.filter((s) => s.outboundId).reduce((a, s) => a + s.units, 0) }, { split: [{ stockId: "f2", units: 8 }], f2: 32, picked: 60 });
+  } },
+  { name: "R1 undo a pick: the split row joins its loose pallet again (50 + 50 = 100)", check: () => {
+    const p = planRestore([lrow("exp", 50, "EXP-1")], [lrow("exp", 50, "EXP-1"), lrow("pico", 50, "B-02-1")], per, freeSlot());
+    return same(p, { merges: [{ fromId: "exp", intoId: "pico", units: 50 }], moves: [] });
+  } },
+  { name: "R2 whole pallets go back to free slots, never to a taken one", check: () => {
+    const lane = [lrow("a", 100, "EXP-1"), lrow("b", 100, "EXP-1")];
+    const p = planRestore(lane, [...lane, lrow("x", 100, "Z-00-1", { itemId: "Q" })], per, (_r, t) => (["Z-00-1", "Z-01-1", "Z-02-1"].find((c) => !t.has(c)) ?? null));
+    return same(p, { merges: [], moves: [{ id: "a", location: "Z-01-1" }, { id: "b", location: "Z-02-1" }] });
+  } },
+  { name: "R3 no join when it would pass a full pallet, or lot / expiry / delivery differ", check: () => {
+    const lane = [lrow("e1", 60, "EXP-1"), lrow("e2", 50, "EXP-1", { lot: "L2" }), lrow("e3", 50, "EXP-1", { expiresAt: day(29) }), lrow("e4", 50, "EXP-1", { inboundId: "IN2" })];
+    const p = planRestore(lane, [...lane, lrow("pico", 50, "B-02-1")], per, freeSlot());
+    return same({ merges: p.merges.length, moves: p.moves.map((m) => m.id).sort() }, { merges: 0, moves: ["e1", "e2", "e3", "e4"] });
+  } },
+  { name: "R4 two split rows of the same lot: the first fills the loose pallet, the second goes to a slot", check: () => {
+    const lane = [lrow("e1", 40, "EXP-1"), lrow("e2", 40, "EXP-1")];
+    const p = planRestore(lane, [...lane, lrow("pico", 50, "B-02-1")], per, freeSlot());
+    return same({ merges: p.merges, moves: p.moves.map((m) => m.id) }, { merges: [{ fromId: "e1", intoId: "pico", units: 40 }], moves: ["e2"] });
+  } },
+  { name: "R5 full building: the row waits in the receiving lane instead of getting lost", check: () => {
+    const p = planRestore([lrow("a", 100, "EXP-1")], [lrow("a", 100, "EXP-1")], per, () => null);
+    return same(p.moves, [{ id: "a", location: "REC-1" }]);
+  } },
+  { name: "R6 a shortage names the item: order 2 pallets + 20 boxes, 1 pallet in stock", check: () => {
+    const p = planOf([row(100)], order(220));
+    return same({ lines: p.shortLines, short: p.shortUnits }, { lines: [{ itemId: "I1", units: 120 }], short: 120 });
   } },
 ];
 
