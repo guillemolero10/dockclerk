@@ -158,11 +158,11 @@ const CASES: Case[] = [
     },
   },
   {
-    name: "B9-FULL loose pallet charged as a whole pallet",
+    name: "B9-FULL loose pallet charged as a whole pallet, the boxes leave on a whole pallet",
     run() {
       const r = bill(pico(), "2026-06", tariff({ partialPallets: "FULL" }));
       console.log(`      B9-FULL: ${r.palletDays} pallet-days (30 days, one pallet), outbound ${line(r, "out")?.quantity}`);
-      return r.palletDays === 30 && line(r, "out")?.quantity === 0.5 && r.checks.detailMatches ? null : `pallet-days ${r.palletDays}, out ${line(r, "out")?.quantity}`;
+      return r.palletDays === 30 && line(r, "out")?.quantity === 1 && r.checks.detailMatches ? null : `pallet-days ${r.palletDays}, out ${line(r, "out")?.quantity}`;
     },
   },
   {

@@ -4,7 +4,7 @@
 import { dayNumber } from "./calendar";
 
 export type PalletKind = "EURO" | "AMERICAN";
-/** FRACTION: a loose bit counts units / units-per-pallet. FULL: each row with goods counts as one whole pallet while inside. */
+/** FRACTION: a loose bit counts units / units-per-pallet. FULL: each row with goods counts as one whole pallet while inside, and loose boxes enter and leave as a whole pallet. */
 export type PartialRule = "FRACTION" | "FULL";
 
 export type Stay = {
