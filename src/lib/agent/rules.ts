@@ -2,10 +2,15 @@
 // It returns the same DraftSeed contract Muse Spark will return, so the approval queue does not care
 // which one ran. It also backs the live demo if the model is slow or unavailable.
 import type { Client, Message } from "@prisma/client";
+import { ymdOf } from "@/lib/billing/calendar";
+import { db } from "@/lib/db";
 import { madridDayRange } from "@/lib/format";
+import { billingIntent } from "./bill-format";
+import { billSoFar, explainCharge } from "./bill-tools";
 import { checkStock, findConsignees, findItem, inboundsThisMonth, lastShipmentTo, norm } from "./tools";
 import { describeUnits, scanQuantities, toUnits, unitWordFor } from "@/lib/pallets/quantity";
 import { buildLine, withUnits } from "./lines";
+import { convertLog, convertQuantity } from "./convert";
 import type { Doubt, DraftSeed, OutboundLineDraft, OutboundPayload, Step } from "./types";
 
 const HOUR = 60 * 60 * 1000;
@@ -113,6 +118,31 @@ export async function draftMessage(message: Message & { client: Client | null })
     return [human(sales ? "sales email from a supplier, no action needed" : "unknown sender, not a customer in the software", steps)];
   }
   const client = message.client;
+  // Questions about the customer's own bill that code can answer; claims, resends and payments go to a person.
+  const intent = billingIntent(body, ymdOf(new Date()));
+  if (intent?.kind === "human") {
+    steps.push({ kind: "tool", text: "classify → invoice claim, resend or payment" });
+    return [human("invoice claim, resend or payment, outside the warehouse software", steps)];
+  }
+  if (intent) {
+    // Only ever the sender's own bill: a question that names another customer goes to a person.
+    const others = await db.client.findMany({ where: { id: { not: client.id } }, select: { name: true } });
+    if (others.some((o) => t.includes(norm(o.name)))) {
+      steps.push({ kind: "tool", text: "classify → billing question about another customer" });
+      return [human("asks about another customer's bill, a person must answer", steps)];
+    }
+    steps.push({ kind: "tool", text: `classify → billing question (${intent.kind === "amount" ? "bill so far" : "explain a charge"})` });
+    const r = intent.kind === "amount" ? await billSoFar(client.id, intent.month) : await explainCharge(client.id, intent);
+    for (const text of r.log) steps.push({ kind: "tool", text });
+    if (r.failed) return [human(String(r.data.error ?? "could not read the bill"), steps)];
+    const text = String(r.data.text);
+    const provisional = r.data.status !== "approved" ? " Es una prefactura en borrador, no una factura." : "";
+    steps.push({ kind: "ok", text: "reply drafted with the bill figures" });
+    return [{
+      kind: "REPLY_ONLY", payload: { answer: text }, doubts: [], steps,
+      reply: `${hello(message.fromName)} ${text.charAt(0).toLowerCase()}${text.slice(1)}${provisional} Un saludo.`,
+    }];
+  }
   if (t.includes("factura")) {
     steps.push({ kind: "tool", text: "classify → billing question" });
     return [human("billing question, outside the warehouse software", steps)];
@@ -197,7 +227,7 @@ export async function draftMessage(message: Message & { client: Client | null })
       const stock = await checkStock(client.id, item.id);
       const { units, options } = unitsOf(s, item.unitsPerPallet);
       steps.push({ kind: "tool", text: `check_stock(${item.sku}) → ${stock.text} (${stock.units} units)` });
-      if (options) steps.push({ kind: "ask", text: `${item.sku}: ${s.amount} ${s.unit === "pallets" ? "pallets" : "units"} is not a whole number of ${stock.unitWord}` });
+      steps.push({ kind: options ? "ask" : "tool", text: convertLog(item.sku, s.amount, s.unit, convertQuantity(item, s.amount, s.unit)) });
       if (units > stock.units) steps.push({ kind: "ask", text: `${item.sku}: ${units} units asked, only ${stock.units} in stock` });
       lines.push(buildLine(item, units, stock.units, options));
     }
