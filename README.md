@@ -6,7 +6,7 @@ DockClerk is an AI back-office clerk for small and mid-size logistics warehouses
 
 Built for the **Meta Global AI Developer Hackathon** (Oct 26 – Nov 4, 2026), Indie track, theme *Build for Your World*.
 
-**Live demo:** https://dockclerk.vercel.app. Pick a role on the landing page; there is no sign-up.
+**Live demo:** https://dockclerk.vercel.app. Sign in with one of the demo accounts (the user names and passwords come with the hackathon submission form).
 
 ---
 
@@ -22,16 +22,18 @@ DockClerk takes the reading and the retyping. It never takes the decision: every
 
 ## Try it (3 minutes)
 
+There are demo accounts: `oficina` (office), `operario` (warehouse operator) and one per customer (`juguetes-levante`, `bebidas-montgo`…). The passwords are in the submission form, not in this repo. The driver has no account.
+
 | Role | Where | What to do |
 |---|---|---|
-| **Office** | *Enter as office* | **AI inbox**: press *Let the clerk handle it* and watch it read each message, call its tools and draft the outbound. Approve one, then *Light up the pick*: the 3D warehouse shows which pallets to take and the route. |
+| **Office** | Sign in as `oficina` | **AI inbox**: press *Let the clerk handle it* and watch it read each message, call its tools and draft the outbound. Approve one, then *Light up the pick*: the 3D warehouse shows which pallets to take and the route. |
 | | **Dock** | Day timeline for each door. *Let the clerk schedule them* books every waiting truck without overlaps. |
 | | **Alerts** | Late trucks, orders short of stock, lots about to expire and full buildings. Each alert links to the right screen and comes with a ready-to-send notice for the customer. |
 | | **Analyst** | The weekly report of the second agent: who runs out of stock and when, when a building fills up, which carrier is late on which weekday, which supplier's notes don't match. Each finding comes with its chart, its method and a button that acts on it. Try *30 days* against *6 months* to see why history matters. |
 | | **Lot trace** | Type a lot to see the truck that brought it, the rack it sits in and every customer it went to. This is the answer owed to a customer during a recall. |
-| **Operator** | *Enter as operator* (phone size) | Today's tasks: unload, put away (the app suggests the slot), pick along a route, voice note to the office. |
-| **Driver** | *Driver link* | No app and no account. Photo of the delivery note, *I'm at the gate*, sign with a finger, download the dock receipt. |
-| **Customer** | *Enter as customer* | Stock by lot with expiry dates, movements with signed receipts, and an assistant that answers from the live data. Orders go to the office queue. |
+| **Operator** | Sign in as `operario` (phone size) | Today's tasks: unload, put away (the app suggests the slot), pick along a route, voice note to the office. |
+| **Driver** | Link from the office's **Dock** screen | No app and no account. Photo of the delivery note, *I'm at the gate*, sign with a finger, download the dock receipt. |
+| **Customer** | Sign in as a customer (e.g. `juguetes-levante`) | Stock by lot with expiry dates, movements with signed receipts, and an assistant that answers from the live data. Orders go to the office queue. |
 
 All companies, people and goods in the demo are invented.
 
@@ -64,6 +66,13 @@ All companies, people and goods in the demo are invented.
   - It says what it cannot conclude yet, and why (`src/lib/analyst/`).
   - Runs every Monday at 07:00 through Vercel Cron (the route needs `CRON_SECRET`).
 - **Floor loop:** the truck arrives, the driver checks in, the operator receives the goods into a lane by the door, the driver signs, the pallets are put away into suggested slots, picked to a dispatch lane and shipped. Every shipped pallet keeps its lot for traceability (`src/lib/ops/floor.ts`).
+- **Accounts and permissions:** real users in the database (office, operator, customer), not a role picker.
+  - Passwords are hashed with Node's `scrypt` (random salt per user, constant-time comparison, no extra dependency).
+  - Sessions live in the database; the cookie holds only 32 random bytes (`httpOnly`, `secure`, `sameSite=lax`) and the table keeps their SHA-256. There is nothing in the cookie to edit and no signing secret to leak.
+  - The customer id comes from the signed-in user's row, never from the cookie, the URL or the AI.
+  - Every page, server action and route checks the role on the server (`src/lib/session.ts`). A customer only opens the receipts and files of their own deliveries; the driver's link opens one delivery and nothing else.
+  - Ten failed logins lock that user, from that address, for 15 minutes.
+- **Spending limit:** the paid model has a daily budget (`AI_DAILY_BUDGET_USD`, default $3), counted in the database. Past it the inbox runs on the rules engine and the analyst on its template, and the log says so. Questions to the customer assistant and delivery-note readings from the driver's link are rate-limited too.
 
 ```
 src/
@@ -73,9 +82,10 @@ src/
   lib/warehouse/  layout from measurements, picking, lanes, route, 3D snapshot
   lib/dock/       slots and the day plan
   lib/ops/        floor operations shared by every role
+  lib/session.ts  lib/auth/   sessions, role checks, password hashing
   lib/alerts.ts   lib/trace.ts   lib/clients.ts
   lib/analyst/    the analyst: data, analyses, statistics, report
-prisma/           schema, seed and six months of simulated history (invented data, two buildings, ~750 pallets)
+prisma/           schema, seed, demo accounts and six months of simulated history (invented data, two buildings, ~750 pallets)
 ```
 
 ## Real vs. simulated
@@ -89,11 +99,13 @@ prisma/           schema, seed and six months of simulated history (invented dat
 cp .env.example .env      # database URL, plus model keys if you have them
 npm install
 npx prisma db push
-npm run db:seed           # wipes and recreates the demo data
+npm run db:seed           # wipes and recreates the demo data, keeps the accounts
 npm run dev
 ```
 
-The app runs without any model key, using the rules engine and manual entry. Add `BASETEN_API_KEY` to switch the inbox to Muse Spark Open, and `META_API_KEY` to turn on Muse Spark, SAM 3.1 and Voice Transcribe.
+The seed creates the demo accounts that are missing, each with a random password that it writes **once** to a file outside the repository (`../USUARIOS-DEMO.md`); it never prints them and never changes the password of an account that exists, so credentials handed out stay valid across reseeds. To change one: `npm run users:reset -- <user>`.
+
+The app runs without any model key, using the rules engine and manual entry. Add `BASETEN_API_KEY` to switch the inbox to Muse Spark Open, and `META_API_KEY` to turn on Muse Spark, SAM 3.1 and Voice Transcribe. Sessions need no secret.
 
 ---
 
