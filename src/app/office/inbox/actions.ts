@@ -8,6 +8,9 @@ import { orderReply } from "@/lib/agent/rules";
 import type { Doubt, DraftSeed, OutboundPayload, Step } from "@/lib/agent/types";
 import { db } from "@/lib/db";
 import { madridDayRange } from "@/lib/format";
+import { makeLayout } from "@/lib/warehouse/layout";
+import { suggestSlot } from "@/lib/warehouse/lanes";
+import { planRestore } from "@/lib/warehouse/restore";
 import { assertRole } from "@/lib/session";
 
 // Every exported function below is reachable by anybody who can POST to the site: check the role in each one.
@@ -50,7 +53,7 @@ export async function approveDraft(formData: FormData) {
   if (!draft || draft.status !== "PENDING") return;
 
   if (draft.kind !== "CREATE_OUTBOUND") {
-    await db.draft.update({ where: { id }, data: { status: "APPROVED" } });
+    await db.draft.updateMany({ where: { id, status: "PENDING" }, data: { status: "APPROVED" } });
     revalidatePath("/office", "layout");
     return;
   }
@@ -74,27 +77,33 @@ export async function approveDraft(formData: FormData) {
   if (!payload.lines.every((l) => Number.isInteger(l.units) && l.units > 0)) throw new Error("This draft has no valid quantity. Discard it and replay the message.");
 
   const deliverBy = payload.deliverBy ? new Date(payload.deliverBy) : null;
-  const outbound = await db.outbound.create({
-    data: {
-      date: madridDayRange(deliverBy ?? new Date()).start,
-      deadline: deliverBy,
-      clientId: payload.clientId,
-      clientDocRef: payload.clientDocRef,
-      consigneeId: payload.consigneeId,
-      notes: "Alta DockClerk · aprobada en oficina",
-      status: "REQUESTED",
-      lines: { create: payload.lines.map((l) => ({ itemId: l.itemId, pallets: Math.ceil(l.units / l.unitsPerPallet), units: l.units })) },
-    },
+  // Claim the draft and create the outbound in one transaction: with two clicks (or two tabs) only one gets count === 1,
+  // the other one rolls back without creating anything.
+  const outbound = await db.$transaction(async (tx) => {
+    const claimed = await tx.draft.updateMany({ where: { id, status: "PENDING" }, data: { status: "APPROVED" } });
+    if (claimed.count !== 1) return null;
+    const created = await tx.outbound.create({
+      data: {
+        date: madridDayRange(deliverBy ?? new Date()).start,
+        deadline: deliverBy,
+        clientId: payload.clientId,
+        clientDocRef: payload.clientDocRef,
+        consigneeId: payload.consigneeId,
+        notes: "Alta DockClerk · aprobada en oficina",
+        status: "REQUESTED",
+        lines: { create: payload.lines.map((l) => ({ itemId: l.itemId, pallets: Math.ceil(l.units / l.unitsPerPallet), units: l.units })) },
+      },
+    });
+    await tx.draft.update({
+      where: { id },
+      data: {
+        payload: json({ ...payload, outboundId: created.id, outboundNumber: created.number }),
+        reply: draft.message ? orderReply(payload, draft.message.fromName) : draft.reply,
+      },
+    });
+    return created;
   });
-
-  await db.draft.update({
-    where: { id },
-    data: {
-      status: "APPROVED",
-      payload: json({ ...payload, outboundId: outbound.id, outboundNumber: outbound.number }),
-      reply: draft.message ? orderReply(payload, draft.message.fromName) : draft.reply,
-    },
-  });
+  if (!outbound) return;
   revalidatePath("/office", "layout");
 }
 
@@ -112,10 +121,27 @@ export async function resetInbox() {
   const outboundIds = created
     .map((d) => (d.payload as { outboundId?: string }).outboundId)
     .filter((x): x is string => Boolean(x));
-  await db.$transaction([
-    db.outbound.deleteMany({ where: { id: { in: outboundIds } } }),
-    db.draft.deleteMany(),
-    db.message.updateMany({ data: { status: "NEW" } }),
-  ]);
+  await db.$transaction(async (tx) => {
+    // Pallets already picked for those outbounds go back to the racks (and a split row joins its loose pallet again)
+    // before the outbounds are deleted, so nothing stays in a dispatch lane without an owner.
+    const lane = await tx.stock.findMany({ where: { outboundId: { in: outboundIds } } });
+    if (lane.length) {
+      const warehouses = await tx.warehouse.findMany({ where: { id: { in: [...new Set(lane.map((r) => r.warehouseId))] } } });
+      const here = await tx.stock.findMany({ where: { warehouseId: { in: warehouses.map((w) => w.id) } } });
+      const items = await tx.item.findMany({ where: { id: { in: [...new Set(lane.map((r) => r.itemId))] } }, select: { id: true, unitsPerPallet: true } });
+      const layouts = new Map(warehouses.map((w) => [w.id, makeLayout(w)]));
+      const plan = planRestore(lane, here, new Map(items.map((i) => [i.id, i.unitsPerPallet])), (row, taken) =>
+        suggestSlot(layouts.get(row.warehouseId)!, taken, here.filter((s) => s.warehouseId === row.warehouseId && s.clientId === row.clientId).map((s) => s.location)),
+      );
+      for (const m of plan.merges) {
+        await tx.stock.update({ where: { id: m.intoId }, data: { units: { increment: m.units } } });
+        await tx.stock.delete({ where: { id: m.fromId } });
+      }
+      for (const m of plan.moves) await tx.stock.update({ where: { id: m.id }, data: { outboundId: null, location: m.location } });
+    }
+    await tx.outbound.deleteMany({ where: { id: { in: outboundIds } } });
+    await tx.draft.deleteMany();
+    await tx.message.updateMany({ data: { status: "NEW" } });
+  });
   revalidatePath("/office", "layout");
 }

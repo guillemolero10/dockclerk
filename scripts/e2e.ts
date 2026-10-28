@@ -443,7 +443,7 @@ async function main() {
     assert(await office.getByRole("button", { name: /Let the clerk handle \d+ messages/ }).count(), "after the replay the messages are not waiting again");
     await office.goto(BASE + "/office/billing", { waitUntil: "networkidle" });
     assert((await office.locator("tbody tr").count()) === 8, "billing does not show 8 rows after the replay");
-    warn("after a replay the pallets picked for the approved order stay in the dispatch lane (EXP): reseed before the next run");
+    warn("after a replay the picked pallets go back to the racks (a split row joins its loose pallet): check /office/warehouse has nothing in EXP lanes without an outbound");
   });
 
   await browser.close();
