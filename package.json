@@ -9,7 +9,9 @@
     "lint": "eslint",
     "postinstall": "prisma generate",
     "db:seed": "prisma db seed",
-    "users:reset": "node --env-file=.env --import tsx scripts/users-reset.ts"
+    "users:reset": "node --env-file=.env --import tsx scripts/users-reset.ts",
+    "db:checks": "bash scripts/db-checks.sh",
+    "e2e": "bash scripts/e2e.sh"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
@@ -27,6 +29,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.3",
+    "playwright-core": "1.58.2",
     "prisma": "^6.19.3",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
