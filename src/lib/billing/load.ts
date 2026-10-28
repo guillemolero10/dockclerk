@@ -1,5 +1,5 @@
 // Reads the warehouse records of one customer and turns them into a bill. The arithmetic is in compute.ts.
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { billPeriod, type BillResult, type TariffInput } from "./compute";
 import { dateOfDay, dayNumber, type Period } from "./calendar";
@@ -113,20 +113,34 @@ export async function prepareClients(p: Period, options: { dryRun?: boolean } = 
       steps: bill.steps as unknown as Prisma.InputJsonValue,
       createdAt: new Date(),
     };
+    const skipApproved = () => out.skipped.push({ client: client.code, reason: "Already approved." });
+    const refresh = async (id: string) => {
+      // Only while it is still a draft: if somebody approves it right now, this changes nothing.
+      const { count } = await db.preInvoice.updateMany({ where: { id, status: "DRAFT" }, data });
+      return count === 1;
+    };
     const existing = await db.preInvoice.findUnique({ where: { clientId_from_to: { clientId: client.id, from, to } }, select: { id: true, status: true } });
     if (existing?.status === "APPROVED") {
-      out.skipped.push({ client: client.code, reason: "Already approved." });
+      skipApproved();
       continue;
     }
     if (existing) {
-      // Only while it is still a draft: if somebody approves it right now, this changes nothing.
-      const { count } = await db.preInvoice.updateMany({ where: { id: existing.id, status: "DRAFT" }, data });
-      if (count === 0) {
-        out.skipped.push({ client: client.code, reason: "Already approved." });
+      if (!(await refresh(existing.id))) {
+        skipApproved();
         continue;
       }
     } else {
-      await db.preInvoice.create({ data: { clientId: client.id, from, to, status: "DRAFT", ...data } });
+      try {
+        await db.preInvoice.create({ data: { clientId: client.id, from, to, status: "DRAFT", ...data } });
+      } catch (error) {
+        // Another tab created it a moment ago (unique clientId + period): treat it as the existing one, and keep going with the rest.
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
+        const other = await db.preInvoice.findUnique({ where: { clientId_from_to: { clientId: client.id, from, to } }, select: { id: true } });
+        if (!other || !(await refresh(other.id))) {
+          skipApproved();
+          continue;
+        }
+      }
     }
     out.prepared++;
   }
