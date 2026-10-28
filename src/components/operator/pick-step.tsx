@@ -5,7 +5,7 @@ import { useState, useTransition } from "react";
 import { Check, Route } from "lucide-react";
 import { pick } from "@/app/operator/actions";
 
-type Step = { id: string; location: string; level: number | null; sku: string; lot: string | null; units: number };
+type Step = { id: string; location: string; level: number | null; sku: string; lot: string | null; units: number; take: number | null };
 
 /** Walk the route: one big location at a time, the same order the office sees lit up in 3D. */
 export function PickStep({ outboundId, lane, done, total, short, metres, steps }: { outboundId: string; lane: number; done: number; total: number; short: number; metres: number; steps: Step[] }) {
@@ -38,7 +38,7 @@ export function PickStep({ outboundId, lane, done, total, short, metres, steps }
               <p className="mono font-semibold">
                 {current.sku} {current.lot && <span className="text-dock-ink/50">· lot {current.lot}</span>}
               </p>
-              <p className="text-xs text-dock-ink/55">1 pallet · {current.units} units · then to EXP {lane}</p>
+              <p className="text-xs text-dock-ink/55">{current.take ? `Take ${current.take} boxes of ${current.units} · the rest stays here` : `1 pallet · ${current.units} units`} · then to EXP {lane}</p>
             </div>
           </div>
           <button
@@ -47,7 +47,7 @@ export function PickStep({ outboundId, lane, done, total, short, metres, steps }
               start(async () => {
                 setError(null);
                 try {
-                  await pick(outboundId, current.id);
+                  await pick(outboundId, current.id, current.take ?? undefined);
                   router.refresh();
                 } catch (err) {
                   setError(err instanceof Error ? err.message : "Could not do it.");
@@ -56,7 +56,7 @@ export function PickStep({ outboundId, lane, done, total, short, metres, steps }
             }
             className="cond flex w-full items-center justify-center gap-2 bg-dock-yellow px-4 py-4 text-base font-semibold ring-[1.5px] ring-dock-ink disabled:opacity-60"
           >
-            <Check size={18} /> {pending ? "…" : `Picked, taken to EXP ${lane}`}
+            <Check size={18} /> {pending ? "…" : current.take ? `Picked ${current.take} boxes, taken to EXP ${lane}` : `Picked, taken to EXP ${lane}`}
           </button>
           {error && <p className="text-sm text-dock-red">{error}</p>}
         </>

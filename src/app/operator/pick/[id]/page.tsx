@@ -53,6 +53,8 @@ export default async function PickPage({ params }: PageProps<"/operator/pick/[id
       sku: items.find((i) => i.id === s.itemId)!.sku,
       lot: s.lot,
       units: s.units,
+      /** Boxes to take when the plan takes only part of this pallet. */
+      take: plan.split.find((p) => p.stockId === stockId)?.units ?? null,
     };
   };
 

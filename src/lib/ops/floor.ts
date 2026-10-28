@@ -140,7 +140,7 @@ export async function confirmReceipt(inboundId: string, lines: ReceivedLine[], d
     }),
     db.inbound.update({
       where: { id: inboundId },
-      data: { status: "RECEIVED", warehouseId: warehouse.id, receivedPallets: pallets, receivedUnits: units, incident: note },
+      data: { status: "RECEIVED", receivedAt: new Date(), warehouseId: warehouse.id, receivedPallets: pallets, receivedUnits: units, incident: note },
     }),
     db.dockReceipt.upsert({
       where: { inboundId },
@@ -210,24 +210,46 @@ export async function openPickPlans() {
   ]);
   const plans = allocatePicks(
     stock.map((s) => ({ ...s, receivedAt: s.inbound?.date ?? null })),
-    open.map((o) => ({ id: o.id, number: o.number, date: o.date, deadline: o.deadline, lines: o.lines })),
+    open.map((o) => ({ id: o.id, number: o.number, date: o.date, deadline: o.deadline, lines: o.lines.map((l) => ({ itemId: l.itemId, units: l.units })) })),
   );
   return { plans, stock, open };
 }
 
-/** Takes one pallet to the outbound's dispatch lane. When everything is there, the outbound is prepared. */
-export async function pickPallet(outboundId: string, stockId: string) {
+/**
+ * Takes one pallet to the outbound's dispatch lane. When everything is there, the outbound is prepared.
+ * If the plan takes only part of a pallet, `units` must be exactly that: the rest stays in its slot as a
+ * loose pallet and the units taken become a new row in the dispatch lane (same delivery, lot and expiry).
+ */
+export async function pickPallet(outboundId: string, stockId: string, units?: number) {
   const { plans, stock, open } = await openPickPlans();
   const plan = plans.get(outboundId);
   const order = open.find((o) => o.id === outboundId);
   if (!plan || !order || !plan.warehouseId) throw new Error("Nothing to pick for this outbound.");
   if (!plan.stockIds.includes(stockId) || plan.picked.includes(stockId)) throw new Error("That pallet is not on this pick list.");
 
+  const row = stock.find((s) => s.id === stockId)!;
+  const part = plan.split.find((p) => p.stockId === stockId);
+  const expected = part?.units ?? row.units;
+  if (units !== undefined && (!Number.isInteger(units) || units !== expected)) throw new Error(`Take ${expected} boxes from ${row.location}.`);
+  if (part && units === undefined) throw new Error(`Take ${expected} boxes from ${row.location}.`);
+
   const warehouse = await db.warehouse.findUniqueOrThrow({ where: { id: plan.warehouseId } });
   const lane = dispatchLane(layoutOf(warehouse), stock.filter((s) => s.warehouseId === warehouse.id), outboundId);
-  await db.stock.update({ where: { id: stockId }, data: { outboundId, location: `EXP-${lane}` } });
+  if (part) {
+    await db.$transaction([
+      db.stock.update({ where: { id: stockId }, data: { units: { decrement: part.units } } }),
+      db.stock.create({
+        data: {
+          warehouseId: row.warehouseId, clientId: row.clientId, itemId: row.itemId, lot: row.lot, expiresAt: row.expiresAt,
+          pallets: 1, units: part.units, location: `EXP-${lane}`, outboundId, inboundId: row.inboundId,
+        },
+      }),
+    ]);
+  } else {
+    await db.stock.update({ where: { id: stockId }, data: { outboundId, location: `EXP-${lane}` } });
+  }
 
-  const done = plan.picked.length + 1 >= plan.stockIds.length && plan.short === 0;
+  const done = plan.picked.length + 1 >= plan.stockIds.length && plan.shortUnits === 0;
   if (done) await db.outbound.update({ where: { id: outboundId }, data: { status: "PREPARED", warehouseId: warehouse.id } });
   return { done, lane };
 }
@@ -240,6 +262,7 @@ export async function shipOutbound(outboundId: string) {
       where: { id: outboundId },
       data: {
         status: "SHIPPED",
+        shippedAt: new Date(),
         shipped: json(picked.map((s) => ({ itemId: s.itemId, sku: s.item.sku, lot: s.lot, units: s.units, location: s.location, inboundId: s.inboundId }))),
       },
     }),

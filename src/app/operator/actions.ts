@@ -85,9 +85,9 @@ export async function putAwayAll(warehouseCode: string) {
   return waiting.length;
 }
 
-export async function pick(outboundId: string, stockId: string) {
+export async function pick(outboundId: string, stockId: string, units?: number) {
   await requireFloor();
-  const result = await pickPallet(outboundId, stockId);
+  const result = await pickPallet(outboundId, stockId, units);
   refresh();
   return result;
 }
