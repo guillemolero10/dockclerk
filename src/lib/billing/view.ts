@@ -112,7 +112,7 @@ export function groupMovements(rows: DetailRow[]): MovementGroup[] {
   for (const g of out) {
     g.rows.sort((a, b) => {
       if (a.concept !== b.concept) return ORDER[a.concept as keyof typeof ORDER] - ORDER[b.concept as keyof typeof ORDER];
-      return (a.exitDate ?? "9999").localeCompare(b.exitDate ?? "9999");
+      return (a.exitDate ?? "").localeCompare(b.exitDate ?? "");
     });
     const storage = g.rows.filter((r) => r.concept === "storage");
     const stay = storage.filter((r) => r.exitDate === null);
