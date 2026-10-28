@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowDownToLine, ArrowLeft, ArrowUpFromLine, FileText } from "lucide-react";
+import { PartialRule } from "@/components/billing/partial-rule";
+import { RULE_HELP } from "@/lib/billing/view";
 import { customerDetail, ROTATION_DAYS } from "@/lib/clients";
 import { db } from "@/lib/db";
 import { fmtDate, fmtNumber } from "@/lib/format";
@@ -27,24 +29,25 @@ export default async function ClientPage({ params }: PageProps<"/office/clients/
   const { code } = await params;
   const [detail, codes] = await Promise.all([customerDetail(code), db.client.findMany({ orderBy: { code: "asc" }, select: { code: true } })]);
   if (!detail) notFound();
+  const tariff = await db.tariff.findUnique({ where: { clientId: detail.client.id }, select: { partialPallets: true } });
   const { client, items, movements } = detail;
   const color = clientColor(codes.findIndex((c) => c.code === code));
   const total = (f: (i: (typeof items)[number]) => number) => items.reduce((sum, i) => sum + f(i), 0);
 
   return (
-    <main className="mx-auto max-w-6xl px-8 py-8">
+    <main className="mx-auto max-w-6xl px-4 py-6 sm:px-8 sm:py-8">
       <Link href="/office/clients" className="cond flex items-center gap-1 text-xs text-dock-ink/50 hover:text-dock-ink">
         <ArrowLeft size={13} /> Customers
       </Link>
-      <header className="mt-2 flex flex-wrap items-end gap-x-6 gap-y-2">
+      <header className="mt-2 flex flex-wrap items-end gap-x-6 gap-y-3">
         <span className="h-10 w-2" style={{ background: color }} />
         <div>
           <p className="mono text-xs text-dock-ink/50">{client.code}</p>
           <h1 className="text-3xl font-semibold tracking-tight">{client.name}</h1>
           <p className="text-sm text-dock-ink/60">{[client.contact, client.email, client.phone].filter(Boolean).join(" · ")}</p>
         </div>
-        <div className="ml-auto flex gap-3">
-          <Stat value={total((i) => i.pallets)} label="pallets stored" />
+        <div className="flex flex-wrap gap-3 sm:ml-auto">
+          <Stat value={total((i) => i.fullPallets)} note={total((i) => i.picos) > 0 ? `+ ${total((i) => i.picos)} pico${total((i) => i.picos) === 1 ? "" : "s"}` : undefined} label="pallets stored" />
           <Stat value={total((i) => i.free)} label="free to ship" />
           <Stat value={total((i) => i.reserved + i.picked)} label="promised" />
           <Stat value={total((i) => i.out30)} label={`out in ${ROTATION_DAYS} days`} />
@@ -76,8 +79,14 @@ export default async function ClientPage({ params }: PageProps<"/office/clients/
                       {i.warehouses.length > 0 && ` · ${i.warehouses.join(", ")}`}
                     </span>
                   </td>
-                  <td className="mono px-2 py-2.5 text-right">{i.pallets}</td>
-                  <td className="mono px-2 py-2.5 text-right font-semibold">{i.free}</td>
+                  <td className="mono px-2 py-2.5 text-right">
+                    {i.fullPallets}
+                    {i.picos > 0 && <Pico units={i.looseUnits} unit={UNIT[i.unit]} />}
+                  </td>
+                  <td className="mono px-2 py-2.5 text-right font-semibold">
+                    {i.freeFull}
+                    {i.freeLoose > 0 && <Pico units={i.freeLoose} unit={UNIT[i.unit]} />}
+                  </td>
                   <td className="mono px-2 py-2.5 text-right text-dock-ink/60">{i.reserved + i.picked || "—"}</td>
                   <td className="mono px-2 py-2.5 text-right text-dock-ink/60">{i.out30 || "—"}</td>
                   <td className={`px-2 py-2.5 text-xs ${c.tone}`}>{c.text}</td>
@@ -110,6 +119,20 @@ export default async function ClientPage({ params }: PageProps<"/office/clients/
         </table>
       </section>
 
+      {tariff && (
+        <section className="dock-card mt-6 flex flex-wrap items-center gap-x-6 gap-y-3 bg-white p-4">
+          <div className="min-w-0 flex-1 basis-72">
+            <h2 className="cond text-xs text-dock-ink/55">Month-end billing · how loose pallets are charged</h2>
+            <p className="mt-1 text-sm text-dock-ink/70">{RULE_HELP[tariff.partialPallets]}</p>
+            <p className="mt-1 text-xs text-dock-ink/55">
+              Applies to the next pre-invoice you prepare. Approved ones keep the rule they were made with.{" "}
+              <Link href="/office/billing" className="underline underline-offset-2">Billing</Link>
+            </p>
+          </div>
+          <PartialRule clientId={client.id} value={tariff.partialPallets} />
+        </section>
+      )}
+
       <section className="mt-8">
         <h2 className="cond mb-3 text-sm text-dock-ink/60">Latest movements</h2>
         <ul className="dock-card divide-y divide-dock-line bg-white">
@@ -137,10 +160,18 @@ export default async function ClientPage({ params }: PageProps<"/office/clients/
   );
 }
 
-function Stat({ value, label }: { value: number; label: string }) {
+/** The loose part of a stock figure: "+ pico 12 boxes". */
+function Pico({ units, unit }: { units: number; unit: string }) {
+  return <span className="block whitespace-nowrap text-[11px] font-normal text-dock-ink/55">+ pico {fmtNumber(units)} {unit}</span>;
+}
+
+function Stat({ value, label, note }: { value: number; label: string; note?: string }) {
   return (
     <span className="dock-card bg-white px-4 py-2">
-      <span className="mono block text-2xl font-semibold leading-none">{fmtNumber(value)}</span>
+      <span className="mono block text-2xl font-semibold leading-none">
+        {fmtNumber(value)}
+        {note && <span className="ml-1.5 text-xs font-normal text-dock-ink/55">{note}</span>}
+      </span>
       <span className="cond block text-[10px] text-dock-ink/50">{label}</span>
     </span>
   );

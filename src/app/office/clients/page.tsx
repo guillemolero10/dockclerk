@@ -33,7 +33,7 @@ export default async function ClientsPage() {
                   {c.contact ?? "—"} · {c.type === "RAW_MATERIAL" ? "Raw material" : "Finished goods"} · {c.items} items · {c.warehouses.join(", ") || "no stock"}
                 </p>
                 <div className="mt-3 flex items-end gap-5">
-                  <Figure value={c.pallets} label="pallets" />
+                  <Figure value={c.fullPallets} label={c.picos > 0 ? `pallets + ${c.picos} pico${c.picos === 1 ? "" : "s"}` : "pallets"} />
                   <Figure value={`${Math.round(c.share * 100)}%`} label="of stock" />
                   <Figure value={`+${c.in30}`} label={`in · ${ROTATION_DAYS} d`} />
                   <Figure value={`−${c.out30}`} label={`out · ${ROTATION_DAYS} d`} />
