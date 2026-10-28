@@ -256,6 +256,64 @@ const CASES: Case[] = [
     },
   },
   {
+    name: "B16 FULL: a loose pallet alone enters as 1 pallet (FRACTION: 12/40)",
+    run() {
+      const st = rows(1, { inYmd: "2026-06-05", units: 12, inbound: 20 });
+      const f = bill(st, "2026-06", tariff({ partialPallets: "FULL" }));
+      const a = bill(st, "2026-06");
+      const bad = [
+        line(f, "in")?.quantity !== 1 ? `FULL in ${line(f, "in")?.quantity}` : "",
+        line(a, "in")?.quantity !== 0.3 ? `FRACTION in ${line(a, "in")?.quantity}` : "",
+        f.palletDays !== 26 ? `FULL pd ${f.palletDays} (1 pallet x 26 days)` : "",
+        !f.checks.detailMatches || !a.checks.detailMatches ? "detail" : "",
+      ].filter(Boolean);
+      return bad.length ? bad.join("; ") : null;
+    },
+  },
+  {
+    name: "B17 FULL: two loose pieces shipped the same day = 2 pallets out, 1 pallet stored",
+    run() {
+      const st = [...rows(1, { inYmd: "2026-05-01", units: 20, inbound: 21 }), ...rows(2, { inYmd: "2026-05-01", units: 10, outYmd: "2026-06-10", inbound: 21 })];
+      const f = bill(st, "2026-06", tariff({ partialPallets: "FULL" }));
+      const bad = [
+        line(f, "out")?.quantity !== 2 ? `FULL out ${line(f, "out")?.quantity}` : "",
+        f.palletDays !== 30 ? `FULL pd ${f.palletDays} (one shared pallet, never twice)` : "",
+        !f.checks.detailMatches ? "detail" : "",
+      ].filter(Boolean);
+      return bad.length ? bad.join("; ") : null;
+    },
+  },
+  {
+    name: "B18 same day in and out = 0 days in both rules (entry and exit still charged)",
+    run() {
+      const bad: string[] = [];
+      for (const rule of ["FRACTION", "FULL"] as const) {
+        const r = bill(rows(1, { inYmd: "2026-06-15", outYmd: "2026-06-15", inbound: 22 }), "2026-06", tariff({ partialPallets: rule }));
+        if (r.palletDays !== 0 || line(r, "storage")) bad.push(`${rule} storage ${r.palletDays}`);
+        if (line(r, "in")?.quantity !== 1 || line(r, "out")?.quantity !== 1) bad.push(`${rule} in/out`);
+        const loose = bill(rows(1, { inYmd: "2026-06-15", outYmd: "2026-06-15", units: 10, inbound: 23 }), "2026-06", tariff({ partialPallets: rule }));
+        if (loose.palletDays !== 0) bad.push(`${rule} loose same day ${loose.palletDays}`);
+      }
+      return bad.length ? bad.join("; ") : null;
+    },
+  },
+  {
+    name: "B19 FULL: a pallet split in two stays enters once (20 stays + 20 leaves, same note)",
+    run() {
+      const st = [...rows(1, { inYmd: "2026-06-05", units: 20, inbound: 24 }), ...rows(1, { inYmd: "2026-06-05", units: 20, outYmd: "2026-06-12", inbound: 24 })];
+      const f = bill(st, "2026-06", tariff({ partialPallets: "FULL" }));
+      const a = bill(st, "2026-06");
+      const bad = [
+        line(f, "in")?.quantity !== 1 ? `FULL in ${line(f, "in")?.quantity}` : "",
+        line(a, "in")?.quantity !== 1 ? `FRACTION in ${line(a, "in")?.quantity}` : "",
+        line(f, "out")?.quantity !== 1 ? `FULL out ${line(f, "out")?.quantity}` : "",
+        f.palletDays !== 26 ? `FULL pd ${f.palletDays}` : "",
+        !f.checks.detailMatches ? "detail" : "",
+      ].filter(Boolean);
+      return bad.length ? bad.join("; ") : null;
+    },
+  },
+  {
     name: "B15 300 random months: detail always adds up, in both rules",
     run() {
       let seed = 12345;
