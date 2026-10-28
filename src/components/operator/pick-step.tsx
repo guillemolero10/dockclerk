@@ -5,7 +5,7 @@ import { useState, useTransition } from "react";
 import { Check, Route } from "lucide-react";
 import { pick } from "@/app/operator/actions";
 
-type Step = { id: string; location: string; level: number | null; sku: string; lot: string | null; units: number; take: number | null };
+type Step = { id: string; location: string; level: number | null; sku: string; lot: string | null; units: number; word: string; take: number | null };
 
 /** Walk the route: one big location at a time, the same order the office sees lit up in 3D. */
 export function PickStep({ outboundId, lane, done, total, short, metres, steps }: { outboundId: string; lane: number; done: number; total: number; short: number; metres: number; steps: Step[] }) {
@@ -34,12 +34,21 @@ export function PickStep({ outboundId, lane, done, total, short, metres, steps }
               <p className="cond text-6xl font-bold tracking-wide text-dock-yellow">{current.location}</p>
               {current.level && <p className="cond text-sm text-white/60">level {current.level}</p>}
             </div>
-            <div className="px-4 py-3 text-sm">
-              <p className="mono font-semibold">
-                {current.sku} {current.lot && <span className="text-dock-ink/50">· lot {current.lot}</span>}
-              </p>
-              <p className="text-xs text-dock-ink/55">{current.take ? `Take ${current.take} boxes of ${current.units} · the rest stays here` : `1 pallet · ${current.units} units`} · then to EXP {lane}</p>
-            </div>
+            {current.take ? (
+              <div className="border-t-[1.5px] border-dock-ink bg-dock-yellow px-4 py-3 text-center">
+                <p className="cond text-xs font-semibold">Take only</p>
+                <p className="cond text-5xl font-bold leading-none">
+                  {current.take} <span className="text-3xl">{current.word}</span>
+                </p>
+                <p className="mt-1 text-sm font-medium">of {current.units} on this pallet · leaves a pico of {current.units - current.take} here</p>
+              </div>
+            ) : (
+              <p className="border-t-[1.5px] border-dock-ink px-4 py-3 text-center text-sm font-medium">Take the whole pallet · {current.units} {current.word}</p>
+            )}
+            <p className="mono px-4 py-2 text-center text-sm font-semibold">
+              {current.sku} {current.lot && <span className="font-normal text-dock-ink/50">· lot {current.lot}</span>}
+              <span className="block text-xs font-normal text-dock-ink/55">then to EXP {lane}</span>
+            </p>
           </div>
           <button
             disabled={pending}
@@ -54,9 +63,9 @@ export function PickStep({ outboundId, lane, done, total, short, metres, steps }
                 }
               })
             }
-            className="cond flex w-full items-center justify-center gap-2 bg-dock-yellow px-4 py-4 text-base font-semibold ring-[1.5px] ring-dock-ink disabled:opacity-60"
+            className="cond flex min-h-16 w-full items-center justify-center gap-3 bg-dock-yellow px-4 py-4 text-xl font-bold ring-[1.5px] ring-dock-ink active:brightness-90 disabled:opacity-60"
           >
-            <Check size={18} /> {pending ? "…" : current.take ? `Picked ${current.take} boxes, taken to EXP ${lane}` : `Picked, taken to EXP ${lane}`}
+            <Check size={24} /> {pending ? "…" : current.take ? `Picked ${current.take} ${current.word}` : "Picked the pallet"}
           </button>
           {error && <p className="text-sm text-dock-red">{error}</p>}
         </>
