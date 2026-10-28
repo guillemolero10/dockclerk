@@ -35,3 +35,17 @@ export async function approvePreInvoice(id: string): Promise<void> {
   revalidatePath("/office/billing");
   revalidatePath(`/office/billing/${id}`);
 }
+
+/**
+ * How loose pallets (picos) are charged for one customer, from now on: FRACTION or FULL.
+ * Pre-invoices already approved keep the rule they were made with; drafts take the new one the next time they are prepared.
+ */
+export async function setPartialPallets(clientId: string, mode: string): Promise<void> {
+  await assertRole("office");
+  if (mode !== "FRACTION" && mode !== "FULL") throw new Error("The rule must be FRACTION or FULL.");
+  if (typeof clientId !== "string" || !clientId) throw new Error("Customer not found.");
+  const { count } = await db.tariff.updateMany({ where: { clientId }, data: { partialPallets: mode } });
+  if (count === 0) throw new Error("This customer has no tariff.");
+  revalidatePath("/office/billing");
+  revalidatePath("/office/clients/[code]", "page");
+}

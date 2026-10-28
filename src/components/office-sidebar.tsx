@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { logout } from "@/app/actions";
-import { BellRing, Boxes, Building2, FlaskConical, Inbox, LayoutDashboard, LogOut, MonitorCog, Route, Truck } from "lucide-react";
+import { BellRing, Boxes, Building2, FlaskConical, Inbox, Receipt, LayoutDashboard, LogOut, MonitorCog, Route, Truck } from "lucide-react";
 
 const NAV = [
   { href: "/office", label: "Today", icon: LayoutDashboard, exact: true },
@@ -14,6 +14,7 @@ const NAV = [
   { href: "/office/analyst", label: "Analyst", icon: FlaskConical },
   { href: "/office/trace", label: "Lot trace", icon: Route },
   { href: "/office/clients", label: "Customers", icon: Building2 },
+  { href: "/office/billing", label: "Billing", icon: Receipt },
 ];
 
 export function OfficeSidebar({ userName, inboxCount, alertCount }: { userName: string; inboxCount: number; alertCount: number }) {
@@ -21,7 +22,7 @@ export function OfficeSidebar({ userName, inboxCount, alertCount }: { userName: 
   const isActive = (href: string, exact?: boolean) => (exact ? pathname === href : pathname.startsWith(href));
 
   return (
-    <aside className="flex w-full shrink-0 flex-col bg-dock-ink text-white md:sticky md:top-0 md:h-screen md:w-60">
+    <aside className="flex w-full shrink-0 flex-col bg-dock-ink text-white print:hidden md:sticky md:top-0 md:h-screen md:w-60">
       <div className="hazard h-2.5" />
       <Link href="/office" className="flex items-center gap-2.5 px-5 py-3 md:py-5">
         <span className="cond grid h-8 w-8 place-items-center bg-dock-yellow text-sm font-bold text-dock-ink">DC</span>

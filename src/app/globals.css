@@ -174,3 +174,19 @@ body {
 .dock-console .ask { color: var(--color-dock-yellow); }
 .dock-console .tool { color: #7fb8d6; }
 .dock-console .t { color: #6b6a63; }
+
+/* Printing a pre-invoice or an acta: plain white paper, no texture or hard shadows. */
+@media print {
+  .dock-app {
+    background: #fff;
+    background-image: none;
+  }
+  .dock-card {
+    box-shadow: none;
+  }
+  .hazard,
+  .dock-console {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}
