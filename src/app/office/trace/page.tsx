@@ -3,12 +3,14 @@ import { ArrowDownToLine, ArrowRight, ArrowUpFromLine, CheckCircle2, FileText, S
 import { CopyNotice } from "@/components/alerts/copy-notice";
 import { firstName, fmtDate, fmtNumber } from "@/lib/format";
 import { findLots, lotsAtRisk, traceLot, type LotOption, type LotTrace } from "@/lib/trace";
+import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 const AREA = { rack: "in the racks", receiving: "in the receiving lane", dispatch: "in the dispatch lane" };
 
 export default async function TracePage({ searchParams }: PageProps<"/office/trace">) {
+  await requireRole("office");
   const { lot, q } = await searchParams;
   const query = typeof q === "string" ? q.trim() : "";
   const lotCode = typeof lot === "string" ? lot : null;

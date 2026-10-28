@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { fmtDate, fmtNumber } from "@/lib/format";
 import { INBOUND_STATUS, OUTBOUND_STATUS } from "@/lib/labels";
 import { clientColor } from "@/lib/warehouse/palette";
+import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,7 @@ function cover(weeks: number | null, free: number) {
 }
 
 export default async function ClientPage({ params }: PageProps<"/office/clients/[code]">) {
+  await requireRole("office");
   const { code } = await params;
   const [detail, codes] = await Promise.all([customerDetail(code), db.client.findMany({ orderBy: { code: "asc" }, select: { code: true } })]);
   if (!detail) notFound();

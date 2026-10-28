@@ -7,6 +7,7 @@ import { RuleButton } from "@/components/analyst/rule-button";
 import { getReport } from "@/lib/analyst";
 import type { Finding, FindingKind } from "@/lib/analyst/types";
 import { db } from "@/lib/db";
+import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -27,6 +28,7 @@ const when = (d: Date) =>
   d.toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" });
 
 export default async function AnalystPage({ searchParams }: PageProps<"/office/analyst">) {
+  await requireRole("office");
   const { r } = await searchParams;
   const [report, history, warehouses] = await Promise.all([
     getReport(typeof r === "string" ? r : undefined),

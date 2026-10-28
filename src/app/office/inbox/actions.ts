@@ -7,22 +7,22 @@ import { orderReply } from "@/lib/agent/rules";
 import type { Doubt, DraftSeed, OutboundPayload, Step } from "@/lib/agent/types";
 import { db } from "@/lib/db";
 import { madridDayRange } from "@/lib/format";
-import { getSession } from "@/lib/session";
+import { assertRole } from "@/lib/session";
 
-async function requireOffice() {
-  const session = await getSession();
-  if (session?.role !== "office") throw new Error("Only the office can do this.");
-}
+// Every exported function below is reachable by anybody who can POST to the site: check the role in each one.
+const requireOffice = () => assertRole("office");
 
 const json = (value: unknown) => value as Prisma.InputJsonValue;
 
 /** Runs the clerk on one message and stores its drafts. Called one by one so the UI can show progress. */
 export async function processMessage(messageId: string): Promise<{ steps: Step[]; kinds: DraftSeed["kind"][] }> {
   await requireOffice();
+  // Claim the message in one step: if two clicks (or two tabs) arrive together only one of them gets count === 1,
+  // so a message is never drafted twice, and the second one does not pay the model for nothing.
+  const claimed = await db.message.updateMany({ where: { id: messageId, status: "NEW" }, data: { status: "PROCESSING" } });
+  if (claimed.count !== 1) return { steps: [], kinds: [] };
   const message = await db.message.findUnique({ where: { id: messageId }, include: { client: true } });
-  if (!message || message.status !== "NEW") return { steps: [], kinds: [] };
-
-  await db.message.update({ where: { id: messageId }, data: { status: "PROCESSING" } });
+  if (!message) return { steps: [], kinds: [] };
   try {
     const drafts = await runClerk(message);
     await db.$transaction([

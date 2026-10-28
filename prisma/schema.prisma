@@ -55,6 +55,8 @@ model Client {
   inbounds  Inbound[]
   outbounds Outbound[]
   messages  Message[]
+  /// Portal accounts of this customer.
+  users     User[]
 }
 
 /// Where outbound goods are delivered (supermarket hubs, factories...).
@@ -151,8 +153,9 @@ model Inbound {
   receivedUnits   Int?
   incident        String?
   status          InboundStatus    @default(EXPECTED)
-  /// Secret token for the driver's link (no login, no app).
-  driverToken     String           @unique @default(cuid())
+  /// Secret token for the driver's link (no login, no app). A random UUID v4 (122 bits from the OS random generator):
+  /// cuid() is not a secret, it carries a timestamp, a counter and a machine fingerprint.
+  driverToken     String           @unique @default(uuid())
   client          Client           @relation(fields: [clientId], references: [id])
   carrier         Carrier?         @relation(fields: [carrierId], references: [id])
   lines           InboundLine[]
@@ -340,7 +343,7 @@ model Draft {
 /// Photos and audio taken on the floor (delivery notes, loads, signatures, voice notes).
 /// Kept in the database so the demo needs no file storage service.
 model Upload {
-  id        String   @id @default(cuid())
+  id        String   @id @default(uuid())
   kind      String
   mime      String
   data      Bytes
@@ -365,4 +368,65 @@ model AnalystReport {
   gaps      Json     @default("[]")
   /// Trace shown in the console panel.
   steps     Json     @default("[]")
+}
+
+// ---------- Accounts, sessions and safety belts ----------
+
+enum UserRole {
+  office
+  operator
+  customer
+}
+
+/// A person who can sign in. The demo accounts are created by the seed, which never deletes this table
+/// (so the passwords handed to the judges survive a reseed).
+model User {
+  id           String    @id @default(cuid())
+  /// Lower case, what the person types in the login form.
+  username     String    @unique
+  name         String
+  role         UserRole
+  /// "scrypt$N$r$p$salt$hash" (see src/lib/auth/password.ts). Never the password.
+  passwordHash String
+  /// Only for role "customer" (required there, checked in code). The portal reads it from here, never from the browser.
+  /// If the customer is deleted the account stays but loses access.
+  clientId     String?
+  client       Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  sessions     Session[]
+  createdAt    DateTime  @default(now())
+
+  @@index([clientId])
+}
+
+/// A signed-in browser. The cookie holds 32 random bytes; the table keeps only their SHA-256 (id),
+/// so a copy of the database cannot be replayed as a cookie.
+model Session {
+  id        String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// What the paid models cost each day (Madrid calendar day), to stop at AI_DAILY_BUDGET_USD.
+/// Survives reseeds on purpose. Cost in millionths of a dollar, so sums are exact integers.
+model AiSpend {
+  day              String   @id
+  costMicroUsd     Int      @default(0)
+  calls            Int      @default(0)
+  promptTokens     Int      @default(0)
+  completionTokens Int      @default(0)
+  updatedAt        DateTime @updatedAt
+}
+
+/// Fixed-window counters: failed logins per user and address, questions to the portal assistant per user.
+model RateLimit {
+  key         String   @id
+  count       Int
+  windowStart DateTime
+
+  @@index([windowStart])
 }

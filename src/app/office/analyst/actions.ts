@@ -4,12 +4,10 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { runAnalysis, WINDOWS } from "@/lib/analyst";
 import { db } from "@/lib/db";
-import { getSession } from "@/lib/session";
+import { assertRole } from "@/lib/session";
 
-async function requireOffice() {
-  const session = await getSession();
-  if (session?.role !== "office") throw new Error("Only the office can do this.");
-}
+// Every exported function below is reachable by anybody who can POST to the site: check the role in each one.
+const requireOffice = () => assertRole("office");
 
 export async function analyzeNow(days: number) {
   await requireOffice();

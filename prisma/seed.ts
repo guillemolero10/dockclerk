@@ -1,12 +1,15 @@
 // Seed for the simulated "legacy warehouse software".
 // Every company, person and product here is invented for the demo.
-// Re-running it wipes the demo database and recreates the same data (deterministic).
+// Re-running it wipes the demo data and recreates the same data (deterministic).
+// It keeps three things on purpose: the User and Session tables (the judges' passwords must not change),
+// the customers' ids (so each customer account stays linked), and the AI spend counters (the daily limit is not a reset button).
 
 import { randomUUID } from "node:crypto";
 import { PrismaClient, type ClientType, type Prisma, type Unit } from "@prisma/client";
 import { DOCK_CLOSE_H, firstFree, slotMinutes, type Busy } from "../src/lib/dock/slots";
 import { makeLayout, type WarehouseDims } from "../src/lib/warehouse/layout";
 import { runAnalysis } from "../src/lib/analyst";
+import { ensureDemoUsers } from "./demo-users";
 import { simulateHistory } from "./history";
 
 const db = new PrismaClient();
@@ -152,7 +155,8 @@ async function wipe() {
   await db.inboundLine.deleteMany();
   await db.inbound.deleteMany();
   await db.item.deleteMany();
-  await db.client.deleteMany();
+  // Customers are updated in place (by their stable code), never recreated: the accounts point at their ids.
+  await db.client.deleteMany({ where: { code: { notIn: clients.map((c) => c.code) } } });
   await db.consignee.deleteMany();
   await db.carrier.deleteMany();
   await db.warehouse.deleteMany();
@@ -176,7 +180,8 @@ async function main() {
 
   const itemRows: { id: string; sku: string; clientId: string; clientCode: string; unitsPerPallet: number; tracksLot: boolean }[] = [];
   for (const c of clients) {
-    const client = await db.client.create({ data: { code: c.code, name: c.name, contact: CONTACTS[c.code], type: c.type, email: c.email, phone: c.phone } });
+    const fields = { name: c.name, contact: CONTACTS[c.code], type: c.type, email: c.email, phone: c.phone };
+    const client = await db.client.upsert({ where: { code: c.code }, update: fields, create: { code: c.code, ...fields } });
     warehouseOfClient.set(client.id, warehouseOfCode(c.code));
     for (const [sku, description, unit, unitsPerPallet, tracksLot] of c.items) {
       const item = await db.item.create({ data: { clientId: client.id, sku, description, unit, unitsPerPallet, tracksLot } });
@@ -184,6 +189,12 @@ async function main() {
     }
   }
   const clientRows = await db.client.findMany();
+
+  // Demo accounts: only the missing ones are created (the passwords go to ../USUARIOS-DEMO.md and nowhere else).
+  const accounts = await ensureDemoUsers(db);
+  console.log(`Accounts: ${accounts.created.length} created, ${accounts.relinked.length} re-linked to their customer, the rest unchanged (passwords are never printed).`);
+  if (accounts.created.length) console.log(`  New: ${accounts.created.join(", ")} (password in USUARIOS-DEMO.md)`);
+  if (accounts.notInFile.length) console.log(`  Not in USUARIOS-DEMO.md (password unknown here): ${accounts.notInFile.join(", ")}. Use: npm run users:reset -- <user>`);
 
   // Six months of history (prisma/history.ts): the analyst studies it, and today's stock is what it leaves behind.
   const warehouseCodeOf = (clientCode: string) => warehouses.find((w) => w.clients.includes(clientCode))!.code;

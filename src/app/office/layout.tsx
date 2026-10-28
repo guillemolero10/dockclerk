@@ -1,12 +1,10 @@
-import { redirect } from "next/navigation";
 import { OfficeSidebar } from "@/components/office-sidebar";
 import { getAlerts } from "@/lib/alerts";
 import { db } from "@/lib/db";
-import { getSession } from "@/lib/session";
+import { requireRole } from "@/lib/session";
 
 export default async function OfficeLayout({ children }: LayoutProps<"/office">) {
-  const session = await getSession();
-  if (session?.role !== "office") redirect("/");
+  const session = await requireRole("office");
 
   // Everything waiting for the office: messages not read yet plus drafts not approved yet.
   // Plus the alerts that need acting on now.
@@ -23,7 +21,7 @@ export default async function OfficeLayout({ children }: LayoutProps<"/office">)
 
   return (
     <div className="dock-app flex min-h-screen flex-col md:flex-row">
-      <OfficeSidebar inboxCount={inboxCount} alertCount={alerts.filter((a) => a.level === "red").length} />
+      <OfficeSidebar userName={session.name} inboxCount={inboxCount} alertCount={alerts.filter((a) => a.level === "red").length} />
       <div className="dock-grid min-w-0 flex-1">{children}</div>
     </div>
   );

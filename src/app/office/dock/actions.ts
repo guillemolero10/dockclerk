@@ -7,15 +7,13 @@ import { getDockDay } from "@/lib/dock/day";
 import { DOCK_CLOSE_H, DOCK_OPEN_H, firstFree, overlaps, slotMinutes, type Busy } from "@/lib/dock/slots";
 import { madridDay, madridHm } from "@/lib/format";
 import { shipOutbound } from "@/lib/ops/floor";
-import { getSession } from "@/lib/session";
+import { assertRole } from "@/lib/session";
 import { makeLayout } from "@/lib/warehouse/layout";
 
 const MIN = 60 * 1000;
 
-async function requireOffice() {
-  const session = await getSession();
-  if (session?.role !== "office") throw new Error("Only the office can do this.");
-}
+// Every exported function below is reachable by anybody who can POST to the site: check the role in each one.
+const requireOffice = () => assertRole("office");
 
 export type BookState = { ok?: string; error?: string; suggestion?: { dock: number; time: string } } | null;
 

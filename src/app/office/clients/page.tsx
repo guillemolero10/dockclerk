@@ -3,10 +3,12 @@ import { ArrowRight } from "lucide-react";
 import { customerOverview, ROTATION_DAYS } from "@/lib/clients";
 import { fmtDate } from "@/lib/format";
 import { clientColor } from "@/lib/warehouse/palette";
+import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function ClientsPage() {
+  await requireRole("office");
   const clients = await customerOverview();
 
   return (

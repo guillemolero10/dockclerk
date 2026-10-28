@@ -1,5 +1,5 @@
-import Link from "next/link";
 import { LogOut } from "lucide-react";
+import { logout } from "@/app/actions";
 import { PortalNav } from "@/components/portal/portal-nav";
 import { requireCustomer } from "@/lib/portal";
 
@@ -18,9 +18,11 @@ export default async function PortalLayout({ children }: LayoutProps<"/portal">)
             </span>
           </div>
           <PortalNav />
-          <Link href="/" className="cond ml-auto flex items-center gap-1.5 text-xs text-dock-ink/50 hover:text-dock-ink">
-            <LogOut size={14} /> Switch role
-          </Link>
+          <form action={logout} className="ml-auto">
+            <button className="cond flex items-center gap-1.5 text-xs text-dock-ink/50 hover:text-dock-ink">
+              <LogOut size={14} /> Sign out
+            </button>
+          </form>
         </div>
       </header>
       <div className="mx-auto max-w-6xl px-6 py-8">{children}</div>

@@ -5,10 +5,12 @@ import { FloorVoice } from "@/components/operator/floor-voice";
 import { db } from "@/lib/db";
 import { madridDayRange, madridHm } from "@/lib/format";
 import { openPickPlans } from "@/lib/ops/floor";
+import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function OperatorHome({ searchParams }: PageProps<"/operator">) {
+  await requireRole("operator");
   const { w } = await searchParams;
   const warehouses = await db.warehouse.findMany({ orderBy: { code: "asc" } });
   const here = warehouses.find((x) => x.code === w) ?? warehouses[0];

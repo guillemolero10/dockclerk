@@ -4,6 +4,7 @@ import type { Channel } from "@prisma/client";
 import { getAlerts } from "@/lib/alerts";
 import { db } from "@/lib/db";
 import { fmtNumber, madridDayRange, madridHm } from "@/lib/format";
+import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,7 @@ function dayLabel(date: Date) {
 }
 
 export default async function OfficeToday() {
+  await requireRole("office");
   const { start: startOfToday, end: endOfToday } = madridDayRange();
 
   const [newMessages, latestMessages, trucksToday, nextShipments, stockTotals, stockByClient, clients, alerts] = await Promise.all([

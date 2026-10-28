@@ -6,6 +6,7 @@ import { DockTimeline } from "@/components/dock/dock-timeline";
 import { getDockDay, type DockSlot } from "@/lib/dock/day";
 import { madridHm, madridYmd } from "@/lib/format";
 import { clerkSchedule, updateSlot } from "./actions";
+import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,7 @@ const shiftDay = (ymd: string, days: number) => {
 };
 
 export default async function DockPage({ searchParams }: PageProps<"/office/dock">) {
+  await requireRole("office");
   const params = await searchParams;
   const str = (k: string) => (typeof params[k] === "string" ? (params[k] as string) : undefined);
   const today = madridYmd();

@@ -4,10 +4,12 @@ import { LegacyFilters } from "@/components/legacy-filters";
 import { db } from "@/lib/db";
 import { fmtDate, fmtNumber, fmtTime } from "@/lib/format";
 import { OUTBOUND_STATUS } from "@/lib/labels";
+import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function OutboundsPage({ searchParams }: PageProps<"/office/legacy/outbounds">) {
+  await requireRole("office");
   const { client, status } = await searchParams;
   const where: Prisma.OutboundWhereInput = {};
   if (typeof client === "string" && client) where.clientId = client;

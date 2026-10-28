@@ -10,7 +10,9 @@ type Box = { x: number; y: number; w: number; h: number; damaged: boolean };
 const BY: Record<string, string> = { "muse-spark": "Muse Spark", "sam-3.1": "SAM 3.1", driver: "the driver", operator: "the operator" };
 
 /** The dock receipt (acta de descarga): what the note said, what was counted, photos and signature. */
-export async function ReceiptSheet({ inboundId }: { inboundId: string }) {
+export async function ReceiptSheet({ inboundId, driverToken }: { inboundId: string; driverToken?: string }) {
+  // The driver has no session: his files are opened with the secret of his link.
+  const file = (url: string) => (driverToken ? `${url}?t=${encodeURIComponent(driverToken)}` : url);
   const inbound = await db.inbound.findUnique({
     where: { id: inboundId },
     include: { client: true, warehouse: true, carrier: true, appointment: true, receipt: true, lines: { include: { item: true } } },
@@ -95,13 +97,13 @@ export async function ReceiptSheet({ inboundId }: { inboundId: string }) {
           <div className="grid gap-4 px-8 pt-5 sm:grid-cols-2">
             {r?.noteImageUrl && (
               <figure>
-                <img src={r.noteImageUrl} alt="Delivery note" className="w-full border-[1.5px] border-dock-ink" />
+                <img src={file(r.noteImageUrl)} alt="Delivery note" className="w-full border-[1.5px] border-dock-ink" />
                 <figcaption className="cond mt-1 text-[11px] text-dock-ink/50">Delivery note</figcaption>
               </figure>
             )}
             {r?.palletImageUrl && (
               <figure>
-                <LoadPhoto src={r.palletImageUrl} boxes={(r.boxes as Box[] | null) ?? null} />
+                <LoadPhoto src={file(r.palletImageUrl)} boxes={(r.boxes as Box[] | null) ?? null} />
                 <figcaption className="cond mt-1 text-[11px] text-dock-ink/50">Load at the dock</figcaption>
               </figure>
             )}
@@ -111,7 +113,7 @@ export async function ReceiptSheet({ inboundId }: { inboundId: string }) {
         <footer className="mt-6 grid grid-cols-2 gap-8 border-t-[1.5px] border-dock-ink px-8 py-5 text-sm">
           <div>
             <p className="cond text-[11px] text-dock-ink/50">Driver</p>
-            {r?.signatureUrl ? <img src={r.signatureUrl} alt="Signature" className="h-20" /> : <div className="h-20" />}
+            {r?.signatureUrl ? <img src={file(r.signatureUrl)} alt="Signature" className="h-20" /> : <div className="h-20" />}
             <p>{r?.signedBy ?? "Not signed yet"}</p>
             {r?.signedAt && <p className="mono text-xs text-dock-ink/50">{fmtDate(r.signedAt)} {madridHm(r.signedAt)}</p>}
           </div>

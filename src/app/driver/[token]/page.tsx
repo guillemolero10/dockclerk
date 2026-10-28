@@ -74,7 +74,7 @@ export default async function DriverPage({ params }: PageProps<"/driver/[token]"
       {stage === "coming" && (
         <section className="mt-5 space-y-4">
           {noteDone ? (
-            <NoteSummary readBy={receipt?.readBy ?? null} pallets={receipt?.notePallets ?? null} lines={noteLines} image={receipt?.noteImageUrl ?? null} />
+            <NoteSummary readBy={receipt?.readBy ?? null} pallets={receipt?.notePallets ?? null} lines={noteLines} image={receipt?.noteImageUrl ? `${receipt.noteImageUrl}?t=${encodeURIComponent(token)}` : null} />
           ) : (
             <div className="space-y-2">
               <h2 className="text-lg font-semibold">Before you arrive</h2>

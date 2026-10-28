@@ -3,10 +3,12 @@ import { ArrowLeft } from "lucide-react";
 import { PutAwayStep } from "@/components/operator/putaway-step";
 import { db } from "@/lib/db";
 import { planPutAway } from "@/lib/ops/floor";
+import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function PutAwayPage({ searchParams }: PageProps<"/operator/putaway">) {
+  await requireRole("operator");
   const { w } = await searchParams;
   const warehouse = await db.warehouse.findFirst({ where: typeof w === "string" ? { code: w } : {}, orderBy: { code: "asc" } });
   if (!warehouse) return <p className="p-6">No warehouse.</p>;

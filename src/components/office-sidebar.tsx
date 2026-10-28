@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { logout } from "@/app/actions";
 import { BellRing, Boxes, Building2, FlaskConical, Inbox, LayoutDashboard, LogOut, MonitorCog, Route, Truck } from "lucide-react";
 
 const NAV = [
@@ -15,7 +16,7 @@ const NAV = [
   { href: "/office/clients", label: "Customers", icon: Building2 },
 ];
 
-export function OfficeSidebar({ inboxCount, alertCount }: { inboxCount: number; alertCount: number }) {
+export function OfficeSidebar({ userName, inboxCount, alertCount }: { userName: string; inboxCount: number; alertCount: number }) {
   const pathname = usePathname();
   const isActive = (href: string, exact?: boolean) => (exact ? pathname === href : pathname.startsWith(href));
 
@@ -67,9 +68,12 @@ export function OfficeSidebar({ inboxCount, alertCount }: { inboxCount: number; 
       </nav>
 
       <div className="border-t border-white/10 p-1 md:p-3">
-        <Link href="/" className="cond flex items-center gap-3 px-3 py-2 text-sm text-white/40 hover:text-white">
-          <LogOut size={16} /> Switch role
-        </Link>
+        <p className="cond hidden truncate px-3 pb-1 text-[11px] text-white/30 md:block">{userName}</p>
+        <form action={logout}>
+          <button className="cond flex w-full items-center gap-3 px-3 py-2 text-sm text-white/40 hover:text-white">
+            <LogOut size={16} /> Sign out
+          </button>
+        </form>
       </div>
     </aside>
   );

@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowRight, Boxes, CalendarClock, Clock, Forklift, Packa
 import { AutoRefresh } from "@/components/auto-refresh";
 import { CopyNotice } from "@/components/alerts/copy-notice";
 import { getAlerts, type AlertKind, type AlertLevel } from "@/lib/alerts";
+import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,7 @@ const LEVELS: { level: AlertLevel; title: string; note: string; bar: string }[] 
 ];
 
 export default async function AlertsPage() {
+  await requireRole("office");
   const alerts = await getAlerts();
   const count = (level: AlertLevel) => alerts.filter((a) => a.level === level).length;
 

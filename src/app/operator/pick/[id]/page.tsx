@@ -6,10 +6,12 @@ import { openPickPlans } from "@/lib/ops/floor";
 import { dispatchLane } from "@/lib/warehouse/lanes";
 import { makeLayout, parseLocation } from "@/lib/warehouse/layout";
 import { pickRoute } from "@/lib/warehouse/route";
+import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function PickPage({ params }: PageProps<"/operator/pick/[id]">) {
+  await requireRole("operator");
   const { id } = await params;
   const outbound = await db.outbound.findUnique({ where: { id }, include: { client: true, consignee: true, warehouse: true, appointment: true } });
   if (!outbound) return <p className="p-6">Not found.</p>;

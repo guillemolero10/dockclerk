@@ -1,12 +1,11 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { LogOut } from "lucide-react";
-import { getSession } from "@/lib/session";
+import { logout } from "@/app/actions";
+import { requireRole } from "@/lib/session";
 
 /** The handheld: one phone-wide column, big targets, works with gloves on. */
 export default async function OperatorLayout({ children }: LayoutProps<"/operator">) {
-  const session = await getSession();
-  if (session?.role !== "operator") redirect("/");
+  await requireRole("operator");
 
   return (
     <div className="dock-app min-h-screen">
@@ -18,9 +17,11 @@ export default async function OperatorLayout({ children }: LayoutProps<"/operato
             <span className="text-sm font-semibold text-white">DockClerk</span>
             <span className="cond text-[11px] text-white/40">Floor</span>
           </Link>
-          <Link href="/" className="ml-auto text-white/40 hover:text-white" aria-label="Switch role">
-            <LogOut size={16} />
-          </Link>
+          <form action={logout} className="ml-auto">
+            <button className="text-white/40 hover:text-white" aria-label="Sign out" title="Sign out">
+              <LogOut size={16} />
+            </button>
+          </form>
         </header>
         {children}
       </div>

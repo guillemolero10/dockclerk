@@ -5,6 +5,7 @@ import { LoadPhoto } from "@/components/load-photo";
 import { LoadStep, NoteStepOperator, ReceiveForm, TruckHereButton } from "@/components/operator/receive-steps";
 import { aiStatus } from "@/lib/ai/client";
 import { db } from "@/lib/db";
+import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,7 @@ type NoteLine = { sku: string | null; description: string; lot: string | null; p
 type Box = { x: number; y: number; w: number; h: number; damaged: boolean };
 
 export default async function ReceivePage({ params }: PageProps<"/operator/receive/[id]">) {
+  await requireRole("operator");
   const { id } = await params;
   const inbound = await db.inbound.findUnique({
     where: { id },

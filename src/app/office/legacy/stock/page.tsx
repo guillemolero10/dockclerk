@@ -3,10 +3,12 @@ import { LegacyFilters } from "@/components/legacy-filters";
 import { db } from "@/lib/db";
 import { fmtNumber } from "@/lib/format";
 import { UNIT_LABEL } from "@/lib/labels";
+import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function StockPage({ searchParams }: PageProps<"/office/legacy/stock">) {
+  await requireRole("office");
   const { client } = await searchParams;
   const where: Prisma.StockWhereInput = {};
   if (typeof client === "string" && client) where.clientId = client;

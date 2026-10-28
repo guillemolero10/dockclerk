@@ -2,10 +2,12 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { WarehouseView, type Mode } from "@/components/warehouse/warehouse-view";
 import { getWarehouseSnapshot } from "@/lib/warehouse/snapshot";
+import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function WarehousePage({ searchParams }: PageProps<"/office/warehouse">) {
+  await requireRole("office");
   const { w, pick, color } = await searchParams;
   const code = typeof w === "string" ? w : undefined;
   const pickId = typeof pick === "string" ? pick : null;

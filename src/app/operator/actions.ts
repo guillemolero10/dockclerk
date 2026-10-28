@@ -4,13 +4,11 @@ import { revalidatePath } from "next/cache";
 import { transcribe } from "@/lib/ai/voice";
 import { db } from "@/lib/db";
 import { checkIn, confirmReceipt, pickPallet, putAway, recordLoad, recordNote, suggestPutAway, typeNote, type ReceivedLine } from "@/lib/ops/floor";
-import { getSession } from "@/lib/session";
+import { assertRole } from "@/lib/session";
 import { parseDataUrl, saveUpload } from "@/lib/uploads";
 
-async function requireFloor() {
-  const session = await getSession();
-  if (session?.role !== "operator") throw new Error("Only the warehouse floor can do this.");
-}
+// Every exported function below is reachable by anybody who can POST to the site: check the role in each one.
+const requireFloor = () => assertRole("operator");
 
 const refresh = () => {
   revalidatePath("/operator", "layout");

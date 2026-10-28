@@ -3,10 +3,12 @@ import { LegacyFilters } from "@/components/legacy-filters";
 import { db } from "@/lib/db";
 import { fmtDate, fmtNumber } from "@/lib/format";
 import { INBOUND_STATUS } from "@/lib/labels";
+import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function InboundsPage({ searchParams }: PageProps<"/office/legacy/inbounds">) {
+  await requireRole("office");
   const { client, status } = await searchParams;
   const where: Prisma.InboundWhereInput = {};
   if (typeof client === "string" && client) where.clientId = client;

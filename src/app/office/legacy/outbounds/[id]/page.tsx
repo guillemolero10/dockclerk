@@ -3,10 +3,12 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { fmtDate, fmtNumber, fmtTime } from "@/lib/format";
 import { OUTBOUND_STATUS, UNIT_LABEL } from "@/lib/labels";
+import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function OutboundDetail({ params }: PageProps<"/office/legacy/outbounds/[id]">) {
+  await requireRole("office");
   const { id } = await params;
   const o = await db.outbound.findUnique({
     where: { id },

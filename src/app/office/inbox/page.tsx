@@ -6,6 +6,7 @@ import { DraftCard, type DraftView } from "@/components/inbox/draft-card";
 import type { Doubt, Step } from "@/lib/agent/types";
 import { db } from "@/lib/db";
 import { resetInbox } from "./actions";
+import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 // The clerk's server action runs under this page: room for the model (25 s budget in agent/muse.ts) plus the rules fallback.
@@ -15,6 +16,7 @@ export const maxDuration = 60;
 const ORDER: Record<DraftKind, number> = { CREATE_OUTBOUND: 0, CREATE_INBOUND: 1, REPLY_ONLY: 2, NEEDS_HUMAN: 3 };
 
 export default async function InboxPage() {
+  await requireRole("office");
   const [newMessages, drafts] = await Promise.all([
     db.message.findMany({ where: { status: "NEW" }, orderBy: { receivedAt: "asc" }, include: { client: true } }),
     db.draft.findMany({ orderBy: { createdAt: "desc" }, include: { message: { include: { client: true } } } }),

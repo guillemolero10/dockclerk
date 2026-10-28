@@ -1,30 +1,15 @@
-import Link from "next/link";
-import { ArrowRight, Building2, HardHat, Monitor, Truck } from "lucide-react";
-import { db } from "@/lib/db";
-import { enterAsCustomer, enterAsOffice, enterAsOperator } from "./actions";
+import { redirect } from "next/navigation";
+import { Building2, HardHat, KeyRound, Monitor, Truck } from "lucide-react";
+import { LoginForm } from "@/components/login-form";
+import { getSession, HOME } from "@/lib/session";
 
-// Reads live data on every request.
+// Reads the session cookie on every request.
 export const dynamic = "force-dynamic";
 
-async function loadDemoData() {
-  try {
-    const [customers, nextTruck] = await Promise.all([
-      db.client.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
-      // The next truck of the day still in progress (coming, unloading or waiting for the signature).
-      db.inbound.findFirst({
-        where: { appointment: { status: { in: ["BOOKED", "ARRIVED"] } } },
-        orderBy: { appointment: { startsAt: "asc" } },
-        select: { driverToken: true },
-      }),
-    ]);
-    return { customers, driverToken: nextTruck?.driverToken ?? null };
-  } catch {
-    return { customers: null, driverToken: null }; // database not connected yet
-  }
-}
-
 export default async function Home() {
-  const { customers, driverToken } = await loadDemoData();
+  // Already signed in: straight to your own place. If the database is down, show the form anyway (signing in will say so).
+  const session = await getSession().catch(() => null);
+  if (session) redirect(HOME[session.role]);
 
   return (
     <div className="min-h-screen bg-dock-ink text-white">
@@ -39,79 +24,48 @@ export default async function Home() {
             <span className="text-lg font-semibold tracking-tight text-white">DockClerk</span>
           </div>
 
-          <h1 className="mt-10 max-w-3xl text-4xl font-semibold leading-tight tracking-tight text-white sm:text-5xl">
-            Don&apos;t replace your warehouse software.{" "}
-            <span className="text-dock-yellow">Hire an AI clerk that works inside it.</span>
-          </h1>
-          <p className="mt-5 max-w-2xl text-lg text-white/55">
-            DockClerk reads the orders customers send by email, WhatsApp or voice note, prepares them in the software
-            the warehouse already uses, and counts the boxes at the dock with a phone. A person approves everything.
-          </p>
+          <div className="mt-10 grid gap-12 lg:grid-cols-[1.4fr_1fr] lg:items-start">
+            <div>
+              <h1 className="max-w-3xl text-4xl font-semibold leading-tight tracking-tight text-white sm:text-5xl">
+                Don&apos;t replace your warehouse software.{" "}
+                <span className="text-dock-yellow">Hire an AI clerk that works inside it.</span>
+              </h1>
+              <p className="mt-5 max-w-2xl text-lg text-white/55">
+                DockClerk reads the orders customers send by email, WhatsApp or voice note, prepares them in the software
+                the warehouse already uses, and counts the boxes at the dock with a phone. A person approves everything.
+              </p>
 
-          <h2 className="cond mt-14 text-sm text-white/35">Try the demo as one of the four people in the warehouse</h2>
+              <h2 className="cond mt-12 text-sm text-white/35">Four people, four ways in</h2>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <Who icon={Monitor} title="Office" text="The AI clerk handles the inbox and prepares the work. You approve with one click." />
+                <Who icon={HardHat} title="Warehouse operator" text="On the phone: unload, put away, pick. Photograph the delivery note and the AI counts the boxes." />
+                <Who icon={Building2} title="Customer" text="Their own portal: stock, movements, receipts with photos. They can ask and order in plain words." />
+                <Who icon={Truck} title="Truck driver" text="No account: a link by WhatsApp for each delivery. The office sends it from the Dock screen." />
+              </div>
+            </div>
 
-          <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <RoleCard
-              icon={Monitor}
-              title="Office"
-              who="The admin team"
-              text="The AI clerk handles the inbox and prepares the work. You approve with one click."
-            >
-              <form action={enterAsOffice}>
-                <EnterButton label="Enter as office" />
-              </form>
-            </RoleCard>
-
-            <RoleCard
-              icon={HardHat}
-              title="Warehouse operator"
-              who="Forklift driver, on the phone"
-              text="Today's tasks. Photograph the delivery note and the pallet: the AI counts the boxes and spots damage."
-            >
-              <form action={enterAsOperator}>
-                <EnterButton label="Enter as operator" />
-              </form>
-            </RoleCard>
-
-            <RoleCard
-              icon={Truck}
-              title="Truck driver"
-              who="No app, no account"
-              text="Gets a link by WhatsApp for each delivery: sends the delivery note photo and signs the receipt."
-            >
-              {driverToken ? (
-                <Link href={`/driver/${driverToken}`} className="cond inline-flex items-center gap-2 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/15">
-                  Open today&apos;s delivery link <ArrowRight size={15} />
-                </Link>
-              ) : (
-                <p className="text-sm text-white/40">No delivery expected right now.</p>
-              )}
-            </RoleCard>
-
-            <RoleCard
-              icon={Building2}
-              title="Customer"
-              who="Companies that store goods here"
-              text="Their own portal: stock, movements and delivery receipts with photos. They can ask and order in plain words."
-            >
-              {customers === null ? (
-                <p className="text-sm text-dock-yellow">Database not connected yet.</p>
-              ) : (
-                <form action={enterAsCustomer} className="flex flex-wrap gap-2">
-                  <select name="clientId" className="min-w-0 flex-1 border border-white/15 bg-black/40 px-3 py-2 text-sm text-white">
-                    {customers.map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
-                  <EnterButton label="Enter" />
-                </form>
-              )}
-            </RoleCard>
+            <section className="border border-white/15 bg-white/[0.03] p-6">
+              <div className="flex items-center gap-3">
+                <span className="grid h-10 w-10 place-items-center bg-dock-yellow/15 text-dock-yellow ring-1 ring-dock-yellow/30">
+                  <KeyRound size={19} />
+                </span>
+                <div>
+                  <h2 className="font-semibold text-white">Sign in</h2>
+                  <p className="cond text-xs text-white/40">Office, operator or customer</p>
+                </div>
+              </div>
+              <div className="mt-6">
+                <LoginForm />
+              </div>
+              <p className="mt-5 text-xs leading-relaxed text-white/40">
+                Demo accounts for the judges: the user names and passwords come with the hackathon submission form.
+              </p>
+            </section>
           </div>
 
           <footer className="mt-14 flex flex-wrap items-center justify-between gap-3 border-t border-white/15 pt-6 text-xs text-white/40">
             <span>Built during the Meta Global AI Developer Hackathon 2026 · Powered by Meta&apos;s Muse Spark and SAM 3.1</span>
-            <span>Demo: no real login · all companies and data are invented</span>
+            <span>All companies and data are invented</span>
           </footer>
         </div>
       </main>
@@ -119,28 +73,16 @@ export default async function Home() {
   );
 }
 
-function RoleCard({ icon: Icon, title, who, text, children }: { icon: typeof Monitor; title: string; who: string; text: string; children: React.ReactNode }) {
+function Who({ icon: Icon, title, text }: { icon: typeof Monitor; title: string; text: string }) {
   return (
-    <div className="flex flex-col border border-white/15 bg-white/[0.03] p-6">
-      <div className="flex items-center gap-3">
-        <span className="grid h-10 w-10 place-items-center bg-dock-yellow/15 text-dock-yellow ring-1 ring-dock-yellow/30">
-          <Icon size={19} />
+    <div className="border border-white/10 bg-white/[0.02] p-4">
+      <div className="flex items-center gap-2.5">
+        <span className="grid h-8 w-8 place-items-center bg-dock-yellow/15 text-dock-yellow ring-1 ring-dock-yellow/30">
+          <Icon size={16} />
         </span>
-        <div>
-          <h3 className="font-semibold text-white">{title}</h3>
-          <p className="cond text-xs text-white/40">{who}</p>
-        </div>
+        <h3 className="text-sm font-semibold text-white">{title}</h3>
       </div>
-      <p className="mt-4 flex-1 text-sm leading-relaxed text-white/55">{text}</p>
-      <div className="mt-5">{children}</div>
+      <p className="mt-2.5 text-xs leading-relaxed text-white/50">{text}</p>
     </div>
-  );
-}
-
-function EnterButton({ label }: { label: string }) {
-  return (
-    <button className="cond group inline-flex items-center gap-2 bg-dock-yellow px-4 py-2 text-sm font-semibold text-dock-ink transition hover:brightness-95">
-      {label} <ArrowRight size={15} className="transition group-hover:translate-x-0.5" />
-    </button>
   );
 }

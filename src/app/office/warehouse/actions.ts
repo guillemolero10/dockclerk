@@ -4,12 +4,10 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { LIMITS, makeLayout } from "@/lib/warehouse/layout";
-import { getSession } from "@/lib/session";
+import { assertRole } from "@/lib/session";
 
-async function requireOffice() {
-  const session = await getSession();
-  if (session?.role !== "office") throw new Error("Only the office can do this.");
-}
+// Every exported function below is reachable by anybody who can POST to the site: check the role in each one.
+const requireOffice = () => assertRole("office");
 
 function readDims(formData: FormData) {
   const num = (name: keyof typeof LIMITS | "aisleWidth") => {
