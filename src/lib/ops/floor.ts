@@ -21,12 +21,15 @@ async function receiptFor(inboundId: string) {
 
 // ---------- receiving ----------
 
-/** Photo of the delivery note: Muse Spark reads it when available, otherwise a person types the pallets. */
-export async function recordNote(inboundId: string, media: Media) {
+/**
+ * Photo of the delivery note: Muse Spark reads it when available, otherwise a person types the pallets.
+ * `read: false` keeps the photo but skips the model (used when a link has asked for too many readings).
+ */
+export async function recordNote(inboundId: string, media: Media, options: { read?: boolean } = {}) {
   const inbound = await db.inbound.findUniqueOrThrow({ where: { id: inboundId }, include: { client: { include: { items: true } } } });
   const url = await saveUpload("note", media);
   await receiptFor(inboundId);
-  const reading = await readDeliveryNote(media, { customer: inbound.client.name, items: inbound.client.items });
+  const reading = options.read === false ? null : await readDeliveryNote(media, { customer: inbound.client.name, items: inbound.client.items });
   if (!reading) {
     await db.dockReceipt.update({ where: { inboundId }, data: { noteImageUrl: url } });
     return { read: false as const };

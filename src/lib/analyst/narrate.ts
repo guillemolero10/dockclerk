@@ -2,6 +2,7 @@
 // findings, decides what matters most this week and says it plainly. A guard then checks that
 // every figure it wrote is in the data, and drops what is not. Without a key, a template writes it.
 
+import { DailyBudgetError, fmtUsd } from "@/lib/ai/budget";
 import { chat, parseJson, providers } from "@/lib/ai/client";
 import type { Finding, Gap, Step } from "./types";
 
@@ -66,7 +67,7 @@ export async function narrate(findings: Finding[], gaps: Gap[], days: number): P
       findings: findings.map((f) => ({ id: f.id, kind: f.kind, score: f.score, confidence: f.confidence, title: f.title, body: f.body, evidence: f.evidence })),
       gaps,
     };
-    const answer = await chat(p, [{ role: "system", content: SYSTEM }, { role: "user", content: JSON.stringify(input) }], { json: true, maxTokens: 900 });
+    const answer = await chat(p, [{ role: "system", content: SYSTEM }, { role: "user", content: JSON.stringify(input) }], { json: true, maxTokens: 900, timeoutMs: 30_000 });
     const raw = parseJson<Partial<Story>>(answer.content);
     const allowed = numbersIn(findings, gaps, days);
     const ids = new Set(findings.map((f) => f.id));
@@ -96,8 +97,13 @@ export async function narrate(findings: Finding[], gaps: Gap[], days: number): P
     );
     return { story, brain: p.name, steps };
   } catch (error) {
-    console.error("Analyst narrative failed, using the template", error);
-    steps.push({ kind: "ask", text: "model unavailable → report template (plan B)" });
+    if (error instanceof DailyBudgetError) {
+      console.warn(error.message);
+      steps.push({ kind: "ask", text: `daily AI limit reached (${fmtUsd(error.spentUsd)} of ${fmtUsd(error.limitUsd)}) → report template (plan B)` });
+    } else {
+      console.error("Analyst narrative failed, using the template", error);
+      steps.push({ kind: "ask", text: "model unavailable → report template (plan B)" });
+    }
     return { story: fallback, brain: "rules", steps };
   }
 }

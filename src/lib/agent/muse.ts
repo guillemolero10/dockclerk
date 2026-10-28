@@ -48,7 +48,7 @@ type Final =
 const MAX_TURNS = 6;
 const MAX_CALLS_PER_TURN = 6;
 // Whole budget for one message (model + database). Past it the rules answer instead, so the demo never hangs.
-const DEADLINE_MS = Number(process.env.AGENT_TIMEOUT_MS) || 25_000;
+const DEADLINE_MS = Math.min(Number(process.env.AGENT_TIMEOUT_MS) || 25_000, 45_000);
 const short = (value: unknown) => JSON.stringify(value).slice(0, 900);
 
 /** Numbers written in a text; "1.360" (Spanish thousands) counts as 1360. */
@@ -139,7 +139,8 @@ export async function draftWithMuse(message: Message & { client: Client }): Prom
     if (!requested.length) throw new Error(`${p.name} answered with neither a tool nor a decision`);
     const results: string[] = [];
     for (const call of requested) {
-      const run = tools[call.tool];
+      // Own properties only: the model could ask for "constructor" or "toString", which every object inherits.
+      const run = Object.hasOwn(tools, call.tool) ? tools[call.tool] : undefined;
       const result = run ? await run(call.args ?? {}) : { error: `unknown tool ${call.tool}` };
       evidence.push(JSON.stringify(result));
       results.push(`Result of ${call.tool}: ${short(result)}`);

@@ -1,6 +1,9 @@
 // Meta models behind one door. Keys live only in .env (never in the repo).
 // Without a key every caller gets null and the app falls back to rules or manual entry,
 // so the whole product works before the credits arrive and the demo never depends on luck.
+// Models with a known price also stop for the day at AI_DAILY_BUDGET_USD (see budget.ts).
+
+import { assertBudget, recordSpend } from "./budget";
 
 export type Provider = {
   name: string;
@@ -63,10 +66,13 @@ type Reply = { content: string | null; tool_calls?: { id: string; function: { na
 
 /**
  * OpenAI-compatible chat completion. Throws on HTTP errors, timeouts and empty answers so callers can fall back.
+ * Also throws DailyBudgetError once today's spend on priced models reaches AI_DAILY_BUDGET_USD.
  * Retries once (after a short wait) on 429 and gateway errors if there is time left.
  */
 export async function chat(p: Provider, messages: ChatMessage[], options: { json?: boolean; maxTokens?: number; tools?: unknown[]; timeoutMs?: number } = {}) {
   const timeoutMs = options.timeoutMs ?? 60_000;
+  // Before anything leaves the server. Only models with a price are counted: for the others (Meta Model API) the cost is not known.
+  if (p.price) await assertBudget();
   const started = Date.now();
   const body = JSON.stringify({
     model: p.model,
@@ -115,6 +121,7 @@ export async function chat(p: Provider, messages: ChatMessage[], options: { json
   spend.completion += usage.completion;
   spend.reasoning += usage.reasoning;
   spend.costUsd += usage.costUsd;
+  if (p.price) await recordSpend({ costUsd: usage.costUsd, prompt: usage.prompt, completion: usage.completion });
   console.info(`[ai] ${p.name} ${((Date.now() - started) / 1000).toFixed(1)}s · ${usage.prompt} in + ${usage.completion} out (${usage.reasoning} reasoning) · $${usage.costUsd.toFixed(5)}`);
   return { ...choice.message, usage };
 }

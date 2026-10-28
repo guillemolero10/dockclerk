@@ -6,6 +6,7 @@ import { runClerk } from "@/lib/agent";
 import type { OutboundPayload, Step } from "@/lib/agent/types";
 import { db } from "@/lib/db";
 import { requireCustomer } from "@/lib/portal";
+import { consume } from "@/lib/rate-limit";
 
 export type AskResult = { kind: "answer" | "forwarded"; text: string; steps: Step[] };
 
@@ -18,6 +19,10 @@ export async function askClerk(question: string): Promise<AskResult> {
   const client = await requireCustomer();
   const body = question.trim().slice(0, 1000);
   if (!body) throw new Error("Write your question or request.");
+  // Every question can call the paid model: 30 an hour per customer, answered in the chat rather than as an error.
+  if (!(await consume(`portal-ask:${client.id}`, 30, 60 * 60 * 1000))) {
+    return { kind: "answer", text: "Has hecho muchas consultas seguidas. Espera un rato o escribe a la oficina directamente.", steps: [] };
+  }
   const fromName = `${client.contact ?? client.name} (${client.name})`;
 
   const preview: Message & { client: typeof client } = {

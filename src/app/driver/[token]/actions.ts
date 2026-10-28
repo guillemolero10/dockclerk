@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { checkIn, recordNote, signReceipt, typeNote } from "@/lib/ops/floor";
+import { consume } from "@/lib/rate-limit";
 import { parseDataUrl } from "@/lib/uploads";
 
 // The driver has no account: the secret token in the link is the only key, and it only opens one delivery.
@@ -22,7 +23,10 @@ export async function sendNotePhoto(token: string, photo: string) {
   const inbound = await inboundOf(token);
   const media = parseDataUrl(photo);
   if (!media) throw new Error("That photo could not be read.");
-  const result = await recordNote(inbound.id, media);
+  // Reading a photo costs model credits and this link has no login: ten readings an hour per delivery.
+  // Past that the photo is kept and the driver types the pallets, as when no model is available.
+  const read = await consume(`driver-note:${inbound.id}`, 10, 60 * 60 * 1000);
+  const result = await recordNote(inbound.id, media, { read });
   refresh(token);
   return { read: result.read };
 }
