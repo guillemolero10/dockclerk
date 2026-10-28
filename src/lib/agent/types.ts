@@ -7,23 +7,34 @@ export type StepKind = "read" | "tool" | "ok" | "ask";
 export type Step = { kind: StepKind; text: string };
 
 /** A field the clerk is not sure about. The office picks one option before approving.
- * "consigneeId": which destination. "pallets:<SKU>": how many to ship when stock is short. */
+ * "consigneeId": which destination. "units:<SKU>": how many units to ship, when the quantity does not
+ * come out in whole units or stock is short (option values are units). */
 export type Doubt = {
-  field: "consigneeId" | `pallets:${string}`;
+  field: "consigneeId" | `units:${string}`;
   question: string;
   options: { label: string; value: string }[];
 };
 
+/** Units are the truth; pallets are derived (see src/lib/pallets/quantity.ts). */
 export type OutboundLineDraft = {
   itemId: string;
   sku: string;
   description: string;
-  pallets: number;
-  /** What the customer asked for; pallets can end lower if stock is short. */
-  requested: number;
+  /** Units to ship, a whole number above zero. */
+  units: number;
+  /** What the customer asked for, in units; `units` can end lower if stock is short. */
+  requestedUnits: number;
+  /** Units the customer has free right now, to warn before approving. */
+  availableUnits: number;
   unitsPerPallet: number;
-  /** Pallets the customer has in stock right now, to warn before approving. */
-  available: number;
+  /** "cajas", "sacos": how the customer counts this item. */
+  unitWord: string;
+  /** `units` as people say it: "2 palés + 50 cajas". */
+  text: string;
+  /** Pallet positions the shipment takes: ⌈units / unitsPerPallet⌉. */
+  pallets: number;
+  /** Set when the words did not give whole units (1,5 palés of 55 sacos): the two nearest whole numbers. */
+  wholeOptions?: number[];
 };
 
 export type OutboundPayload = {

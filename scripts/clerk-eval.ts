@@ -64,7 +64,7 @@ async function grade(c: Case, client: Client, d: DraftSeed): Promise<string | nu
   const e = c.expect;
   if (d.kind !== e.kind) return `kind ${d.kind}, expected ${e.kind}`;
   if (e.kind === "CREATE_OUTBOUND" && d.kind === "CREATE_OUTBOUND") {
-    const got = Object.fromEntries(d.payload.lines.map((l) => [l.sku, l.requested]));
+    const got = Object.fromEntries(d.payload.lines.map((l) => [l.sku, l.requestedUnits / l.unitsPerPallet]));
     if (JSON.stringify(Object.entries(got).sort()) !== JSON.stringify(Object.entries(e.lines).sort())) return `lines ${JSON.stringify(got)}`;
     if (!(d.payload.consigneeName ?? "").includes(e.to)) return `destination ${d.payload.consigneeName}`;
     if (d.doubts.length !== e.doubts) return `${d.doubts.length} yellow doubts, expected ${e.doubts}`;
@@ -73,7 +73,7 @@ async function grade(c: Case, client: Client, d: DraftSeed): Promise<string | nu
     const text = d.reply.replace(/(\d)\.(?=\d{3}\b)/g, "$1");
     for (const sku of e.skus) {
       const item = await db.item.findFirstOrThrow({ where: { clientId: client.id, sku } });
-      const { pallets } = await checkStock(client.id, item.id);
+      const { full: pallets } = await checkStock(client.id, item.id);
       if (!new RegExp(`(?<![\\d,.])${pallets}(?![\\d])`).test(text)) return `reply lacks ${sku} = ${pallets} pallets`;
     }
   }

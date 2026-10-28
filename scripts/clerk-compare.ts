@@ -33,7 +33,7 @@ function summary(d: DraftSeed) {
   const base = { kind: d.kind, doubts: d.doubts.map((x) => x.question), reply: d.reply };
   if (d.kind === "CREATE_OUTBOUND") {
     const p = d.payload;
-    return { ...base, to: p.consigneeName, deliverBy: p.deliverBy, phrase: p.deliverPhrase, lines: p.lines.map((l) => `${l.pallets}x ${l.sku} (asked ${l.requested}, stock ${l.available})`) };
+    return { ...base, to: p.consigneeName, deliverBy: p.deliverBy, phrase: p.deliverPhrase, lines: p.lines.map((l) => `${l.text} ${l.sku} (asked ${l.requestedUnits}, stock ${l.availableUnits} units)`) };
   }
   if (d.kind === "REPLY_ONLY") return { ...base, answer: d.payload.answer };
   return { ...base, reason: d.payload.reason };

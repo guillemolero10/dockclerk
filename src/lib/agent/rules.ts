@@ -4,6 +4,8 @@
 import type { Client, Message } from "@prisma/client";
 import { madridDayRange } from "@/lib/format";
 import { checkStock, findConsignees, findItem, inboundsThisMonth, lastShipmentTo, norm } from "./tools";
+import { describeUnits, scanQuantities, toUnits, unitWordFor } from "@/lib/pallets/quantity";
+import { buildLine, withUnits } from "./lines";
 import type { Doubt, DraftSeed, OutboundLineDraft, OutboundPayload, Step } from "./types";
 
 const HOUR = 60 * 60 * 1000;
@@ -61,19 +63,30 @@ function deliveryText(payload: OutboundPayload) {
 /** Customer-facing confirmation, rebuilt on approval in case the office changed destination or quantities. */
 export function orderReply(payload: OutboundPayload, fromName: string) {
   const what = payload.lines
-    .map((l) => (l.pallets < l.requested
-      ? `${l.pallets} palés de ${l.sku} (de los ${l.requested} pedidos, es lo que tenéis en stock; el resto queda pendiente)`
-      : `${l.pallets} palés de ${l.sku}`))
+    .map((l) => (l.units < l.requestedUnits
+      ? `${l.text} de ${l.sku} (de los ${describeUnits(l.requestedUnits, l.unitsPerPallet, l.unitWord)} pedidos, es lo que tenéis en stock; el resto queda pendiente)`
+      : `${l.text} de ${l.sku}`))
     .join(" y ");
   const when = payload.deliverBy ? `, entrega ${deliveryText(payload)}` : "";
   return `${hello(fromName)} confirmado: ${what} para ${payload.consigneeName ?? "el destino indicado"}${when}. Un saludo, Almacenes del Vinalopó.`;
 }
 
-/** "12 palés de PELUCHE-30", "4 de horchata", "15 de blando" → quantity + product fragment. */
+/** "12 palés de PELUCHE-30", "2,5 palés de X", "130 cajas de Y", "4 de horchata" → quantity + product fragment. */
 function quantitySegments(text: string) {
   const t = norm(text).replace(/litro y medio/g, "1,5").replace(/\bref\.\s*/g, "");
-  const re = /(\d+)\s*(?:pales?|palets?)?\s+de\s+(.+?)(?=\s+(?:para|a|y|del pedido)\s|[,.;!?]|$)/g;
-  return [...t.matchAll(re)].map((m) => ({ pallets: Number(m[1]), fragment: m[2] }));
+  const found: { amount: number; unit: "pallets" | "units"; fragment: string }[] = [];
+  for (const q of scanQuantities(t)) {
+    const m = /^\s+de\s+(.+?)(?=\s+(?:para|a|y|del pedido)\s|[,.;!?]|$)/.exec(t.slice(q.end));
+    if (m && q.amount > 0) found.push({ amount: q.amount, unit: q.unit, fragment: m[1] });
+  }
+  return found;
+}
+
+/** Units for a quantity of an item: whole units, or the two nearest whole numbers when it does not fit. */
+function unitsOf(q: { amount: number; unit: "pallets" | "units" }, perPallet: number) {
+  const r = toUnits(q.amount, q.unit, perPallet);
+  if ("units" in r) return { units: r.units, options: undefined };
+  return { units: r.options[0], options: r.options };
 }
 
 function channelLabel(m: Message) {
@@ -122,7 +135,7 @@ export async function draftMessage(message: Message & { client: Client | null })
     if (!last) return [human("no recent shipment to that destination, check before answering", steps)];
     const state = last.status === "SHIPPED" || last.status === "CLOSED" ? "salió" : "todavía no ha salido; sale";
     const date = last.date.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", timeZone: "Europe/Madrid" });
-    const what = last.lines.map((l) => `${l.pallets} palés de ${l.item.sku}`).join(" y ");
+    const what = last.lines.map((l) => `${describeUnits(l.units, l.item.unitsPerPallet, unitWordFor(l.item.unit))} de ${l.item.sku}`).join(" y ");
     steps.push({ kind: "tool", text: `last_shipment → Nº ${last.number} · ${last.status.toLowerCase()} · ${date}` });
     steps.push({ kind: "ok", text: "reply drafted" });
     return [{
@@ -151,7 +164,7 @@ export async function draftMessage(message: Message & { client: Client | null })
     steps.push({ kind: "tool", text: "classify → stock question" });
     const asked = segments.length
       ? segments
-      : t.split(/\?|\by\b/).map((fragment) => ({ pallets: 0, fragment })).filter((s) => s.fragment.trim().length > 2);
+      : t.split(/\?|\by\b/).map((fragment) => ({ amount: 0, unit: "pallets" as const, fragment })).filter((s) => s.fragment.trim().length > 2);
     const answers: string[] = [];
     const seen = new Set<string>();
     for (const s of asked) {
@@ -159,10 +172,11 @@ export async function draftMessage(message: Message & { client: Client | null })
       if (!item || seen.has(item.id)) continue;
       seen.add(item.id);
       const stock = await checkStock(client.id, item.id);
-      steps.push({ kind: "tool", text: `check_stock(${item.sku}) → ${stock.pallets} pallets` });
-      const short = s.pallets > stock.pallets;
-      if (short) steps.push({ kind: "ask", text: `${item.sku}: asks ${s.pallets}, only ${stock.pallets} in stock` });
-      answers.push(`${stock.pallets} palés de ${item.sku} (${stock.units.toLocaleString("es-ES")} uds)${s.pallets ? (short ? `: faltarían ${s.pallets - stock.pallets}` : ": hay suficiente") : ""}`);
+      const wanted = s.amount ? unitsOf(s, item.unitsPerPallet).units : 0;
+      steps.push({ kind: "tool", text: `check_stock(${item.sku}) → ${stock.text} (${stock.units} units)` });
+      const short = wanted > stock.units;
+      if (short) steps.push({ kind: "ask", text: `${item.sku}: asks ${wanted} units, only ${stock.units} in stock` });
+      answers.push(`${stock.text} de ${item.sku} (${stock.units.toLocaleString("es-ES")} uds)${wanted ? (short ? `: faltarían ${describeUnits(wanted - stock.units, item.unitsPerPallet, stock.unitWord)}` : ": hay suficiente") : ""}`);
     }
     if (!answers.length) return [human("stock question about a product I could not identify", steps)];
     steps.push({ kind: "ok", text: "reply drafted with live stock" });
@@ -181,9 +195,11 @@ export async function draftMessage(message: Message & { client: Client | null })
       steps.push({ kind: "tool", text: `find_item("${s.fragment}") → ${item ? item.sku : "no match"}` });
       if (!item) continue;
       const stock = await checkStock(client.id, item.id);
-      steps.push({ kind: "tool", text: `check_stock(${item.sku}) → ${stock.pallets} pallets` });
-      if (s.pallets > stock.pallets) steps.push({ kind: "ask", text: `${item.sku}: ${s.pallets} asked, only ${stock.pallets} in stock` });
-      lines.push({ itemId: item.id, sku: item.sku, description: item.description, pallets: s.pallets, requested: s.pallets, unitsPerPallet: item.unitsPerPallet, available: stock.pallets });
+      const { units, options } = unitsOf(s, item.unitsPerPallet);
+      steps.push({ kind: "tool", text: `check_stock(${item.sku}) → ${stock.text} (${stock.units} units)` });
+      if (options) steps.push({ kind: "ask", text: `${item.sku}: ${s.amount} ${s.unit === "pallets" ? "pallets" : "units"} is not a whole number of ${stock.unitWord}` });
+      if (units > stock.units) steps.push({ kind: "ask", text: `${item.sku}: ${units} units asked, only ${stock.units} in stock` });
+      lines.push(buildLine(item, units, stock.units, options));
     }
     if (!lines.length) return [human("order for products I could not identify", steps)];
 
@@ -235,17 +251,26 @@ export function outboundDraft(
       options: consignees.map((c) => ({ label: `${c.name.split("–")[1]?.trim() ?? c.name} · ${c.city}`, value: c.id })),
     });
   }
-  for (const l of lines.filter((l) => l.requested > l.available)) {
-    // Never promise what is not on the shelf: default to what is there, let the office decide.
-    if (l.available > 0) l.pallets = l.available;
-    doubts.push({
-      field: `pallets:${l.sku}`,
-      question: `${l.sku}: ${l.requested} asked, ${l.available} in stock`,
-      options: [
-        ...(l.available > 0 ? [{ label: `Ship the ${l.available} in stock`, value: String(l.available) }] : []),
-        { label: `Ship ${l.requested} anyway`, value: String(l.requested) },
-      ],
-    });
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (l.requestedUnits > l.availableUnits) {
+      // Never promise what is not on the shelf: default to what is there, let the office decide.
+      if (l.availableUnits > 0) lines[i] = withUnits(l, l.availableUnits);
+      doubts.push({
+        field: `units:${l.sku}`,
+        question: `${l.sku}: ${describeUnits(l.requestedUnits, l.unitsPerPallet, l.unitWord)} asked, ${describeUnits(l.availableUnits, l.unitsPerPallet, l.unitWord)} in stock`,
+        options: [
+          ...(l.availableUnits > 0 ? [{ label: `Ship the ${describeUnits(l.availableUnits, l.unitsPerPallet, l.unitWord)} in stock`, value: String(l.availableUnits) }] : []),
+          { label: `Ship ${describeUnits(l.requestedUnits, l.unitsPerPallet, l.unitWord)} anyway`, value: String(l.requestedUnits) },
+        ],
+      });
+    } else if (l.wholeOptions?.length) {
+      doubts.push({
+        field: `units:${l.sku}`,
+        question: `${l.sku}: that is not a whole number of ${l.unitWord}`,
+        options: l.wholeOptions.map((u) => ({ label: describeUnits(u, l.unitsPerPallet, l.unitWord), value: String(u) })),
+      });
+    }
   }
   steps.push({
     kind: doubts.length ? "ask" : "ok",

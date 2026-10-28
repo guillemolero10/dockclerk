@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { Prisma } from "@prisma/client";
 import { runClerk } from "@/lib/agent";
+import { withUnits } from "@/lib/agent/lines";
 import { orderReply } from "@/lib/agent/rules";
 import type { Doubt, DraftSeed, OutboundPayload, Step } from "@/lib/agent/types";
 import { db } from "@/lib/db";
@@ -65,10 +66,12 @@ export async function approveDraft(formData: FormData) {
       payload.consigneeId = consignee.id;
       payload.consigneeName = consignee.name;
     } else {
-      const line = payload.lines.find((l) => `pallets:${l.sku}` === doubt.field);
-      if (line) line.pallets = Number(value);
+      const idx = payload.lines.findIndex((l) => `units:${l.sku}` === doubt.field);
+      if (idx >= 0) payload.lines[idx] = withUnits(payload.lines[idx], Number(value));
     }
   }
+
+  if (!payload.lines.every((l) => Number.isInteger(l.units) && l.units > 0)) throw new Error("This draft has no valid quantity. Discard it and replay the message.");
 
   const deliverBy = payload.deliverBy ? new Date(payload.deliverBy) : null;
   const outbound = await db.outbound.create({
@@ -80,7 +83,7 @@ export async function approveDraft(formData: FormData) {
       consigneeId: payload.consigneeId,
       notes: "Alta DockClerk · aprobada en oficina",
       status: "REQUESTED",
-      lines: { create: payload.lines.map((l) => ({ itemId: l.itemId, pallets: l.pallets, units: l.pallets * l.unitsPerPallet })) },
+      lines: { create: payload.lines.map((l) => ({ itemId: l.itemId, pallets: Math.ceil(l.units / l.unitsPerPallet), units: l.units })) },
     },
   });
 

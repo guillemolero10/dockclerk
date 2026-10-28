@@ -2,6 +2,7 @@
 // The rules engine calls them today; Muse Spark will call the same functions through tool calling.
 import { db } from "@/lib/db";
 import { madridDayRange } from "@/lib/format";
+import { describeUnits, splitUnits, unitWordFor } from "@/lib/pallets/quantity";
 
 /** Lowercase, no accents, single spaces: "Bahía" and "bahia" compare equal. */
 export function norm(text: string) {
@@ -54,22 +55,35 @@ export async function findItem(clientId: string, fragment: string) {
 }
 
 /**
- * Pallets and units of an item free to promise right now: what is on the shelves and not
- * picked yet, minus what open outbounds still have to pick (it stays on the shelf until then).
+ * What is free to promise of an item right now, in units: what is on the shelves and not picked yet,
+ * minus what open outbounds still have to pick (it stays on the shelf until then).
+ * Pallets are derived: whole pallets, loose units, and the loose pallets (picos) with where they stand.
  */
 export async function checkStock(clientId: string, itemId: string) {
-  const [unpicked, ordered, pickedForOpen] = await Promise.all([
-    db.stock.aggregate({ where: { clientId, itemId, outboundId: null }, _sum: { pallets: true, units: true } }),
-    db.outboundLine.aggregate({ where: { itemId, outbound: { clientId, status: "REQUESTED" } }, _sum: { pallets: true, units: true } }),
-    db.stock.aggregate({ where: { clientId, itemId, outbound: { status: "REQUESTED" } }, _sum: { pallets: true, units: true } }),
+  const [item, unpicked, ordered, pickedForOpen, loosePallets] = await Promise.all([
+    db.item.findUniqueOrThrow({ where: { id: itemId } }),
+    db.stock.aggregate({ where: { clientId, itemId, outboundId: null }, _sum: { units: true } }),
+    db.outboundLine.aggregate({ where: { itemId, outbound: { clientId, status: "REQUESTED" } }, _sum: { units: true } }),
+    db.stock.aggregate({ where: { clientId, itemId, outbound: { status: "REQUESTED" } }, _sum: { units: true } }),
+    db.stock.findMany({ where: { clientId, itemId, outboundId: null }, select: { location: true, units: true }, orderBy: { location: "asc" } }),
   ]);
-  const stillToPick = {
-    pallets: Math.max(0, (ordered._sum.pallets ?? 0) - (pickedForOpen._sum.pallets ?? 0)),
-    units: Math.max(0, (ordered._sum.units ?? 0) - (pickedForOpen._sum.units ?? 0)),
-  };
+  const stillToPick = Math.max(0, (ordered._sum.units ?? 0) - (pickedForOpen._sum.units ?? 0));
+  const units = Math.max(0, (unpicked._sum.units ?? 0) - stillToPick);
+  const unitWord = unitWordFor(item.unit);
+  const split = splitUnits(units, item.unitsPerPallet);
   return {
-    pallets: Math.max(0, (unpicked._sum.pallets ?? 0) - stillToPick.pallets),
-    units: Math.max(0, (unpicked._sum.units ?? 0) - stillToPick.units),
+    /** Free units (the truth). */
+    units,
+    /** Pallet positions those units take: ⌈units / unitsPerPallet⌉. */
+    pallets: split.slots,
+    full: split.full,
+    loose: split.loose,
+    equivalent: split.equivalent,
+    unitsPerPallet: item.unitsPerPallet,
+    unitWord,
+    /** Loose pallets standing in the building, not yet promised to anyone. */
+    picos: loosePallets.filter((r) => r.units < item.unitsPerPallet),
+    text: describeUnits(units, item.unitsPerPallet, unitWord),
   };
 }
 

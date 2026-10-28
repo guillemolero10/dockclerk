@@ -2,6 +2,7 @@
 // The answer a food or cosmetics 3PL owes its customer within hours of a recall.
 
 import { db } from "@/lib/db";
+import { describeUnits, unitWordFor } from "@/lib/pallets/quantity";
 
 export type ShippedPallet = { itemId: string; sku: string; lot: string | null; units: number; location: string; inboundId: string | null };
 
@@ -61,6 +62,7 @@ export async function traceLot(lot: string) {
   if (!lines.length && !stock.length) return null;
 
   const item = lines[0]?.item ?? (await db.item.findUniqueOrThrow({ where: { id: stock[0].itemId }, include: { client: true } }));
+  const unitWord = unitWordFor(item.unit);
 
   const came = lines.map((l) => ({
     inboundId: l.inbound.id,
@@ -73,6 +75,7 @@ export async function traceLot(lot: string) {
     plate: l.inbound.plate,
     pallets: l.pallets,
     units: l.units,
+    text: describeUnits(l.units, item.unitsPerPallet, unitWord),
     receipt: !!l.inbound.receipt,
     incident: l.inbound.incident,
   }));
@@ -101,14 +104,19 @@ export async function traceLot(lot: string) {
       docRef: o.clientDocRef,
       pallets: mine.length,
       units: mine.reduce((sum, p) => sum + p.units, 0),
+      text: describeUnits(mine.reduce((sum, p) => sum + p.units, 0), item.unitsPerPallet, unitWord),
     };
   });
 
   const sum = <T,>(list: T[], f: (x: T) => number) => list.reduce((s, x) => s + f(x), 0);
+  // Units are the truth: one pallet that comes in can leave as two rows (a loose pallet and what was taken),
+  // so pallets are information and the books balance in units.
   const totals = {
-    in: sum(came, (c) => c.pallets),
-    here: sum(stock, (s) => s.pallets),
-    out: sum(went, (w) => w.pallets),
+    in: sum(came, (c) => c.units),
+    here: sum(stock, (s) => s.units),
+    out: sum(went, (w) => w.units),
+    pallets: { in: sum(came, (c) => c.pallets), here: sum(stock, (s) => s.pallets), out: sum(went, (w) => w.pallets) },
+    hereText: describeUnits(sum(stock, (s) => s.units), item.unitsPerPallet, unitWord),
   };
 
   return {

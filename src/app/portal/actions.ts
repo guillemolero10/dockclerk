@@ -5,6 +5,7 @@ import type { Message } from "@prisma/client";
 import { runClerk } from "@/lib/agent";
 import type { OutboundPayload, Step } from "@/lib/agent/types";
 import { db } from "@/lib/db";
+import { describeUnits } from "@/lib/pallets/quantity";
 import { requireCustomer } from "@/lib/portal";
 import { consume } from "@/lib/rate-limit";
 
@@ -38,11 +39,11 @@ export async function askClerk(question: string): Promise<AskResult> {
 
   if (draft.kind === "CREATE_OUTBOUND") {
     const order = draft.payload as OutboundPayload;
-    const what = order.lines.map((l) => `${l.requested} palés de ${l.sku}`).join(" y ");
+    const what = order.lines.map((l) => `${describeUnits(l.requestedUnits, l.unitsPerPallet, l.unitWord)} de ${l.sku}`).join(" y ");
     const where = draft.doubts.some((d) => d.field === "consigneeId") ? `${order.consigneeName?.split("–")[0].trim()} (la oficina confirmará la plataforma)` : order.consigneeName;
     const when = order.deliverPhrase ? `, ${order.deliverPhrase}` : "";
-    const short = order.lines.filter((l) => l.requested > l.available);
-    const stockNote = short.length ? ` Ojo: de ${short.map((l) => `${l.sku} ahora hay ${l.available}`).join(", ")}; la oficina te dirá cómo lo hacemos.` : "";
+    const short = order.lines.filter((l) => l.requestedUnits > l.availableUnits);
+    const stockNote = short.length ? ` Ojo: de ${short.map((l) => `${l.sku} ahora hay ${describeUnits(l.availableUnits, l.unitsPerPallet, l.unitWord)}`).join(", ")}; la oficina te dirá cómo lo hacemos.` : "";
     return {
       kind: "forwarded",
       text: `Recibido. He preparado tu pedido para la oficina: ${what} para ${where}${when}.${stockNote} Te confirmamos aquí en cuanto lo aprueben.`,

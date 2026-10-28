@@ -4,6 +4,7 @@ import { useFormStatus } from "react-dom";
 import { AlertTriangle, Check, Mail, MessageCircle, Mic, UserRound, X } from "lucide-react";
 import type { Channel, DraftKind } from "@prisma/client";
 import { approveDraft, discardDraft } from "@/app/office/inbox/actions";
+import { describeUnits } from "@/lib/pallets/quantity";
 import type { Doubt, HumanPayload, OutboundPayload, ReplyPayload, Step } from "@/lib/agent/types";
 
 export type DraftView = {
@@ -61,9 +62,10 @@ export function DraftCard({ draft }: { draft: DraftView }) {
                     <td className="mono px-3 py-1.5 font-semibold">{l.sku}</td>
                     <td className="px-1 py-1.5 text-dock-ink/60">{l.description}</td>
                     <td className="mono px-3 py-1.5 text-right">
-                      {l.requested} plt
-                      <span className={`ml-2 text-[11px] ${l.available < l.requested ? "font-semibold text-dock-red" : "text-dock-ink/40"}`}>
-                        {l.available} in stock
+                      {l.text}
+                      {l.unitsPerPallet > 0 && l.units % l.unitsPerPallet !== 0 && <span className="ml-1 text-[11px] text-dock-ink/40">({(l.units / l.unitsPerPallet).toLocaleString("es-ES", { maximumFractionDigits: 2 })})</span>}
+                      <span className={`ml-2 text-[11px] ${l.availableUnits < l.requestedUnits ? "font-semibold text-dock-red" : "text-dock-ink/40"}`}>
+                        {describeUnits(l.availableUnits, l.unitsPerPallet, l.unitWord)} in stock
                       </span>
                     </td>
                   </tr>
@@ -94,7 +96,7 @@ export function DraftCard({ draft }: { draft: DraftView }) {
             <span className="flex-1 font-medium">{d.question}</span>
             <select
               name={d.field}
-              defaultValue={d.field === "consigneeId" ? order?.consigneeId ?? d.options[0].value : String(order?.lines.find((l) => `pallets:${l.sku}` === d.field)?.pallets ?? d.options[0].value)}
+              defaultValue={d.field === "consigneeId" ? order?.consigneeId ?? d.options[0].value : String(order?.lines.find((l) => `units:${l.sku}` === d.field)?.units ?? d.options[0].value)}
               className="border-[1.5px] border-dock-ink bg-white px-2 py-1 text-sm"
             >
               {d.options.map((o) => (

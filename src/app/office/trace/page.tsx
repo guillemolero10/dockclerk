@@ -78,11 +78,11 @@ function Trail({ t }: { t: LotTrace }) {
   const first = firstName(t.contact);
   const notice = [
     `Hola${first ? ` ${first}` : ""}, os pasamos la trazabilidad del lote ${t.lot} de ${t.sku} (${t.description}).`,
-    `Entrada: ${t.came.map((c) => `${c.pallets} palés el ${fmtDate(c.date)} (entrada Nº ${c.number}${c.docRef ? `, albarán ${c.docRef}` : ""})`).join("; ") || "sin registro"}.`,
+    `Entrada: ${t.came.map((c) => `${c.text} el ${fmtDate(c.date)} (entrada Nº ${c.number}${c.docRef ? `, albarán ${c.docRef}` : ""})`).join("; ") || "sin registro"}.`,
     t.went.length
-      ? `Salidas: ${t.went.map((w) => `${w.pallets} palés el ${fmtDate(w.date)} a ${w.consignee}${w.city ? ` (${w.city})` : ""}, salida Nº ${w.number}`).join("; ")}.`
+      ? `Salidas: ${t.went.map((w) => `${w.text} el ${fmtDate(w.date)} a ${w.consignee}${w.city ? ` (${w.city})` : ""}, salida Nº ${w.number}`).join("; ")}.`
       : "No ha salido ningún palé de este lote.",
-    t.totals.here ? `Quedan ${t.totals.here} palés en nuestro almacén; si hay que retirarlos, los apartamos hoy mismo.` : "No queda ningún palé en el almacén.",
+    t.totals.here ? `Quedan ${t.totals.hereText} en nuestro almacén; si hay que retirarlos, los apartamos hoy mismo.` : "No queda ningún palé en el almacén.",
     "Un saludo.",
   ].join(" ");
 
@@ -101,12 +101,12 @@ function Trail({ t }: { t: LotTrace }) {
         </span>
         <span className={`cond ml-auto flex items-center gap-1.5 text-sm ${t.balanced ? "text-dock-yellow" : "text-dock-red"}`}>
           {t.balanced ? <CheckCircle2 size={16} /> : <TriangleAlert size={16} />}
-          {t.totals.in} in = {t.totals.out} out + {t.totals.here} here{t.balanced ? "" : " · does not add up"}
+          {t.totals.in} in = {t.totals.out} out + {t.totals.here} here (units){t.balanced ? "" : " · does not add up"}
         </span>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_auto_1fr_auto_1fr]">
-        <Column icon={ArrowDownToLine} title="Came in" count={t.totals.in}>
+        <Column icon={ArrowDownToLine} title="Came in" count={t.totals.pallets.in}>
           {t.came.map((c) => (
             <Card key={c.inboundId}>
               <p className="flex items-center justify-between">
@@ -131,7 +131,7 @@ function Trail({ t }: { t: LotTrace }) {
           ))}
         </Column>
         <Arrow />
-        <Column icon={Warehouse} title="In the building" count={t.totals.here}>
+        <Column icon={Warehouse} title="In the building" count={t.totals.pallets.here}>
           {t.here.length === 0 && <p className="text-sm text-dock-ink/50">Nothing left.</p>}
           {t.here.map((h) => (
             <Card key={`${h.warehouse}-${h.area}-${h.outbound}`}>
@@ -147,7 +147,7 @@ function Trail({ t }: { t: LotTrace }) {
           ))}
         </Column>
         <Arrow />
-        <Column icon={ArrowUpFromLine} title="Went out" count={t.totals.out}>
+        <Column icon={ArrowUpFromLine} title="Went out" count={t.totals.pallets.out}>
           {t.went.length === 0 && <p className="text-sm text-dock-ink/50">No pallet of this lot has left yet.</p>}
           {t.went.map((w) => (
             <Card key={w.outboundId}>
