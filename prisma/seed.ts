@@ -5,7 +5,7 @@
 // the customers' ids (so each customer account stays linked), and the AI spend counters (the daily limit is not a reset button).
 
 import { randomUUID } from "node:crypto";
-import { PrismaClient, type ClientType, type Prisma, type Unit } from "@prisma/client";
+import { PrismaClient, type ClientType, type PalletType, type PartialPallets, type Prisma, type Unit } from "@prisma/client";
 import { DOCK_CLOSE_H, firstFree, slotMinutes, type Busy } from "../src/lib/dock/slots";
 import { makeLayout, type WarehouseDims } from "../src/lib/warehouse/layout";
 import { runAnalysis } from "../src/lib/analyst";
@@ -99,6 +99,23 @@ const clients: { code: string; name: string; type: ClientType; email: string; ph
   },
 ];
 
+// Items on American pallets (the others are on Euro pallets).
+const AMERICAN_ITEMS = new Set(["AGUA-15", "REFR-NAR"]);
+
+// One invented tariff per customer. Prices in euros per pallet; storage per pallet and day.
+// Juguetes Levante has the round figures used in the worked examples. Textil Biar is the one customer
+// charged for a loose pallet as a whole pallet; the other seven pay the fraction of a pallet.
+const tariffs: Record<string, { inPerPallet: number; outPerPallet: number; storagePrice: number; storageByType?: Record<string, number>; handlingPrice?: number; partialPallets: PartialPallets }> = {
+  C001: { inPerPallet: 1.0, outPerPallet: 1.0, storagePrice: 0.1, partialPallets: "FRACTION" },
+  C002: { inPerPallet: 1.2, outPerPallet: 1.2, storagePrice: 0.08, partialPallets: "FRACTION" },
+  C003: { inPerPallet: 1.1, outPerPallet: 1.1, storagePrice: 0.12, partialPallets: "FRACTION" },
+  C004: { inPerPallet: 1.5, outPerPallet: 1.5, storagePrice: 0.12, storageByType: { AMERICAN: 0.18 }, handlingPrice: 12, partialPallets: "FRACTION" },
+  C005: { inPerPallet: 1.0, outPerPallet: 1.25, storagePrice: 0.09, partialPallets: "FULL" },
+  C006: { inPerPallet: 1.3, outPerPallet: 1.3, storagePrice: 0.08, partialPallets: "FRACTION" },
+  C007: { inPerPallet: 1.5, outPerPallet: 1.5, storagePrice: 0.15, partialPallets: "FRACTION" },
+  C008: { inPerPallet: 1.25, outPerPallet: 1.25, storagePrice: 0.14, partialPallets: "FRACTION" },
+};
+
 // Two hubs of the same chain on purpose: "Hipermercados Turia" alone is ambiguous.
 const consignees: [string, string, string, string, string[]][] = [
   ["D0412", "Hipermercados Turia – Plataforma Riba-roja", "Pol. Ind. El Oliveral, parcela 7", "Riba-roja de Túria", ["Turia Riba-roja", "Hiper Turia Ribarroja", "plataforma de Riba-roja"]],
@@ -144,6 +161,9 @@ const warehouses: { code: string; name: string; city: string; dims: WarehouseDim
 ];
 
 async function wipe() {
+  await db.preInvoice.deleteMany();
+  await db.handling.deleteMany();
+  await db.tariff.deleteMany();
   await db.analystReport.deleteMany();
   await db.dockAppointment.deleteMany();
   await db.draft.deleteMany();
@@ -183,8 +203,11 @@ async function main() {
     const fields = { name: c.name, contact: CONTACTS[c.code], type: c.type, email: c.email, phone: c.phone };
     const client = await db.client.upsert({ where: { code: c.code }, update: fields, create: { code: c.code, ...fields } });
     warehouseOfClient.set(client.id, warehouseOfCode(c.code));
+    const t = tariffs[c.code];
+    await db.tariff.create({ data: { clientId: client.id, ...t, storageByType: t.storageByType ?? {}, handlingPrice: t.handlingPrice ?? 10 } });
     for (const [sku, description, unit, unitsPerPallet, tracksLot] of c.items) {
-      const item = await db.item.create({ data: { clientId: client.id, sku, description, unit, unitsPerPallet, tracksLot } });
+      const palletType: PalletType = AMERICAN_ITEMS.has(sku) ? "AMERICAN" : "EURO";
+      const item = await db.item.create({ data: { clientId: client.id, sku, description, unit, unitsPerPallet, tracksLot, palletType } });
       itemRows.push({ id: item.id, sku, clientId: client.id, clientCode: c.code, unitsPerPallet, tracksLot });
     }
   }
@@ -219,7 +242,7 @@ async function main() {
       const it = itemOf.get(i.sku)!;
       const carrier = carrierRows[i.carrier];
       return {
-        id: inboundIdOf.get(i.key)!, date: i.date, clientId: it.clientId, warehouseId: warehouseIdOf.get(i.warehouse)!,
+        id: inboundIdOf.get(i.key)!, date: i.date, receivedAt: i.date, clientId: it.clientId, warehouseId: warehouseIdOf.get(i.warehouse)!,
         clientDocRef: `ALB-${between(10000, 99999)}`, supplier: i.supplier, carrierId: carrier.id, plate: carrier.plate,
         expectedPallets: i.expected, expectedUnits: i.expected * it.unitsPerPallet, receivedPallets: i.pallets, receivedUnits: i.pallets * it.unitsPerPallet,
         incident: i.incident, status: "CLOSED" as const,
@@ -234,24 +257,26 @@ async function main() {
   });
 
   const pastOut = [...history.outbounds].sort((a, b) => a.date.getTime() - b.date.getTime() || a.deadline.getTime() - b.deadline.getTime());
-  await db.outbound.createMany({
-    data: pastOut.map((o) => {
-      const it = itemOf.get(o.sku)!;
-      return {
-        id: outboundIdOf.get(o.key)!, date: o.date, deadline: o.deadline, clientId: it.clientId, warehouseId: warehouseIdOf.get(o.warehouse)!,
-        clientDocRef: `PED-${between(1000, 9999)}`, consigneeId: consigneeIdOf.get(o.consignee)!, carrierId: carrierRows[o.carrier].id,
-        status: o.day < -3 ? ("CLOSED" as const) : ("SHIPPED" as const),
-        // What left on the truck, pallet by pallet, as shipOutbound records it: the lot trail.
-        shipped: o.shipped.map((p) => ({ itemId: it.id, sku: p.sku, lot: p.lot, units: it.unitsPerPallet, location: "EXP-1", inboundId: inboundIdOf.get(p.inboundKey)! })),
-      };
-    }),
-  });
-  await db.outboundLine.createMany({
-    data: pastOut.map((o) => {
-      const it = itemOf.get(o.sku)!;
-      return { outboundId: outboundIdOf.get(o.key)!, itemId: it.id, pallets: o.pallets, units: o.pallets * it.unitsPerPallet };
-    }),
-  });
+  const outboundRow = (o: (typeof pastOut)[number], docRef: string) => {
+    const it = itemOf.get(o.sku)!;
+    return {
+      id: outboundIdOf.get(o.key)!, date: o.date, shippedAt: o.shippedAt, deadline: o.deadline, clientId: it.clientId, warehouseId: warehouseIdOf.get(o.warehouse)!,
+      clientDocRef: docRef, consigneeId: consigneeIdOf.get(o.consignee)!, carrierId: carrierRows[o.carrier].id,
+      status: o.day < -3 ? ("CLOSED" as const) : ("SHIPPED" as const),
+      // What left on the truck, pallet by pallet, as shipOutbound records it: the lot trail.
+      shipped: o.shipped.map((p) => ({ itemId: it.id, sku: p.sku, lot: p.lot, units: p.units ?? it.unitsPerPallet, location: "EXP-1", inboundId: inboundIdOf.get(p.inboundKey)! })),
+    };
+  };
+  const lineRow = (o: (typeof pastOut)[number]) => {
+    const it = itemOf.get(o.sku)!;
+    return { outboundId: outboundIdOf.get(o.key)!, itemId: it.id, pallets: o.pallets, units: o.units ?? o.pallets * it.unitsPerPallet };
+  };
+  await db.outbound.createMany({ data: pastOut.map((o) => outboundRow(o, `PED-${between(1000, 9999)}`)) });
+  await db.outboundLine.createMany({ data: pastOut.map(lineRow) });
+  // The planted cases come after, with fixed references, so they do not shift the random numbers of the rest.
+  history.extraOutbounds.forEach((o) => outboundIdOf.set(o.key, randomUUID()));
+  await db.outbound.createMany({ data: history.extraOutbounds.map((o, i) => outboundRow(o, `PED-${7001 + i}`)) });
+  await db.outboundLine.createMany({ data: history.extraOutbounds.map(lineRow) });
   await db.dockAppointment.createMany({
     data: history.slots.map((t) => ({
       warehouseId: warehouseIdOf.get(t.warehouse)!, dock: t.dock, startsAt: t.start, endsAt: t.end, status: "DONE" as const, arrivedAt: t.arrivedAt,
@@ -261,10 +286,10 @@ async function main() {
   });
 
   // What is left of each lot is today's stock.
-  type Balance = { itemId: string; sku: string; clientId: string; unitsPerPallet: number; pallets: number; lot: string | null; inboundId: string; received: Date };
+  type Balance = { itemId: string; sku: string; clientId: string; unitsPerPallet: number; pallets: number; lot: string | null; inboundId: string; received: Date; loose?: number };
   const balances: Balance[] = history.remaining.map((r) => {
     const it = itemOf.get(r.sku)!;
-    return { itemId: it.id, sku: r.sku, clientId: it.clientId, unitsPerPallet: it.unitsPerPallet, pallets: r.pallets, lot: r.lot, inboundId: inboundIdOf.get(r.inboundKey)!, received: r.received };
+    return { itemId: it.id, sku: r.sku, clientId: it.clientId, unitsPerPallet: it.unitsPerPallet, pallets: r.pallets, lot: r.lot, inboundId: inboundIdOf.get(r.inboundKey)!, received: r.received, loose: r.loose };
   });
 
   // Open work for the coming days, fixed on purpose so the demo never depends on luck.
@@ -367,7 +392,8 @@ async function main() {
         while (slots.length - slot > total - placed && rand() < (slots.length - slot - (total - placed)) / (slots.length - slot)) slot++;
         stockRows.push({
           warehouseId: warehouse.id, clientId: b.clientId, itemId: b.itemId, lot: b.lot, expiresAt,
-          pallets: 1, units: b.unitsPerPallet, location: slots[slot++], inboundId: b.inboundId,
+          // The last row of a balance with a loose pallet holds only its few boxes.
+          pallets: 1, units: b.loose && i === b.pallets - 1 ? b.loose : b.unitsPerPallet, location: slots[slot++], inboundId: b.inboundId,
         });
         placed++;
       }
@@ -381,6 +407,7 @@ async function main() {
   const morning = await db.inbound.create({
     data: {
       date: new Date(today.getTime() + (7 * 60 + 40) * 60 * 1000),
+      receivedAt: new Date(today.getTime() + (7 * 60 + 40) * 60 * 1000),
       clientId: granzas.id,
       warehouseId: warehouseOfClient.get(granzas.id),
       clientDocRef: "ALB-58210",
@@ -451,6 +478,7 @@ async function main() {
   const lastWeek = await db.inbound.findFirst({ where: { status: "CLOSED", incident: null, date: { gte: daysAgo(6), lt: daysAgo(1) } }, orderBy: { date: "desc" } });
   if (lastWeek) await db.inbound.update({ where: { id: lastWeek.id }, data: { incident: "2 palés con cajas aplastadas" } });
 
+  await seedHandling(clientRows);
   await seedDock({ warehouseRows, morning, expectedToys, expectedDrinks, carrierRows });
   await seedInbox(clientRows);
 
@@ -459,9 +487,35 @@ async function main() {
 
   const counts = await Promise.all([
     db.client.count(), db.consignee.count(), db.item.count(), db.inbound.count(), db.outbound.count(), db.stock.count(), db.message.count(),
-    db.dockAppointment.count(),
+    db.dockAppointment.count(), db.tariff.count(), db.handling.count(),
   ]);
-  console.log(`Seeded: ${counts[0]} clients, ${counts[1]} consignees, ${counts[2]} items, ${counts[3]} inbounds, ${counts[4]} outbounds, ${counts[5]} stock rows, ${counts[6]} messages, ${counts[7]} dock slots, 1 analyst report`);
+  console.log(`Seeded: ${counts[0]} clients, ${counts[1]} consignees, ${counts[2]} items, ${counts[3]} inbounds, ${counts[4]} outbounds, ${counts[5]} stock rows, ${counts[6]} messages, ${counts[7]} dock slots, ${counts[8]} tariffs, ${counts[9]} handling jobs, 1 analyst report`);
+}
+
+// Two jobs done last month that are charged apart from the pallets: one in place of an outbound, one on top.
+async function seedHandling(clientRows: { id: string; code: string }[]) {
+  const toys = clientRows.find((c) => c.code === "C001")!;
+  const drinks = clientRows.find((c) => c.code === "C004")!;
+  const monthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  const monthEnd = new Date(today.getFullYear(), today.getMonth(), 1);
+  // Relabelling replaced the shipment of the same pallets: it goes on the day of the biggest outbound of last month.
+  const outbounds = await db.outbound.findMany({ where: { clientId: toys.id, date: { gte: monthStart, lt: monthEnd } }, include: { lines: true } });
+  const biggest = outbounds
+    .map((o) => ({ o, pallets: o.lines.reduce((sum, l) => sum + l.pallets, 0) }))
+    .sort((a, b) => b.pallets - a.pallets || a.o.date.getTime() - b.o.date.getTime())[0];
+  const hour = (d: Date, h: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), h);
+  await db.handling.create({
+    data: {
+      clientId: toys.id, date: hour(biggest?.o.date ?? new Date(monthStart.getTime() + 14 * DAY), 11), pallets: Math.min(2, biggest?.pallets ?? 2), unitPrice: 10, replacesExit: true,
+      note: "Relabelled for the retailer, shipped as handling instead of an outbound", source: "office",
+    },
+  });
+  await db.handling.create({
+    data: {
+      clientId: drinks.id, date: hour(new Date(monthStart.getTime() + 17 * DAY), 9), pallets: 3, unitPrice: 12, replacesExit: false,
+      note: "Repacked 3 pallets after a damaged delivery", source: "floor",
+    },
+  });
 }
 
 // Today's and tomorrow's dock plan. Some trucks are left without a slot on purpose,
@@ -556,7 +610,7 @@ async function seedInbox(clientRows: { id: string; code: string; name: string; e
     { channel: "EMAIL", client: "C001", fromName: "Marta Pérez (Juguetes Levante)", subject: "Pedido para mañana",
       body: "Buenas, mañana mandad 12 palés de la ref. PELUCHE-30 a Hipermercados Turia, que lleguen antes de las 10. Gracias, Marta.", at: 95 },
     { channel: "WHATSAPP", client: "C004", fromName: "Toni (Bebidas Montgó)",
-      body: "Hola! Para el jueves necesito 6 palés de agua de litro y medio para SuperBahía Alicante. Y si puede ser 4 de horchata también 👍", at: 80 },
+      body: "Hola! Para el jueves necesito 6 palés de agua de litro y medio para SuperBahía Alicante. Y si puede ser 2 palés y medio de horchata también 👍", at: 80 },
     { channel: "EMAIL", client: "C001", fromName: "Marta Pérez (Juguetes Levante)", subject: "Stock",
       body: "Hola, ¿cuántos palés me quedan de PELUCHE-30 en el almacén?", at: 70 },
     { channel: "PORTAL", client: "C007", fromName: "Laura Gil (Cosmética Aitana)",

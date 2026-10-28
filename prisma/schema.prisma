@@ -42,21 +42,24 @@ enum ClientType {
 }
 
 model Client {
-  id        String     @id @default(cuid())
-  code      String     @unique
-  name      String
-  type      ClientType
+  id          String       @id @default(cuid())
+  code        String       @unique
+  name        String
+  type        ClientType
   /// Person who usually writes in, e.g. "Marta Pérez".
-  contact   String?
-  email     String?
-  phone     String?
-  items     Item[]
-  stock     Stock[]
-  inbounds  Inbound[]
-  outbounds Outbound[]
-  messages  Message[]
+  contact     String?
+  email       String?
+  phone       String?
+  items       Item[]
+  stock       Stock[]
+  inbounds    Inbound[]
+  outbounds   Outbound[]
+  messages    Message[]
   /// Portal accounts of this customer.
-  users     User[]
+  users       User[]
+  tariff      Tariff?
+  handling    Handling[]
+  preInvoices PreInvoice[]
 }
 
 /// Where outbound goods are delivered (supermarket hubs, factories...).
@@ -86,6 +89,11 @@ enum Unit {
   BAG
 }
 
+enum PalletType {
+  EURO
+  AMERICAN
+}
+
 model Item {
   id             String         @id @default(cuid())
   clientId       String
@@ -93,6 +101,8 @@ model Item {
   description    String
   unit           Unit
   unitsPerPallet Int
+  /// Storage is priced per pallet type (see Tariff).
+  palletType     PalletType     @default(EURO)
   tracksLot      Boolean        @default(false)
   client         Client         @relation(fields: [clientId], references: [id])
   stock          Stock[]
@@ -142,6 +152,8 @@ model Inbound {
   /// Where it is unloaded.
   warehouseId     String?
   warehouse       Warehouse?       @relation(fields: [warehouseId], references: [id])
+  /// When the goods really came in (set on confirming the receipt). Billing uses receivedAt, or date if it is empty.
+  receivedAt      DateTime?
   /// The supplier's delivery note number.
   clientDocRef    String?
   supplier        String?
@@ -193,6 +205,8 @@ model Outbound {
   warehouseId  String?
   warehouse    Warehouse?       @relation(fields: [warehouseId], references: [id])
   clientDocRef String?
+  /// When the truck really left (set on loading it). Billing uses shippedAt, or date if it is empty.
+  shippedAt    DateTime?
   consigneeId  String?
   carrierId    String?
   notes        String?
@@ -276,6 +290,92 @@ model DockReceipt {
   signedAt       DateTime?
   inbound        Inbound   @relation(fields: [inboundId], references: [id], onDelete: Cascade)
   createdAt      DateTime  @default(now())
+}
+
+// ---------- Billing: tariffs, handling work and month-end pre-invoices ----------
+
+enum StorageMethod {
+  PALLET_DAY
+  PALLET_MONTH
+  OCCUPANCY
+  PER_MOVEMENT
+  FIXED
+}
+
+/// How a loose pallet (fewer units than fit on a pallet) is charged for storage.
+enum PartialPallets {
+  /// Units / units per pallet: 12 boxes of a 40-box pallet count as 0.3 pallets.
+  FRACTION
+  /// Every stock row with goods in it counts as one whole pallet while it is inside.
+  FULL
+}
+
+/// The prices of one customer (one tariff each, no validity dates). All amounts in euros, VAT excluded.
+model Tariff {
+  id             String         @id @default(cuid())
+  clientId       String         @unique
+  client         Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  inPerPallet    Float
+  outPerPallet   Float
+  storageMethod  StorageMethod  @default(PALLET_DAY)
+  /// General storage price (per pallet and day). A pallet type without its own price in storageByType uses this one.
+  storagePrice   Float
+  /// Own prices by pallet type, e.g. {"AMERICAN": 0.18}.
+  storageByType  Json           @default("{}")
+  handlingPrice  Float          @default(10)
+  /// Multiplies every line, in percent.
+  factorPct      Float          @default(100)
+  vatPct         Float          @default(21)
+  partialPallets PartialPallets @default(FRACTION)
+}
+
+/// Work on pallets that is charged apart: relabelling, repacking, preparing...
+model Handling {
+  id           String   @id @default(cuid())
+  clientId     String
+  client       Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  date         DateTime
+  pallets      Float
+  unitPrice    Float
+  /// True when this work is charged instead of the outbound of the same pallets (not twice).
+  replacesExit Boolean  @default(true)
+  note         String
+  /// "office", "clerk" or "floor": who recorded it.
+  source       String   @default("office")
+  createdAt    DateTime @default(now())
+
+  @@index([clientId, date])
+}
+
+enum PreInvoiceStatus {
+  DRAFT
+  APPROVED
+}
+
+/// A frozen month-end statement for one customer. It is NOT an invoice: a person approves it, nothing is sent.
+model PreInvoice {
+  id             String           @id @default(cuid())
+  number         Int              @unique @default(autoincrement())
+  clientId       String
+  client         Client           @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  /// First and last day of the period, both included.
+  from           DateTime
+  to             DateTime
+  status         PreInvoiceStatus @default(DRAFT)
+  /// The rule used for loose pallets, frozen with the figures.
+  partialPallets PartialPallets   @default(FRACTION)
+  lines          Json
+  detail         Json
+  baseCents      Int
+  vatPct         Float
+  vatCents       Int
+  totalCents     Int
+  steps          Json             @default("[]")
+  createdAt      DateTime         @default(now())
+  approvedAt     DateTime?
+  approvedBy     String?
+
+  @@unique([clientId, from, to])
 }
 
 // ---------- The AI clerk ----------
