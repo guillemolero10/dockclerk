@@ -235,19 +235,24 @@ export async function pickPallet(outboundId: string, stockId: string, units?: nu
 
   const warehouse = await db.warehouse.findUniqueOrThrow({ where: { id: plan.warehouseId } });
   const lane = dispatchLane(layoutOf(warehouse), stock.filter((s) => s.warehouseId === warehouse.id), outboundId);
-  if (part) {
-    await db.$transaction([
-      db.stock.update({ where: { id: stockId }, data: { units: { decrement: part.units } } }),
-      db.stock.create({
+  // The plan was made before this transaction: check again, inside it, that the row is still as the plan saw it.
+  // If another operator took it in between, nothing is written and the person reloads the list.
+  const stale = new Error("Somebody else just picked from this pallet. Reload the list and try again.");
+  await db.$transaction(async (tx) => {
+    if (part) {
+      const cut = await tx.stock.updateMany({ where: { id: stockId, outboundId: null, units: { gte: part.units } }, data: { units: { decrement: part.units } } });
+      if (cut.count !== 1) throw stale;
+      await tx.stock.create({
         data: {
           warehouseId: row.warehouseId, clientId: row.clientId, itemId: row.itemId, lot: row.lot, expiresAt: row.expiresAt,
           pallets: 1, units: part.units, location: `EXP-${lane}`, outboundId, inboundId: row.inboundId,
         },
-      }),
-    ]);
-  } else {
-    await db.stock.update({ where: { id: stockId }, data: { outboundId, location: `EXP-${lane}` } });
-  }
+      });
+    } else {
+      const moved = await tx.stock.updateMany({ where: { id: stockId, outboundId: null, units: row.units }, data: { outboundId, location: `EXP-${lane}` } });
+      if (moved.count !== 1) throw stale;
+    }
+  });
 
   const done = plan.picked.length + 1 >= plan.stockIds.length && plan.shortUnits === 0;
   if (done) await db.outbound.update({ where: { id: outboundId }, data: { status: "PREPARED", warehouseId: warehouse.id } });
