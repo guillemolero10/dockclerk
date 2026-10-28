@@ -4,13 +4,17 @@
 // Rules: an outbound leaves from one warehouse, the one that can fill most of it;
 // inside it, first expiring first out for lots, otherwise first in first out;
 // ties go to the lower location so the route stays short.
+// Everything is counted in units. Whole rows are taken while the order still needs at least
+// the whole row; what is left is taken from the next row ("take N boxes"), which stays behind
+// as a loose pallet in its slot.
 
 export type PickableStock = {
   id: string;
   warehouseId: string;
   itemId: string;
   location: string;
-  pallets: number;
+  /** Units on this row (a full pallet, or less for a loose pallet). */
+  units: number;
   expiresAt: Date | null;
   receivedAt: Date | null;
   /** Already picked for this outbound. */
@@ -22,15 +26,20 @@ export type OpenOrder = {
   number: number;
   date: Date;
   deadline: Date | null;
-  lines: { itemId: string; pallets: number }[];
+  lines: { itemId: string; units: number }[];
 };
 
 export type PickPlan = {
   warehouseId: string | null;
-  /** Pallets to take, in no particular order (the route sorts them). */
+  /** Rows to take from (whole or in part), plus the ones already picked, in no particular order. */
   stockIds: string[];
   /** The ones already picked. */
   picked: string[];
+  /** Rows of which only some units are taken: the row stays in its slot with the rest. */
+  split: { stockId: string; units: number }[];
+  /** Units that cannot be served from stock. */
+  shortUnits: number;
+  /** Same shortage in pallet positions (⌈shortUnits / units per pallet⌉), for screens that count pallets. */
   short: number;
 };
 
@@ -51,42 +60,55 @@ export function allocatePicks(stock: PickableStock[], orders: OpenOrder[]): Map<
     );
   }
   const warehouses = [...new Set(stock.map((s) => s.warehouseId))].sort();
+  // A full pallet of each item, to turn missing units into pallet positions.
+  const perPallet = new Map<string, number>();
+  for (const s of stock) perPallet.set(s.itemId, Math.max(perPallet.get(s.itemId) ?? 1, s.units));
 
   // The most urgent order gets first pick.
   const queue = [...orders].sort(
     (a, b) => time(a.deadline ?? a.date, 0) - time(b.deadline ?? b.date, 0) || a.number - b.number,
   );
 
-  // Pallets already picked belong to their outbound and nobody else.
-  const taken = new Set(stock.filter((s) => s.outboundId).map((s) => s.id));
+  // Rows already picked belong to their outbound and nobody else. Units still free on each other row:
+  // an order that takes part of a row leaves the rest for the next order.
+  const left = new Map(stock.filter((s) => !s.outboundId).map((s) => [s.id, s.units]));
   const free = (itemId: string, warehouseId: string) =>
-    (byItem.get(itemId) ?? []).filter((s) => s.warehouseId === warehouseId && !taken.has(s.id));
+    (byItem.get(itemId) ?? []).filter((s) => s.warehouseId === warehouseId && (left.get(s.id) ?? 0) > 0);
+  const freeUnits = (itemId: string, warehouseId: string) => free(itemId, warehouseId).reduce((sum, s) => sum + left.get(s.id)!, 0);
 
   const plans = new Map<string, PickPlan>();
   for (const order of queue) {
     const picked = stock.filter((s) => s.outboundId === order.id);
-    const pickedOf = (itemId: string) => picked.filter((s) => s.itemId === itemId).reduce((sum, s) => sum + s.pallets, 0);
+    const pickedOf = (itemId: string) => picked.filter((s) => s.itemId === itemId).reduce((sum, s) => sum + s.units, 0);
 
     // Once picking has started, the outbound stays in that building.
     let best: string | null = picked[0]?.warehouseId ?? null;
     if (!best) {
       let bestFill = 0;
       for (const w of warehouses) {
-        const fill = order.lines.reduce((sum, l) => sum + Math.min(l.pallets, free(l.itemId, w).reduce((p, s) => p + s.pallets, 0)), 0);
+        const fill = order.lines.reduce((sum, l) => sum + Math.min(l.units, freeUnits(l.itemId, w)), 0);
         if (fill > bestFill) [best, bestFill] = [w, fill];
       }
     }
 
-    const plan: PickPlan = { warehouseId: best, stockIds: picked.map((s) => s.id), picked: picked.map((s) => s.id), short: 0 };
+    const plan: PickPlan = { warehouseId: best, stockIds: picked.map((s) => s.id), picked: picked.map((s) => s.id), split: [], shortUnits: 0, short: 0 };
     for (const line of order.lines) {
-      let missing = line.pallets - pickedOf(line.itemId);
+      let missing = line.units - pickedOf(line.itemId);
       for (const s of best ? free(line.itemId, best) : []) {
         if (missing <= 0) break;
-        taken.add(s.id);
+        const here = left.get(s.id)!;
         plan.stockIds.push(s.id);
-        missing -= s.pallets;
+        // Take the whole row while the order still needs all of it; otherwise only what is missing.
+        const take = Math.min(missing, here);
+        left.set(s.id, here - take);
+        // A row another order already took part of is also a partial pick, even if this order takes all that is left.
+        if (take < s.units) plan.split.push({ stockId: s.id, units: take });
+        missing -= take;
       }
-      plan.short += Math.max(0, missing);
+      if (missing > 0) {
+        plan.shortUnits += missing;
+        plan.short += Math.ceil(missing / (perPallet.get(line.itemId) ?? 1));
+      }
     }
     plans.set(order.id, plan);
   }

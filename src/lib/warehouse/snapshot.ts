@@ -112,10 +112,10 @@ export async function getWarehouseSnapshot(code?: string): Promise<WarehouseSnap
 
   const plans = allocatePicks(
     stock.map((s) => ({
-      id: s.id, warehouseId: s.warehouseId, itemId: s.itemId, location: s.location, pallets: s.pallets,
+      id: s.id, warehouseId: s.warehouseId, itemId: s.itemId, location: s.location, units: s.units,
       expiresAt: s.expiresAt, receivedAt: s.inbound?.date ?? null, outboundId: s.outboundId,
     })),
-    open.map((o) => ({ id: o.id, number: o.number, date: o.date, deadline: o.deadline, lines: o.lines.map((l) => ({ itemId: l.itemId, pallets: l.pallets })) })),
+    open.map((o) => ({ id: o.id, number: o.number, date: o.date, deadline: o.deadline, lines: o.lines.map((l) => ({ itemId: l.itemId, units: l.units })) })),
   );
 
   const here = stockIn(current.id);

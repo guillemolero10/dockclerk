@@ -102,10 +102,10 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
 
   // Open outbounds: short of stock, or close to the deadline with nothing picked.
   const pickable = stock.map((s) => ({
-    id: s.id, warehouseId: s.warehouseId, itemId: s.itemId, location: s.location, pallets: s.pallets,
+    id: s.id, warehouseId: s.warehouseId, itemId: s.itemId, location: s.location, units: s.units,
     expiresAt: s.expiresAt, receivedAt: s.inbound?.date ?? null, outboundId: s.outboundId,
   }));
-  const plans = allocatePicks(pickable, open.map((o) => ({ id: o.id, number: o.number, date: o.date, deadline: o.deadline, lines: o.lines })));
+  const plans = allocatePicks(pickable, open.map((o) => ({ id: o.id, number: o.number, date: o.date, deadline: o.deadline, lines: o.lines.map((l) => ({ itemId: l.itemId, units: l.units })) })));
   for (const o of open) {
     const plan = plans.get(o.id);
     const total = o.lines.reduce((sum, l) => sum + l.pallets, 0);
