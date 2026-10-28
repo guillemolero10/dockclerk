@@ -55,23 +55,27 @@ export function DraftCard({ draft }: { draft: DraftView }) {
 
         {order && (
           <div className="border-[1.5px] border-dock-ink bg-dock-concrete-2">
-            <table className="w-full text-sm">
-              <tbody>
-                {order.lines.map((l) => (
-                  <tr key={l.sku} className="border-b border-dock-line last:border-0">
-                    <td className="mono px-3 py-1.5 font-semibold">{l.sku}</td>
-                    <td className="px-1 py-1.5 text-dock-ink/60">{l.description}</td>
-                    <td className="mono px-3 py-1.5 text-right">
-                      {l.text}
-                      {l.unitsPerPallet > 0 && l.units % l.unitsPerPallet !== 0 && <span className="ml-1 text-[11px] text-dock-ink/40">({(l.units / l.unitsPerPallet).toLocaleString("es-ES", { maximumFractionDigits: 2 })})</span>}
-                      <span className={`ml-2 text-[11px] ${l.availableUnits < l.requestedUnits ? "font-semibold text-dock-red" : "text-dock-ink/40"}`}>
-                        {describeUnits(l.availableUnits, l.unitsPerPallet, l.unitWord)} in stock
+            <ul>
+              {order.lines.map((l) => {
+                const loose = l.unitsPerPallet > 0 && l.units % l.unitsPerPallet !== 0;
+                const short = l.availableUnits < l.requestedUnits;
+                return (
+                  <li key={l.sku} className="border-b border-dock-line px-3 py-2 last:border-0">
+                    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                      <span className="mono font-semibold">{l.sku}</span>
+                      <span className="min-w-0 flex-1 basis-32 text-sm text-dock-ink/60">{l.description}</span>
+                      <span className="mono text-right text-[15px]">
+                        <b>{l.text}</b>
+                        {loose && <span className="ml-1.5 text-[11px] text-dock-ink/50">({(l.units / l.unitsPerPallet).toLocaleString("es-ES", { maximumFractionDigits: 2 })})</span>}
                       </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </div>
+                    <p className={`mono mt-0.5 text-right text-[11px] ${short ? "font-semibold text-dock-red" : "text-dock-ink/45"}`}>
+                      {describeUnits(l.availableUnits, l.unitsPerPallet, l.unitWord)} in stock
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 border-t-[1.5px] border-dock-ink px-3 py-2 text-sm">
               <dt className="cond text-[11px] text-dock-ink/50">Deliver to</dt>
               <dd>{order.consigneeName ?? "—"}</dd>
@@ -93,11 +97,11 @@ export function DraftCard({ draft }: { draft: DraftView }) {
         {draft.doubts.map((d) => (
           <label key={d.field} className="flex flex-wrap items-center gap-2 border-[1.5px] border-dock-ink bg-dock-yellow px-3 py-2 text-sm">
             <AlertTriangle size={15} className="shrink-0" />
-            <span className="flex-1 font-medium">{d.question}</span>
+            <span className="min-w-0 flex-1 basis-48 font-medium">{d.question}</span>
             <select
               name={d.field}
               defaultValue={d.field === "consigneeId" ? order?.consigneeId ?? d.options[0].value : String(order?.lines.find((l) => `units:${l.sku}` === d.field)?.units ?? d.options[0].value)}
-              className="border-[1.5px] border-dock-ink bg-white px-2 py-1 text-sm"
+              className="w-full min-w-0 border-[1.5px] border-dock-ink bg-white px-2 py-1 text-sm sm:w-auto"
             >
               {d.options.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
