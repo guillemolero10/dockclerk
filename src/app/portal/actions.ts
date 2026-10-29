@@ -1,13 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { Message } from "@prisma/client";
+import type { Message, Prisma } from "@prisma/client";
 import { runClerk } from "@/lib/agent";
 import { stepsForCustomer } from "@/lib/agent/public-steps";
 import type { OutboundPayload, Step } from "@/lib/agent/types";
 import { db } from "@/lib/db";
 import { describeUnits } from "@/lib/pallets/quantity";
-import { requireCustomer } from "@/lib/portal";
+import { PORTAL_LIVE_ADDRESS, requireCustomer } from "@/lib/portal";
 import { consume } from "@/lib/rate-limit";
 
 export type AskResult = { kind: "answer" | "forwarded"; text: string; steps: Step[] };
@@ -37,7 +37,19 @@ export async function askClerk(question: string): Promise<AskResult> {
 
   if (draft.kind === "REPLY_ONLY") return { kind: "answer", text: draft.reply, steps };
 
-  await db.message.create({ data: { channel: "PORTAL", clientId: client.id, fromName, body } });
+  // The clerk has already read it: the office gets the message together with that draft, ready to approve,
+  // so the inbox does not run (and pay) the model a second time on the same words.
+  await db.message.create({
+    data: {
+      channel: "PORTAL", clientId: client.id, fromName, fromAddress: PORTAL_LIVE_ADDRESS, body, status: "PROCESSED",
+      drafts: {
+        create: {
+          kind: draft.kind, payload: draft.payload as Prisma.InputJsonValue, doubts: draft.doubts as unknown as Prisma.InputJsonValue,
+          steps: draft.steps as unknown as Prisma.InputJsonValue, reply: draft.reply,
+        },
+      },
+    },
+  });
   revalidatePath("/office", "layout");
 
   if (draft.kind === "CREATE_OUTBOUND") {

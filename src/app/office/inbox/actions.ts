@@ -8,6 +8,7 @@ import { orderReply } from "@/lib/agent/rules";
 import type { Doubt, DraftSeed, OutboundPayload, Step } from "@/lib/agent/types";
 import { db, longTransaction } from "@/lib/db";
 import { madridDayRange } from "@/lib/format";
+import { PORTAL_LIVE_ADDRESS } from "@/lib/portal";
 import { makeLayout } from "@/lib/warehouse/layout";
 import { suggestSlot } from "@/lib/warehouse/lanes";
 import { planRestore } from "@/lib/warehouse/restore";
@@ -114,7 +115,7 @@ export async function discardDraft(formData: FormData) {
   revalidatePath("/office", "layout");
 }
 
-/** Demo helper: put every message back in the inbox and forget the drafts, to replay the morning. */
+/** Demo helper: put the morning's messages back in the inbox, forget the drafts and what the portal sent meanwhile, to replay the morning. */
 export async function resetInbox() {
   await requireOffice();
   const created = await db.draft.findMany({ where: { status: "APPROVED", kind: "CREATE_OUTBOUND" } });
@@ -141,6 +142,8 @@ export async function resetInbox() {
     }
     await tx.outbound.deleteMany({ where: { id: { in: outboundIds } } });
     await tx.draft.deleteMany();
+    // What customers asked in the portal during the demo is not part of the morning.
+    await tx.message.deleteMany({ where: { channel: "PORTAL", fromAddress: PORTAL_LIVE_ADDRESS } });
     await tx.message.updateMany({ data: { status: "NEW" } });
   }, longTransaction);
   revalidatePath("/office", "layout");
