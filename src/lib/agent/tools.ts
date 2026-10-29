@@ -3,11 +3,9 @@
 import { db } from "@/lib/db";
 import { madridDayRange } from "@/lib/format";
 import { describeUnits, splitUnits, unitWordFor } from "@/lib/pallets/quantity";
+import { itemScore, norm, SKU_SCORE, SYNONYMS } from "./words";
 
-/** Lowercase, no accents, single spaces: "Bahía" and "bahia" compare equal. */
-export function norm(text: string) {
-  return text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
-}
+export { norm };
 
 /** Destinations named in the text. Specific aliases ("Turia Quart") win over the bare chain name. */
 export async function findConsignees(text: string) {
@@ -18,23 +16,6 @@ export async function findConsignees(text: string) {
   return all.filter((c) => t.includes(norm(c.name.split("–")[0])));
 }
 
-const GENERIC = new Set(["caja", "cajas", "pack", "saco", "uds", "unidades", "granza", "surtida", "surtidos", "juego", "con"]);
-
-function keywords(sku: string, description: string) {
-  const words = norm(`${sku.replace(/-/g, " ")} ${description.replace(/\(.*?\)/g, "")}`)
-    .split(/[^a-z0-9,]+/)
-    .filter((w) => (w.length >= 3 || /\d/.test(w)) && !GENERIC.has(w));
-  return [...new Set(words)];
-}
-
-// "litro y medio" is how people say 1,5 L.
-const SYNONYMS: [RegExp, string][] = [[/litro y medio/g, "1,5"]];
-
-/** Same word up to the ending: "toallas" ~ "toalla", "naranja" ~ "nar". */
-function similar(a: string, b: string) {
-  return a.startsWith(b.slice(0, 5)) || b.startsWith(a.slice(0, 5));
-}
-
 /** Best item of this customer for a free-text fragment such as "gel de 750" or "toallas blancas". */
 export async function findItem(clientId: string, fragment: string) {
   let t = norm(fragment);
@@ -43,9 +24,8 @@ export async function findItem(clientId: string, fragment: string) {
   let best: (typeof items)[number] | null = null;
   let bestScore = 0;
   for (const item of items) {
-    if (t.includes(norm(item.sku))) return item;
-    const words = t.split(/[^a-z0-9,]+/).filter((w) => w.length >= 3 || /\d/.test(w));
-    const score = keywords(item.sku, item.description).filter((k) => words.some((w) => similar(w, k))).length;
+    const score = itemScore(t, item);
+    if (score >= SKU_SCORE) return item; // the SKU itself is in the text
     if (score > bestScore) {
       best = item;
       bestScore = score;
