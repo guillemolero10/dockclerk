@@ -4,7 +4,7 @@
 import type { Client, Message } from "@prisma/client";
 import { ymdOf } from "@/lib/billing/calendar";
 import { db } from "@/lib/db";
-import { madridDayRange } from "@/lib/format";
+import { madridDayRange, madridYmd } from "@/lib/format";
 import { billingIntent } from "./bill-format";
 import { billSoFar, explainCharge } from "./bill-tools";
 import { checkStock, findConsignees, findItem, inboundsThisMonth, lastShipmentTo, norm } from "./tools";
@@ -16,6 +16,7 @@ import type { Doubt, DraftSeed, OutboundLineDraft, OutboundPayload, Step } from 
 
 const HOUR = 60 * 60 * 1000;
 const WEEKDAYS = ["domingo", "lunes", "martes", "miercoles", "jueves", "viernes", "sabado"];
+const MONTHS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 
 /** "Marta Pérez (Juguetes Levante)" → "Marta". Company-only senders get no name. */
 function firstName(fromName: string) {
@@ -27,21 +28,44 @@ export function hello(fromName: string) {
   return name ? `Hola ${name},` : "Hola,";
 }
 
-/** When the customer wants it: "mañana antes de las 10", "el jueves", "a primera hora"... */
-export function parseDelivery(text: string): { at: Date; phrase: string } | null {
+/**
+ * Days from today to a date written with its number: "el 3 de noviembre", "el día 3/11", "el 3/11/2026".
+ * This year, or next year if that day has passed. Null if there is none, or it is not a real day ("31 de noviembre").
+ */
+function daysToDate(t: string, now: Date): number | null {
+  const named = /\b(\d{1,2}) de (enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/.exec(t);
+  const slash = /\b(?:el|dia) (\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?\b/.exec(t);
+  const [day, month] = named
+    ? [Number(named[1]), named[2] === "setiembre" ? 9 : MONTHS.indexOf(named[2]) + 1]
+    : slash ? [Number(slash[1]), Number(slash[2])] : [0, 0];
+  if (!day || month < 1 || month > 12) return null;
+  const today = new Date(`${madridYmd(now)}T12:00:00Z`);
+  for (const year of [today.getUTCFullYear(), today.getUTCFullYear() + 1]) {
+    const target = new Date(Date.UTC(year, month - 1, day, 12));
+    if (target.getUTCDate() !== day) return null;
+    const days = Math.round((target.getTime() - today.getTime()) / (24 * HOUR));
+    if (days >= 0) return days;
+  }
+  return null;
+}
+
+/** When the customer wants it: "mañana antes de las 10", "el jueves", "el 3 de noviembre", "a primera hora"... */
+export function parseDelivery(text: string, now = new Date()): { at: Date; phrase: string } | null {
   const t = norm(text);
   const morning = t.includes("por la manana");
   const plain = t.replace(/por la manana/g, "");
-  let days: number | null = null;
-  if (plain.includes("pasado manana")) days = 2;
-  else if (/\bmanana\b/.test(plain)) days = 1;
-  else if (t.includes("semana que viene")) days = 7;
-  else {
-    const wd = WEEKDAYS.findIndex((d) => new RegExp(`\\b${d}\\b`).test(t));
-    if (wd >= 0) {
-      const ymd = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Madrid" });
-      const todayWd = new Date(`${ymd}T12:00:00Z`).getUTCDay();
-      days = ((wd - todayWd + 7) % 7) || 7;
+  // A date with its number wins over "mañana" or a weekday next to it ("el martes 3 de noviembre").
+  let days = daysToDate(t, now);
+  if (days === null) {
+    if (plain.includes("pasado manana")) days = 2;
+    else if (/\bmanana\b/.test(plain)) days = 1;
+    else if (t.includes("semana que viene")) days = 7;
+    else {
+      const wd = WEEKDAYS.findIndex((d) => new RegExp(`\\b${d}\\b`).test(t));
+      if (wd >= 0) {
+        const todayWd = new Date(`${madridYmd(now)}T12:00:00Z`).getUTCDay();
+        days = ((wd - todayWd + 7) % 7) || 7;
+      }
     }
   }
   if (days === null) return null;
@@ -54,7 +78,7 @@ export function parseDelivery(text: string): { at: Date; phrase: string } | null
       : morning
         ? [10, "por la mañana"]
         : [12, ""];
-  const dayStart = madridDayRange(new Date(madridDayRange().start.getTime() + days * 24 * HOUR + 12 * HOUR)).start;
+  const dayStart = madridDayRange(new Date(madridDayRange(now).start.getTime() + days * 24 * HOUR + 12 * HOUR)).start;
   return { at: new Date(dayStart.getTime() + hour * HOUR), phrase };
 }
 

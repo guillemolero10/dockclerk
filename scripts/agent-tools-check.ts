@@ -10,7 +10,9 @@ import { billingIntent, ddmm, eurosEs, monthFromText, numEs, resolveWindow, shap
 import { convertLog, convertQuantity, type ConvertItem } from "../src/lib/agent/convert";
 import { amountInMessage, figures, inventedFigures, messageQuantities, unitsGrounded } from "../src/lib/agent/guard";
 import { buildLine, checkModelUnits, vouchConversion, withUnits } from "../src/lib/agent/lines";
-import { draftMessage, outboundDraft } from "../src/lib/agent/rules";
+import { draftMessage, outboundDraft, parseDelivery } from "../src/lib/agent/rules";
+import { madridYmd } from "../src/lib/format";
+import { scanQuantities } from "../src/lib/pallets/quantity";
 import { billPeriod, type TariffInput } from "../src/lib/billing/compute";
 import { dayOfYmd, period } from "../src/lib/billing/calendar";
 import type { Stay } from "../src/lib/billing/stays";
@@ -430,6 +432,18 @@ const CASES: Case[] = [
     billingIntent("Se me ha olvidado el día de la entrega", TODAY),
   ], [null, null, null]) },
   { name: "F5 mes con nombre: septiembre, mes pasado (también en enero), este mes", check: () => same([monthFromText("en septiembre", TODAY), monthFromText("el mes pasado", TODAY), monthFromText("el mes pasado", "2026-01-15"), monthFromText("este mes", TODAY), monthFromText("en diciembre", TODAY), monthFromText("en octubre", TODAY)], ["2026-09", "2026-09", "2025-12", undefined, "2025-12", undefined]) },
+  { name: "D1 fechas con número («el 3 de noviembre», «el día 3/11», «el martes 3 de noviembre», «el 15 de enero» → 2027, hoy) y sin ellas como antes; «31 de noviembre» no es una fecha", check: () => {
+    const now = new Date("2026-10-29T11:00:00Z"); // jueves 29/10, 12:00 en Madrid
+    const day = (text: string) => { const d = parseDelivery(text, now); return d ? `${madridYmd(d.at)} ${d.at.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" })}` : null; };
+    return same([
+      day("Mandad 5 palés a SuperBahía Alicante el 3 de noviembre"), day("para el día 3/11 antes de las 10"), day("el martes 3 de noviembre a primera hora"),
+      day("el 15 de enero"), day("hoy, el 29 de octubre"), day("el 31 de noviembre"), day("mañana antes de las 10"), day("el jueves"), day("sin fecha"),
+    ], ["2026-11-03 12:00", "2026-11-03 10:00", "2026-11-03 08:00", "2027-01-15 12:00", "2026-10-29 12:00", null, "2026-10-30 10:00", "2026-11-05 12:00", null]);
+  } },
+  { name: "D2 «el 3 de noviembre» no son 3 palés; «4 de horchata» sí son 4", check: () => same(
+    [scanQuantities("Mandad 5 palés de PELUCHE-30 a SuperBahía Alicante el 3 de noviembre").map((q) => q.amount), scanQuantities("Mandad 4 de horchata para el 3 de noviembre").map((q) => q.amount)],
+    [[5], [4]],
+  ) },
   { name: "F7 nombre comercial sin forma jurídica: los 8 clientes del seed, «S.L.U.» y «S. A.»; «¿Cuánto lleva Bebidas Montgó…?» lo contiene", check: () => same([
     seedClients.map((c) => tradeName(c.name)).every((n) => n.length > 3 && !/[.,]$/.test(n) && !/\bs\.?\s?[al]\b/.test(n)),
     tradeName("Bebidas Montgó, S.A."), tradeName("Polímeros Serra Mariola, S.L."), tradeName("Ejemplo Uno S.L.U."), tradeName("Ejemplo Dos, S. A."),
