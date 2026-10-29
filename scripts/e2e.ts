@@ -8,7 +8,8 @@
 // What it needs: the dev server running against a freshly seeded database (`npm run dev`, `npm run db:seed`).
 // What it WRITES: it approves the horchata draft (creates an outbound), picks it on the PDA, prepares and approves
 // last month's pre-invoice of C001, and changes C001's loose-pallet rule and puts it back. Reseed before running it again.
-// It refuses to run against anything but localhost unless E2E_ALLOW_REMOTE=1 (never point it at production).
+// It refuses to run against anything but localhost unless E2E_ALLOW_REMOTE=1 (never point it at the deployed site).
+// Careful: localhost uses .env, which is the same database the deployed site reads, so a run changes what the web shows until you reseed.
 //
 // Options (environment): E2E_BASE_URL (http://localhost:3000), E2E_SHOTS (folder for screenshots, outside the repo by default),
 // E2E_HEADED=1 (watch it), E2E_SKIP_REPLAY=1 (do not press "Replay the morning" at the start),
