@@ -16,7 +16,6 @@ import type { Doubt, DraftSeed, OutboundLineDraft, OutboundPayload, Step } from 
 
 const HOUR = 60 * 60 * 1000;
 const WEEKDAYS = ["domingo", "lunes", "martes", "miercoles", "jueves", "viernes", "sabado"];
-const MONTHS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 
 /** "Marta Pérez (Juguetes Levante)" → "Marta". Company-only senders get no name. */
 function firstName(fromName: string) {
@@ -28,23 +27,35 @@ export function hello(fromName: string) {
   return name ? `Hola ${name},` : "Hola,";
 }
 
+// Month names and their usual abbreviations ("3 de nov", "3 de sept."), keyed by their first three letters.
+const MONTH_KEYS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+const MONTH_WORD = "(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre|ene|feb|mar|abr|may|jun|jul|ago|sept?|set|oct|nov|dic)";
+const NAMED_DATE = new RegExp(`\\b(\\d{1,2}) de ${MONTH_WORD}\\b\\.?(?: del? (\\d{4})\\b)?`, "g");
+const SLASH_DATE = /\b(?:el|dia) (\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?\b/g;
+
 /**
- * Days from today to a date written with its number: "el 3 de noviembre", "el día 3/11", "el 3/11/2026".
- * This year, or next year if that day has passed. Null if there is none, or it is not a real day ("31 de noviembre").
+ * Days from today to the delivery date written with its number: "el 3 de noviembre", "el día 3/11", "el 3 de nov",
+ * "el 3/11/2027", "3 de noviembre de 2027". Without a year, the occurrence nearest to today (last, this or next year).
+ * A date that has passed is a reference, not the delivery ("mañana, como el pedido del 20 de octubre"), so it is skipped
+ * and the next date, "mañana" or the weekday decide. Null if there is none, or it is not a real day ("31 de noviembre").
  */
 function daysToDate(t: string, now: Date): number | null {
-  const named = /\b(\d{1,2}) de (enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/.exec(t);
-  const slash = /\b(?:el|dia) (\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?\b/.exec(t);
-  const [day, month] = named
-    ? [Number(named[1]), named[2] === "setiembre" ? 9 : MONTHS.indexOf(named[2]) + 1]
-    : slash ? [Number(slash[1]), Number(slash[2])] : [0, 0];
-  if (!day || month < 1 || month > 12) return null;
+  const found = [
+    ...[...t.matchAll(NAMED_DATE)].map((m) => ({ at: m.index!, day: Number(m[1]), month: MONTH_KEYS.indexOf(m[2] === "set" || m[2] === "setiembre" ? "sep" : m[2].slice(0, 3)) + 1, year: m[3] })),
+    ...[...t.matchAll(SLASH_DATE)].map((m) => ({ at: m.index!, day: Number(m[1]), month: Number(m[2]), year: m[3] })),
+  ].sort((a, b) => a.at - b.at);
   const today = new Date(`${madridYmd(now)}T12:00:00Z`);
-  for (const year of [today.getUTCFullYear(), today.getUTCFullYear() + 1]) {
-    const target = new Date(Date.UTC(year, month - 1, day, 12));
-    if (target.getUTCDate() !== day) return null;
-    const days = Math.round((target.getTime() - today.getTime()) / (24 * HOUR));
-    if (days >= 0) return days;
+  const thisYear = today.getUTCFullYear();
+  for (const { day, month, year } of found) {
+    if (!day || month < 1 || month > 12) continue;
+    const years = year ? [year.length === 2 ? 2000 + Number(year) : Number(year)] : [thisYear - 1, thisYear, thisYear + 1];
+    const options = years
+      .map((y) => new Date(Date.UTC(y, month - 1, day, 12)))
+      .filter((d) => d.getUTCDate() === day)
+      .map((d) => Math.round((d.getTime() - today.getTime()) / (24 * HOUR)));
+    if (!options.length) continue;
+    const nearest = options.reduce((a, b) => (Math.abs(b) < Math.abs(a) ? b : a));
+    if (nearest >= 0) return nearest;
   }
   return null;
 }

@@ -69,18 +69,18 @@ function parseNumber(text: string) {
 }
 
 const NUM = `(?:\\d{1,3}(?:\\.\\d{3})+|\\d+(?:[.,]\\d+)?|${Object.keys(WORDS).join("|")})`;
-const PALLET = "pal(?:e|et)s?"; // the Spanish word, with or without final t, singular or plural (accents are gone by now)
+const PALLET = "(?:pal(?:e|et)s?|plts?)"; // the Spanish word, with or without final t, singular or plural (accents are gone by now), or "plt"
 const PALLET_ONE = "pal(?:e|et)";
 const UNITS = "(?:cajas?|sacos?|bultos?|unidades|uds?)";
-const MONTHS = "(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)";
+const MONTHS = "(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre|ene|feb|mar|abr|may|jun|jul|ago|sept?|set|oct|nov|dic)";
 
 const SCAN = new RegExp(
   "(?<![a-z0-9,.-])(?:" +
     `(media docena de) ${PALLET}\\b` + // 1: half a dozen pallets
     `|(?:medio|media) ${PALLET}\\b` + // half a pallet
-    `|(?:(${NUM}) ?${PALLET}\\b|${PALLET_ONE}\\b)( y medio\\b)?` + // 2: number, 3: "and a half"; a bare "palé" is one
+    `|(?:(${NUM}) ?\\(?${PALLET}\\b\\)?|${PALLET_ONE}\\b)( y medio\\b)?` + // 2: number ("2 palés", "2 plt", "2 (palés)"), 3: "and a half"; a bare "palé" is one
     `|(${NUM}) ?${UNITS}\\b` + // 4: boxes, bags
-    `|(\\d+(?:[.,]\\d+)?)(?= de (?!${MONTHS}\\b))` + // 5: a bare number before "de" means pallets ("3 de noviembre" is a date)
+    `|(?<!\\blas |\\/)(\\d+(?:[.,]\\d+)?)(?= de (?!${MONTHS}\\b))` + // 5: a bare number before "de" means pallets ("3 de noviembre" is a date, "a las 10 de la mañana" an hour, "3/11 de" a day)
   ")",
   "g",
 );
