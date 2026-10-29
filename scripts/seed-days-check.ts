@@ -162,6 +162,9 @@ function dock(plan: SeedPlan, today: Date, now: number): string[] {
     if ((ref === REF.expectedToys || ref === REF.expectedDrinks) && today_ && b.start.getTime() < now && b.end.getTime() !== close) bad.push(`dock: ${ref} is booked in the past`);
   });
   if (!plan.dock.some((b) => b.inbound === REF.expectedToys) || !plan.dock.some((b) => b.inbound === REF.expectedDrinks)) bad.push("dock: today's expected trucks have no door");
+  // A truck for an outbound that has already shipped has been and gone: BOOKED would show it as late in alerts and offer "Truck arrived".
+  const shipped = new Set(outboundsInOrder(plan.history).all.map((o) => o.key)); // every outbound in the history has shipped
+  for (const b of plan.dock) if (b.outbound && shipped.has(b.outbound) && (b.status !== "DONE" || !b.arrivedAt)) bad.push(`dock: ${b.outbound} has already shipped but its booking is ${b.status}`);
   return bad;
 }
 

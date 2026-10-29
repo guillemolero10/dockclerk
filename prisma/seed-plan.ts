@@ -124,7 +124,7 @@ export function planDock({ today, now, outbounds }: { today: Date; now: number; 
   book(warehouseOf("C006").code, "in", { inbound: REF.morning }, at(0, 7, 30), slotMinutes("in", 5), { status: "DONE", carrier: MORNING_CARRIER, dock: 2 });
   // Outbounds shipped today (history order: the same every time).
   const shippedToday = outbounds.filter((o) => o.day >= -3 && o.date.getTime() >= today.getTime() && o.date.getTime() < at(1, 0).getTime());
-  for (const o of shippedToday) book(o.warehouse, "out", { outbound: o.key }, at(0, 6, 30), slotMinutes("out", o.pallets));
+  for (const o of shippedToday) book(o.warehouse, "out", { outbound: o.key }, at(0, 6, 30), slotMinutes("out", o.pallets), { status: "DONE" });
 
   // Still to come today.
   // Never in the past, so the demo does not open with a late truck whatever time the data is reset.
