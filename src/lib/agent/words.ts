@@ -13,10 +13,22 @@ export function tradeName(name: string) {
     .trim();
 }
 
-/** Whether a text names this company. Names that are too short once the legal form is gone ("S.L.", "Ca Sa") never match. */
+const FILLER = new Set(["de", "del", "la", "las", "los", "el", "y"]);
+const QUALIFIER = new Set(["sur", "norte", "este", "oeste", "centro"]);
+const nameWords = (text: string) => norm(text).split(/[^a-z0-9]+/).filter((w) => w && !FILLER.has(w));
+
+/**
+ * Whether a text names this company, word by word and without "de/del": "Granzas Mediterráneo" names "Granzas del Mediterráneo, S.L."
+ * and "Calzados Vinalopó" names "Calzados Vinalopó Sur, S.L." (a last "sur/norte…" is optional when two words are left).
+ * Names that are too short once the legal form is gone ("S.L.", "Ca Sa") never match.
+ */
 export function mentionsCompany(text: string, name: string) {
   const trade = tradeName(name);
-  return trade.length >= 4 && norm(text).includes(trade);
+  if (trade.length < 4) return false;
+  const said = ` ${nameWords(text).join(" ")} `;
+  const full = nameWords(trade);
+  const forms = full.length > 2 && QUALIFIER.has(full[full.length - 1]) ? [full, full.slice(0, -1)] : [full];
+  return forms.some((f) => f.length > 0 && said.includes(` ${f.join(" ")} `));
 }
 
 const GENERIC = new Set(["caja", "cajas", "pack", "saco", "uds", "unidades", "granza", "surtida", "surtidos", "juego", "con"]);
