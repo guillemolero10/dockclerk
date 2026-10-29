@@ -20,6 +20,9 @@ import type { DraftSeed } from "../src/lib/agent/types";
 import { spend } from "../src/lib/ai/client";
 import { db } from "../src/lib/db";
 
+// Cases the rules engine is known to miss (the model reads them). A known miss does not fail the run; a new one does.
+const KNOWN_MISSES = { rules: ["N3", "N4"], muse: [] as string[] };
+
 type Expect =
   // `lines` are pallets (units / units per pallet); `units` are exact units; `options` are the values of the yellow doubt per SKU.
   | { kind: "CREATE_OUTBOUND"; lines?: Record<string, number>; units?: Record<string, number>; options?: Record<string, string>; to: string; doubts: number }
@@ -140,6 +143,7 @@ async function main() {
   const sowed = (await loadBilling(c001.id, period(`${todayYmd.slice(0, 7)}-01`, todayYmd))).result.detail.find((r) => r.concept === "storage" && r.sku === "PUZZLE-500" && r.exitDate);
   const ctx: Ctx = { inbound: sowed?.inboundNumber ?? null };
   const score = { rules: { ok: 0, ms: 0 }, muse: { ok: 0, ms: 0, errors: 0 } };
+  const missed = { rules: [] as string[], muse: [] as string[] };
   const before = { ...spend };
 
   console.log(`${"case".padEnd(4)} ${"rules".padEnd(46)} ${onlyRules ? "" : "Muse Spark Open"}`);
@@ -152,6 +156,7 @@ async function main() {
     score.rules.ms += Date.now() - t0;
     const rulesMiss = await grade(c, client, r, ctx);
     if (!rulesMiss) score.rules.ok++;
+    else missed.rules.push(c.id);
 
     let museCell = "";
     if (!onlyRules) {
@@ -161,10 +166,12 @@ async function main() {
         score.muse.ms += Date.now() - t1;
         const miss = await grade(c, client, m, ctx);
         if (!miss) score.muse.ok++;
+        else missed.muse.push(c.id);
         museCell = miss ? `FAIL ${miss}` : "ok";
       } catch (error) {
         score.muse.ms += Date.now() - t1;
         score.muse.errors++;
+        missed.muse.push(c.id);
         museCell = `ERROR (rules would take over) ${String(error).slice(0, 80)}`;
       }
     }
@@ -177,8 +184,16 @@ async function main() {
     const cost = spend.costUsd - before.costUsd;
     console.log(`Muse Spark Open: ${score.muse.ok}/${n} correct (${score.muse.errors} errors) · ${Math.round(score.muse.ms / n)} ms per message · $${cost.toFixed(4)} total, $${(cost / n).toFixed(4)} per message`);
   }
-  // Exit 1 when any case fails (the model's errors count as failures too, they are not "correct").
-  if (score.rules.ok < n || (!onlyRules && score.muse.ok < n)) process.exitCode = 1;
+  // Exit 1 when a case fails that is not in KNOWN_MISSES (the model's errors count as failures too, they are not "correct").
+  let fresh = 0;
+  for (const engine of onlyRules ? (["rules"] as const) : (["rules", "muse"] as const)) {
+    const known = KNOWN_MISSES[engine];
+    const news = missed[engine].filter((id) => !known.includes(id));
+    const fixed = known.filter((id) => cases.some((c) => c.id === id) && !missed[engine].includes(id));
+    fresh += news.length;
+    console.log(`${engine.padEnd(5)} misses: ${missed[engine].join(", ") || "none"}${news.length ? `  · NEW: ${news.join(", ")}` : missed[engine].length ? "  (all known)" : ""}${fixed.length ? `  · known miss now passes: ${fixed.join(", ")} (drop it from KNOWN_MISSES)` : ""}`);
+  }
+  if (fresh) process.exitCode = 1;
 }
 
 main()

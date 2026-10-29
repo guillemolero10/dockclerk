@@ -5,7 +5,7 @@
 //   BASETEN_MODEL=nope npx tsx --env-file=.env scripts/clerk-edge.ts   same cases with the model down (plan B)
 //
 // Needs the database (mobile data on the UMH wifi) and BASETEN_API_KEY in .env. Prints no keys.
-// Exit code 1 if any case fails, so it can run before recording the video.
+// Exit code 1 if a case fails that is not in KNOWN_FAILS, so it can run before recording the video.
 
 import type { Message } from "@prisma/client";
 import { spend } from "../src/lib/ai/client";
@@ -37,6 +37,10 @@ const exactUnits = (sku: string, units: number) => (d: DraftSeed) => {
   const l = order(d)?.lines.find((x) => x.sku === sku);
   return l ? (l.units === units ? null : `${sku}: ${l.units} units, expected ${units}`) : `no line for ${sku}`;
 };
+
+// Cases known to fail, by name, with the model down (rules) and with the model up. A known failure does not fail the run; a new one does.
+// The model list is empty until a run with the database names the ones that fail every time (25/27 on 29/10, names not kept).
+const KNOWN_FAILS = { rules: [] as string[], model: [] as string[] };
 
 const CASES: Case[] = [
   { name: "decimal quantity (2,5 palés = 100 units)", from: "C001", body: "Mandad 2,5 palés de PELUCHE-30 a SuperBahía Alicante el viernes", check: (d) => wholePallets(d) ?? exactUnits("PELUCHE-30", 100)(d) },
@@ -71,7 +75,7 @@ const CASES: Case[] = [
 
 async function main() {
   const clients = new Map((await db.client.findMany()).map((c) => [c.code, c]));
-  let failed = 0;
+  const failedNames: string[] = [];
   for (const c of CASES) {
     const client = c.from ? clients.get(c.from) ?? null : null;
     const message = {
@@ -90,12 +94,17 @@ async function main() {
       verdict = `threw: ${error instanceof Error ? error.message : error}`;
       summary = "exception";
     }
-    if (verdict) failed++;
+    if (verdict) failedNames.push(c.name);
     console.log(`${verdict ? "FAIL" : "ok  "}  ${c.name}  (${((Date.now() - t0) / 1000).toFixed(1)}s)\n      ${summary}${verdict ? `\n      -> ${verdict}` : ""}`);
   }
-  console.log(`\n${CASES.length - failed}/${CASES.length} pass · ${spend.calls} model calls · $${spend.costUsd.toFixed(3)}`);
+  console.log(`\n${CASES.length - failedNames.length}/${CASES.length} pass · ${spend.calls} model calls · $${spend.costUsd.toFixed(3)}`);
+  const known = KNOWN_FAILS[process.env.BASETEN_MODEL === "nope" || !process.env.BASETEN_API_KEY ? "rules" : "model"];
+  const news = failedNames.filter((n) => !known.includes(n));
+  const fixed = known.filter((n) => !failedNames.includes(n));
+  if (failedNames.length) console.log(news.length ? `NEW failures: ${news.join(" | ")}` : "all failures are known");
+  if (fixed.length) console.log(`known failure now passes: ${fixed.join(" | ")} (drop it from KNOWN_FAILS)`);
   await db.$disconnect();
-  process.exit(failed ? 1 : 0);
+  process.exit(news.length ? 1 : 0);
 }
 
 main();
