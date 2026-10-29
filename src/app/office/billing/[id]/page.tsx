@@ -82,43 +82,75 @@ export default async function PreInvoicePage({ params }: PageProps<"/office/bill
         <span className="block text-dock-ink/65">{RULE_HELP[inv.partialPallets]}</span>
       </p>
 
-      <section className="dock-card mt-5 overflow-x-auto bg-white">
-        <table className="w-full min-w-[520px] text-sm">
-          <thead>
-            <tr className="cond border-b-[1.5px] border-dock-ink text-left text-[11px] text-dock-ink/55">
-              <th className="px-4 py-2">Concept</th>
-              <th className="px-2 py-2 text-right">Quantity</th>
-              <th className="px-2 py-2 text-right">Price</th>
-              <th className="px-4 py-2 text-right">Amount</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-dock-line">
+      <section className="dock-card mt-5 bg-white">
+        {/* Phone: one block per line (concept, amount, then quantity × price), so nothing needs sliding. */}
+        <div className="sm:hidden print:hidden">
+          <ul className="divide-y divide-dock-line">
             {lines.map((l, i) => (
-              <tr key={i}>
-                <td className="px-4 py-2.5 font-medium">{l.label}</td>
-                <td className="mono px-2 py-2.5 text-right">
-                  {num(l.quantity)} <span className="text-xs text-dock-ink/50">{l.unit}</span>
-                </td>
-                <td className="mono px-2 py-2.5 text-right">{num(l.price)} €</td>
-                <td className="mono px-4 py-2.5 text-right">{eur(l.cents)}</td>
-              </tr>
+              <li key={i} className="px-4 py-3">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="min-w-0 font-medium">{l.label}</span>
+                  <span className="mono shrink-0">{eur(l.cents)}</span>
+                </div>
+                <p className="mono mt-0.5 text-xs text-dock-ink/60">
+                  {num(l.quantity)} {l.unit} × {num(l.price)} €
+                </p>
+              </li>
             ))}
-          </tbody>
-          <tfoot className="border-t-[1.5px] border-dock-ink">
-            <tr>
-              <td colSpan={3} className="cond px-4 pt-2 text-right text-xs text-dock-ink/60">Base</td>
-              <td className="mono px-4 pt-2 text-right">{eur(inv.baseCents)}</td>
-            </tr>
-            <tr>
-              <td colSpan={3} className="cond px-4 text-right text-xs text-dock-ink/60">VAT {num(inv.vatPct)} %</td>
-              <td className="mono px-4 text-right">{eur(inv.vatCents)}</td>
-            </tr>
-            <tr>
-              <td colSpan={3} className="cond px-4 pb-3 pt-1 text-right text-sm font-semibold">Total</td>
-              <td className="mono px-4 pb-3 pt-1 text-right text-lg font-semibold">{eur(inv.totalCents)}</td>
-            </tr>
-          </tfoot>
-        </table>
+          </ul>
+          <dl className="space-y-1 border-t-[1.5px] border-dock-ink px-4 py-3">
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="cond text-xs text-dock-ink/60">Base</dt>
+              <dd className="mono">{eur(inv.baseCents)}</dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="cond text-xs text-dock-ink/60">VAT {num(inv.vatPct)} %</dt>
+              <dd className="mono">{eur(inv.vatCents)}</dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-3 pt-1">
+              <dt className="cond text-sm font-semibold">Total</dt>
+              <dd className="mono text-lg font-semibold">{eur(inv.totalCents)}</dd>
+            </div>
+          </dl>
+        </div>
+        <div className="hidden overflow-x-auto sm:block print:block">
+          <table className="w-full min-w-[520px] text-sm">
+            <thead>
+              <tr className="cond border-b-[1.5px] border-dock-ink text-left text-[11px] text-dock-ink/55">
+                <th className="px-4 py-2">Concept</th>
+                <th className="px-2 py-2 text-right">Quantity</th>
+                <th className="px-2 py-2 text-right">Price</th>
+                <th className="px-4 py-2 text-right">Amount</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-dock-line">
+              {lines.map((l, i) => (
+                <tr key={i}>
+                  <td className="px-4 py-2.5 font-medium">{l.label}</td>
+                  <td className="mono px-2 py-2.5 text-right">
+                    {num(l.quantity)} <span className="text-xs text-dock-ink/50">{l.unit}</span>
+                  </td>
+                  <td className="mono px-2 py-2.5 text-right">{num(l.price)} €</td>
+                  <td className="mono px-4 py-2.5 text-right">{eur(l.cents)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot className="border-t-[1.5px] border-dock-ink">
+              <tr>
+                <td colSpan={3} className="cond px-4 pt-2 text-right text-xs text-dock-ink/60">Base</td>
+                <td className="mono px-4 pt-2 text-right">{eur(inv.baseCents)}</td>
+              </tr>
+              <tr>
+                <td colSpan={3} className="cond px-4 text-right text-xs text-dock-ink/60">VAT {num(inv.vatPct)} %</td>
+                <td className="mono px-4 text-right">{eur(inv.vatCents)}</td>
+              </tr>
+              <tr>
+                <td colSpan={3} className="cond px-4 pb-3 pt-1 text-right text-sm font-semibold">Total</td>
+                <td className="mono px-4 pb-3 pt-1 text-right text-lg font-semibold">{eur(inv.totalCents)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
       </section>
 
       <section className="mt-8">
@@ -143,7 +175,12 @@ export default async function PreInvoicePage({ params }: PageProps<"/office/bill
                 {g.split && (
                   <p className="bg-dock-yellow px-4 py-2 text-[15px] font-bold leading-snug">{splitText(g.split)}</p>
                 )}
-                <div className="overflow-x-auto">
+                <ul className="divide-y divide-dock-line sm:hidden print:hidden">
+                  {g.rows.map((r, i) => (
+                    <MovementCard key={i} row={r} periodLast={last} />
+                  ))}
+                </ul>
+                <div className="hidden overflow-x-auto sm:block print:block">
                   <table className="w-full min-w-[520px] text-sm">
                     <tbody className="divide-y divide-dock-line">
                       {g.rows.map((r, i) => (
@@ -185,12 +222,53 @@ export default async function PreInvoicePage({ params }: PageProps<"/office/bill
   );
 }
 
-function MovementRow({ row: r, periodLast }: { row: DetailRow; periodLast: string }) {
+function describeRow(r: DetailRow, periodLast: string) {
   const leaving = r.exitDate !== null;
   const gone = leaving && r.exitDate! <= periodLast;
   const exitText = r.exitDate === null ? "no exit" : `${gone ? "left" : "leaves"} ${ddmm(r.exitDate)}`;
   const Icon = r.concept === "in" ? ArrowDownToLine : r.concept === "out" ? ArrowUpFromLine : Archive;
   const kind = r.concept === "in" ? "Entry" : r.concept === "out" ? "Exit" : "Storage";
+  return { leaving, exitText, Icon, kind };
+}
+
+/** The same movement as MovementRow, stacked for a phone: kind and amount on top, the pallets below, exit and price last. */
+function MovementCard({ row: r, periodLast }: { row: DetailRow; periodLast: string }) {
+  const { leaving, exitText, Icon, kind } = describeRow(r, periodLast);
+  return (
+    <li className="px-4 py-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="cond flex items-center gap-1.5 text-xs text-dock-ink/60">
+          <Icon size={13} aria-hidden /> {kind}
+        </span>
+        <span className="mono shrink-0">{eur(r.cents)}</span>
+      </div>
+      <p className="mt-0.5">
+        <span className="mono text-[15px] font-semibold">{num(r.pallets)}</span> <span className="text-xs text-dock-ink/55">pallets</span>
+        {r.concept === "storage" && (
+          <span className="mono text-xs text-dock-ink/65">
+            {" "}× {r.days} days = <b>{num(r.palletDays ?? 0)}</b> pallet·days
+          </span>
+        )}
+        {r.concept === "out" && (
+          <span className="mono text-xs text-dock-ink/65">
+            {" "}on {r.exitDate ? ddmm(r.exitDate) : ""}
+            {r.outboundNumber ? ` · Nº ${r.outboundNumber}` : ""}
+          </span>
+        )}
+      </p>
+      {r.note && <p className="text-[11px] text-dock-ink/50">{r.note}</p>}
+      <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+        {r.concept === "storage" && (
+          <span className={`cond whitespace-nowrap px-2 py-0.5 text-xs font-semibold ${leaving ? "bg-dock-ink text-dock-yellow" : "border-[1.5px] border-dock-ink"}`}>{exitText}</span>
+        )}
+        <span className="mono text-xs text-dock-ink/55">at {num(r.price)} €</span>
+      </p>
+    </li>
+  );
+}
+
+function MovementRow({ row: r, periodLast }: { row: DetailRow; periodLast: string }) {
+  const { leaving, exitText, Icon, kind } = describeRow(r, periodLast);
   return (
     <tr className="align-baseline">
       <td className="w-28 whitespace-nowrap px-4 py-2">
