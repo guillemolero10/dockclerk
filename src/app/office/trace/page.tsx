@@ -59,9 +59,9 @@ function UntrackedNote({ items, lotMatches }: { items: UntrackedItem[]; lotMatch
     <section className="mt-6 space-y-2" aria-label="Articles without lot tracking">
       {items.map((i) => (
         <p key={`${i.clientCode}-${i.sku}`} className="dock-card border-l-4 border-l-dock-yellow bg-white px-4 py-3 text-sm">
-          <span className="mono font-semibold">{i.sku}</span> is not tracked by lot (no expiry){lotMatches === 0 ? "" : ", so it has no lot in this list"}. See its stock and deliveries in the customer card{" "}
-          <Link href={`/office/clients/${i.clientCode}`} className="cond whitespace-nowrap font-semibold underline">
-            {i.client} <ArrowRight size={13} className="inline" aria-hidden />
+          <span className="mono font-semibold">{i.sku}</span> is not tracked by lot (no expiry){lotMatches === 0 ? "" : ", so it has no lot in this list"}. See its stock and deliveries in the{" "}
+          <Link href={`/office/clients/${i.clientCode}`} className="cond font-semibold underline">
+            {i.client} customer card <ArrowRight size={13} className="inline" aria-hidden />
           </Link>
         </p>
       ))}
