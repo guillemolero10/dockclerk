@@ -5,6 +5,14 @@ export function norm(text: string) {
   return text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+/** The name people use for a company: "Bebidas Montgó, S.A." → "bebidas montgo" (no legal form, no punctuation). */
+export function tradeName(name: string) {
+  return norm(name)
+    .replace(/,?\s*\b(s\.?\s?a\.?\s?u|s\.?\s?l\.?\s?u|s\.?\s?l|s\.?\s?a|s\.?\s?coop)\.?\s*$/, "")
+    .replace(/[.,]+$/, "")
+    .trim();
+}
+
 const GENERIC = new Set(["caja", "cajas", "pack", "saco", "uds", "unidades", "granza", "surtida", "surtidos", "juego", "con"]);
 
 /** The words that name an item: its SKU parts and its description without what is in brackets. */

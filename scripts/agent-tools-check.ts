@@ -15,6 +15,7 @@ import { billPeriod, type TariffInput } from "../src/lib/billing/compute";
 import { dayOfYmd, period } from "../src/lib/billing/calendar";
 import type { Stay } from "../src/lib/billing/stays";
 import { clients as seedClients } from "../prisma/seed-data";
+import { norm, tradeName } from "../src/lib/agent/words";
 
 type Case = { name: string; check: () => string | null | undefined | Promise<string | null> };
 
@@ -412,6 +413,11 @@ const CASES: Case[] = [
     billingIntent("Se me ha olvidado el día de la entrega", TODAY),
   ], [null, null, null]) },
   { name: "F5 mes con nombre: septiembre, mes pasado (también en enero), este mes", check: () => same([monthFromText("en septiembre", TODAY), monthFromText("el mes pasado", TODAY), monthFromText("el mes pasado", "2026-01-15"), monthFromText("este mes", TODAY), monthFromText("en diciembre", TODAY), monthFromText("en octubre", TODAY)], ["2026-09", "2026-09", "2025-12", undefined, "2025-12", undefined]) },
+  { name: "F7 nombre comercial sin forma jurídica: los 8 clientes del seed, «S.L.U.» y «S. A.»; «¿Cuánto lleva Bebidas Montgó…?» lo contiene", check: () => same([
+    seedClients.map((c) => tradeName(c.name)).every((n) => n.length > 3 && !/[.,]$/.test(n) && !/\bs\.?\s?[al]\b/.test(n)),
+    tradeName("Bebidas Montgó, S.A."), tradeName("Polímeros Serra Mariola, S.L."), tradeName("Ejemplo Uno S.L.U."), tradeName("Ejemplo Dos, S. A."),
+    norm("¿Cuánto lleva Bebidas Montgó de almacenaje este mes?").includes(tradeName("Bebidas Montgó, S.A.")),
+  ], [true, "bebidas montgo", "polimeros serra mariola", "ejemplo uno", "ejemplo dos", true]) },
   { name: "F6 el motor de reglas manda a una persona el mensaje sembrado de la factura (sin tocar la BD)", check: async () => {
     const [d] = await draftMessage(asMessage("Hola, no nos ha llegado la factura de septiembre, ¿nos la podéis reenviar?"));
     return d.kind === "NEEDS_HUMAN" ? null : `got ${d.kind}`;
