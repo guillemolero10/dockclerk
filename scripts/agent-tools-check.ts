@@ -444,6 +444,25 @@ const CASES: Case[] = [
     [scanQuantities("Mandad 5 palés de PELUCHE-30 a SuperBahía Alicante el 3 de noviembre").map((q) => q.amount), scanQuantities("Mandad 4 de horchata para el 3 de noviembre").map((q) => q.amount)],
     [[5], [4]],
   ) },
+  { name: "D3 una fecha pasada es una referencia, no la entrega («mañana… como el pedido del 20 de octubre» → mañana); año escrito; abreviaturas; en enero «28 de diciembre» es el pasado", check: () => {
+    const at = (text: string, now: Date) => { const d = parseDelivery(text, now); return d ? madridYmd(d.at) : null; };
+    const oct = new Date("2026-10-29T11:00:00Z");
+    const jan = new Date("2027-01-15T11:00:00Z");
+    return same([
+      at("Mandad mañana 3 palés como en el pedido del 20 de octubre", oct), at("Como el albarán del 28 de octubre, mandad el jueves 2 palés", oct),
+      at("Mandad 2 palés el 3/11/2027", oct), at("el 3 de noviembre de 2027", oct), at("el 3 de nov.", oct), at("para el 5 de dic", oct), at("el 5 de sept", oct),
+      at("el 28 de octubre", oct), at("el 3/11/2025", oct), at("como el del 28 de diciembre, el 20 de enero", jan), at("el 10 de enero", oct),
+    ], ["2026-10-30", "2026-11-05", "2027-11-03", "2027-11-03", "2026-11-03", "2026-12-05", null, null, null, "2027-01-20", "2027-01-10"]);
+  } },
+  { name: "D4 cantidades: «2 plt» y «2 (palés)» son palés; «3 de nov», «a las 10 de la mañana» y «el 3/11 de» no son palés", check: () => same(
+    ["mandad 2 plt de horchata", "mandad 2 (palés) de horchata", "mandad el 3 de nov 2 palés", "mandad 4 de horchata a las 10 de la mañana", "el 3/11 de horchata"].map((t) => scanQuantities(t).map((q) => `${q.amount} ${q.unit}`)),
+    [["2 pallets"], ["2 pallets"], ["2 pallets"], ["4 pallets"], []],
+  ) },
+  { name: "F8 nombres con «del» o un «Sur» final: «Granzas Mediterráneo» y «Calzados Vinalopó» nombran a los del seed; palabras sueltas no", check: () => same([
+    mentionsCompany("¿Y Granzas Mediterráneo?", "Granzas del Mediterráneo, S.L."), mentionsCompany("¿Cuánto stock tiene Calzados Vinalopó?", "Calzados Vinalopó Sur, S.L."),
+    mentionsCompany("Calzados Vinalopó Sur, ¿cuánto tienen?", "Calzados Vinalopó Sur, S.L."), mentionsCompany("Mandad 2 palés al Mediterráneo", "Granzas del Mediterráneo, S.L."),
+    mentionsCompany("¿Cuántos calzados tengo?", "Calzados Vinalopó Sur, S.L."), mentionsCompany("bebidas montgonesas", "Bebidas Montgó, S.A."),
+  ], [true, true, true, false, false, false]) },
   { name: "F7 nombre comercial sin forma jurídica: los 8 clientes del seed, «S.L.U.» y «S. A.»; «¿Cuánto lleva Bebidas Montgó…?» lo contiene", check: () => same([
     seedClients.map((c) => tradeName(c.name)).every((n) => n.length > 3 && !/[.,]$/.test(n) && !/\bs\.?\s?[al]\b/.test(n)),
     tradeName("Bebidas Montgó, S.A."), tradeName("Polímeros Serra Mariola, S.L."), tradeName("Ejemplo Uno S.L.U."), tradeName("Ejemplo Dos, S. A."),

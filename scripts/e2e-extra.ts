@@ -105,6 +105,11 @@ async function approve() {
     const who = ((await other.locator("header").innerText()) ?? "").replace(/\s+/g, " ");
     const pending = await other.locator("select").count();
     out(`26b double click on: ${who} (doubts ${pending})`);
+    // Yellow fields are required now: choose the first option of each, or the double click never reaches the server (a false PASS).
+    for (const sel of await other.locator("select").all()) {
+      const values = await sel.locator("option").evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value).filter(Boolean));
+      if (values.length) await sel.selectOption(values[0]);
+    }
     const before2 = await outboundCount();
     await other.getByRole("button", { name: /Approve & write to software/ }).dblclick().catch((e) => out(`  dblclick: ${String(e.message).split("\n")[0]}`));
     await a.waitForTimeout(6000);
