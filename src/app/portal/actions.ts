@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import type { Message, Prisma } from "@prisma/client";
 import { runClerk } from "@/lib/agent";
 import { stepsForCustomer } from "@/lib/agent/public-steps";
+import { hello } from "@/lib/agent/rules";
+import { mentionsCompany } from "@/lib/agent/words";
 import type { OutboundPayload, Step } from "@/lib/agent/types";
 import { db } from "@/lib/db";
 import { describeUnits } from "@/lib/pallets/quantity";
@@ -26,6 +28,20 @@ export async function askClerk(question: string): Promise<AskResult> {
     return { kind: "answer", text: "Has hecho muchas consultas seguidas. Espera un rato o escribe a la oficina directamente.", steps: [] };
   }
   const fromName = `${client.contact ?? client.name} (${client.name})`;
+
+  // Another customer's goods or bill: the answer is always no, so neither the model nor the office is needed.
+  const others = await db.client.findMany({ where: { id: { not: client.id } }, select: { name: true } });
+  if (others.some((o) => mentionsCompany(body, o.name))) {
+    return {
+      kind: "answer",
+      text: `${hello(fromName)} solo puedo darte información de tu mercancía. Un saludo.`,
+      steps: [
+        { kind: "read", text: `read message from ${client.name} (PORTAL)` },
+        { kind: "tool", text: "classify → asks about another customer" },
+        { kind: "ok", text: "answered: only this customer's own goods" },
+      ],
+    };
+  }
 
   const preview: Message & { client: typeof client } = {
     id: "portal-preview", channel: "PORTAL", fromName, fromAddress: null, clientId: client.id, subject: null, body,
