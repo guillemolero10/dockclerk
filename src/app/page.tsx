@@ -18,13 +18,13 @@ export default async function Home() {
         className="min-h-[calc(100vh-10px)]"
         style={{ backgroundImage: "radial-gradient(rgba(255,255,255,0.035) 1px, transparent 1px)", backgroundSize: "7px 7px" }}
       >
-        <div className="mx-auto max-w-5xl px-6 py-16">
+        <div className="mx-auto max-w-5xl px-6 py-10 sm:py-16">
           <div className="flex items-center gap-2.5">
             <span className="cond grid h-9 w-9 place-items-center bg-dock-yellow text-sm font-bold text-dock-ink">DC</span>
             <span className="text-lg font-semibold tracking-tight text-white">DockClerk</span>
           </div>
 
-          <div className="mt-10 grid gap-12 lg:grid-cols-[1.4fr_1fr] lg:items-start">
+          <div className="mt-8 grid gap-10 sm:mt-10 sm:gap-12 lg:grid-cols-[1.4fr_1fr] lg:items-start">
             <div>
               <h1 className="max-w-3xl text-4xl font-semibold leading-tight tracking-tight text-white sm:text-5xl">
                 Don&apos;t replace your warehouse software.{" "}
@@ -44,7 +44,8 @@ export default async function Home() {
               </div>
             </div>
 
-            <section className="border border-white/15 bg-white/[0.03] p-6">
+            {/* On a phone the form comes first (visual order only; the page text stays first in the HTML). */}
+            <section className="order-first border border-white/15 bg-white/[0.03] p-6 lg:order-none">
               <div className="flex items-center gap-3">
                 <span className="grid h-10 w-10 place-items-center bg-dock-yellow/15 text-dock-yellow ring-1 ring-dock-yellow/30">
                   <KeyRound size={19} />
