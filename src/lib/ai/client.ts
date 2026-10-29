@@ -33,8 +33,12 @@ export const providers = {
    * $1.25 / $4.25 per million tokens in / out.
    */
   agent: () => provider("Muse Spark Open", "BASETEN_API_KEY", "BASETEN_BASE_URL", "https://inference.baseten.co/v1", "BASETEN_MODEL", "meta-models/muse-spark-open-1026", { reasoning: "low", price: { input: 1.25, output: 4.25 } }),
-  /** Muse Spark on the Meta Model API: reads photos (delivery notes, loads). */
-  vision: () => provider("Muse Spark", "META_API_KEY", "META_API_BASE_URL", "https://api.llama.com/compat/v1", "META_VISION_MODEL", "muse-spark"),
+  /**
+   * Muse Spark reads photos (delivery notes, loads): the Meta Model API when there is a key,
+   * otherwise Muse Spark Open on Baseten, which also takes images (checked 29/10/2026: an invented
+   * albarán read right, ≈ 9 s and 0.006 $).
+   */
+  vision: () => provider("Muse Spark", "META_API_KEY", "META_API_BASE_URL", "https://api.llama.com/compat/v1", "META_VISION_MODEL", "muse-spark") ?? providers.agent(),
   /** SAM 3.1 (Meta Model API, or our own Modal service in modal/ with SAM_API_KEY): finds every box in a photo of the load. */
   segment: () => provider("SAM 3.1", env("SAM_API_KEY") ? "SAM_API_KEY" : "META_API_KEY", "META_SAM_URL", "https://api.llama.com/v1/sam", "META_SAM_MODEL", "sam-3.1"),
   /** Muse Voice Transcribe on the Meta Model API: voice notes from the floor. */

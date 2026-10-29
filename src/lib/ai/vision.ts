@@ -25,7 +25,9 @@ export async function readDeliveryNote(image: Image, context: { customer: string
           content:
             "You read photos of Spanish delivery notes (albaranes) at a warehouse dock. Answer only with JSON: " +
             '{"docRef": string|null, "supplier": string|null, "totalPallets": number|null, "lines": [{"sku": string|null, "description": string, "lot": string|null, "pallets": number|null, "units": number|null}]}. ' +
-            "Map each line to one of the customer's SKUs when the description clearly matches; otherwise sku is null. Never invent numbers you cannot read: use null.",
+            "Map each line to one of the customer's SKUs when the description clearly matches; otherwise sku is null. " +
+            "units = the number of boxes (cajas, bultos) exactly as written on the line; never multiply by the pieces inside each box. " +
+            "Never invent numbers you cannot read: use null.",
         },
         {
           role: "user",
