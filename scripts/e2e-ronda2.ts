@@ -1,6 +1,9 @@
 // Checks of the 29/10 front-end round that need a session (run with E2E_* variables; localhost only; WRITES to the database: reseed after).
+// SPENDS MODEL MONEY when the server has a model key: step 1 replays the inbox (15 messages) and step 2 asks the portal assistant
+// (about 0.10 $ in all on 29/10). Without a key the rules answer and it costs nothing.
 //   STEP=1 npx tsx scripts/e2e-ronda2.ts   (login at 375, inbox -> approve Toni's order, 3D ?pick=, PDA receive with 1 damaged box)
 //   STEP=2 npx tsx scripts/e2e-ronda2.ts   (billing prepare, pre-invoice at 375 and desktop, trace, customer portal)
+//   STEP=3 PICK_ID=<outbound id> npx tsx scripts/e2e-ronda2.ts   (3D ?pick= on a short screen; RECEIPT_ID=<id> also checks that receipt)
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -205,7 +208,7 @@ async function step3() {
   const office = await (await b.newContext({ viewport: { width: 1366, height: 520 } })).newPage();
   office.setDefaultTimeout(30_000);
   await login(office, E("E2E_OFFICE_USER"), E("E2E_OFFICE_PASS"));
-  const id = process.env.PICK_ID!;
+  const id = E("PICK_ID");
   await office.goto(`${BASE}/office/warehouse?pick=${id}`, { waitUntil: "networkidle" });
   await office.waitForTimeout(4000);
   const r = await office.evaluate(() => {
@@ -225,4 +228,10 @@ async function step3() {
   }
   await b.close();
 }
-({ "1": step1, "2": step2, "3": step3 } as Record<string, () => Promise<void>>)[process.env.STEP || ""]().catch((e) => { console.error("ERROR", e.message); process.exit(1); });
+const steps: Record<string, () => Promise<void>> = { "1": step1, "2": step2, "3": step3 };
+const step = steps[process.env.STEP ?? ""];
+if (!step) {
+  console.error(`Say which step: STEP=1, STEP=2 or STEP=3 (got ${JSON.stringify(process.env.STEP ?? null)}). See the header of this file.`);
+  process.exit(1);
+}
+step().catch((e) => { console.error("ERROR", e.message); process.exit(1); });
