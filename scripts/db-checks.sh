@@ -72,6 +72,8 @@ step "pallets-check"       npx tsx scripts/pallets-check.ts
 step "billing-check"       npx tsx scripts/billing-check.ts
 step "agent-tools-check"   npx tsx scripts/agent-tools-check.ts
 step "billing-view-check"  npx tsx scripts/billing-view-check.ts
+# the seed must work on any day: 45 days back and 60 ahead, three clock times each (only failing dates are printed)
+step "seed-days-check"     env TZ=Europe/Madrid npx tsx scripts/seed-days-check.ts --quiet
 
 # 2. seed twice (WRITES: deletes and recreates the fake data; keeps User, Session and AiSpend)
 if [ $SEED = 1 ] && confirm "WRITES: 'npm run db:seed' twice (wipes and recreates the demo data, keeps users and sessions). Go on?"; then

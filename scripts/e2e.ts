@@ -12,7 +12,7 @@
 //
 // Options (environment): E2E_BASE_URL (http://localhost:3000), E2E_SHOTS (folder for screenshots, outside the repo by default),
 // E2E_HEADED=1 (watch it), E2E_SKIP_REPLAY=1 (do not press "Replay the morning" at the start),
-// E2E_C001_BASE (expected base of C001, default 675,66; only checked when the month shown is September 2026).
+// E2E_C001_BASE (expected base of C001, e.g. 675,66; only checked when it is set: the figure depends on the day the seed ran).
 //
 // Exit code: 0 all steps passed (warnings do not count), 1 any failure, 2 missing configuration.
 
@@ -23,7 +23,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from "playwrig
 
 const BASE = (process.env.E2E_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
 const SHOTS = process.env.E2E_SHOTS || join(homedir(), "dockclerk-e2e", new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19));
-const WANT_C001_BASE = process.env.E2E_C001_BASE || "675,66";
+const WANT_C001_BASE = process.env.E2E_C001_BASE || "";
 
 const need = ["E2E_OFFICE_USER", "E2E_OFFICE_PASS", "E2E_OPERATOR_USER", "E2E_OPERATOR_PASS"];
 const missing = need.filter((k) => !process.env[k]);
@@ -314,8 +314,8 @@ async function main() {
     c001Base = eurosOf(await row.locator("td").nth(5).innerText());
     assert(c001Base, "C001 has no base amount");
     console.log(`   C001 base ${c001Base}`);
-    if (/september 2026/i.test(monthLabel)) assert(c001Base.startsWith(WANT_C001_BASE), `C001 base is ${c001Base}, expected ${WANT_C001_BASE} €`);
-    else warn(`month is ${monthLabel}: the 675,66 € check only applies to September 2026 (this base is ${c001Base})`);
+    if (WANT_C001_BASE) assert(c001Base.startsWith(WANT_C001_BASE), `C001 base is ${c001Base}, expected ${WANT_C001_BASE} €`);
+    else warn(`C001 base for ${monthLabel} is ${c001Base} (it depends on the day the seed ran; set E2E_C001_BASE to check it)`);
     c001Id = ((await row.locator('a[href^="/office/billing/"]').getAttribute("href")) ?? "").split("/").pop() ?? "";
   });
 

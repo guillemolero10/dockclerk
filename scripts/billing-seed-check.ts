@@ -76,7 +76,9 @@ const CASES: Case[] = [
     name: `C001 ${prevMonth}: 21 pallets with no exit and 2 that leave on PED-7001/7002 (planted case)`,
     async run() {
       const b = await bill("C001", prevMonth);
-      const rows = b.result.detail.filter((d) => d.concept === "storage" && d.sku === "PUZZLE-500" && d.inDate === `${prevMonth}-20`);
+      // A random puzzle delivery can also land on the 20th: the planted case is the entry of 23 pallets, found by its number.
+      const entry = b.result.detail.find((d) => d.concept === "in" && d.sku === "PUZZLE-500" && d.inDate === `${prevMonth}-20` && d.pallets === 23);
+      const rows = b.result.detail.filter((d) => d.concept === "storage" && d.sku === "PUZZLE-500" && d.inDate === `${prevMonth}-20` && d.inboundNumber === entry?.inboundNumber);
       const open = rows.find((d) => d.exitDate === null);
       const leaving = rows.find((d) => d.exitDate !== null);
       const peds = await db.outbound.findMany({ where: { client: { code: "C001" }, number: { in: leaving?.outboundNumber ? [leaving.outboundNumber] : [] } }, select: { number: true, clientDocRef: true, status: true } });
@@ -90,7 +92,8 @@ const CASES: Case[] = [
         peds.length === 1 && !/^PED-700[12]$/.test(peds[0].clientDocRef ?? "") ? `outbound reference ${peds[0].clientDocRef}, expected PED-7001/7002` : "",
         open && leaving && open.days !== null && open.palletDays !== 21 * open.days ? "open pallet-days" : "",
         leaving && leaving.days !== null && leaving.palletDays !== 2 * leaving.days ? "leaving pallet-days" : "",
-        b.result.detail.some((d) => d.concept === "out" && d.inDate === `${prevMonth}-20` && d.sku === "PUZZLE-500") ? "the 2 pallets must not be charged as an exit in " + prevMonth : "",
+        !entry ? `no entry of 23 pallets of PUZZLE-500 on ${prevMonth}-20` : "",
+        b.result.detail.some((d) => d.concept === "out" && d.inDate === `${prevMonth}-20` && d.sku === "PUZZLE-500" && d.inboundNumber === entry?.inboundNumber) ? "the 2 pallets must not be charged as an exit in " + prevMonth : "",
       ].filter(Boolean);
       return bad.length ? bad.join("; ") : null;
     },
@@ -100,7 +103,7 @@ const CASES: Case[] = [
     async run() {
       if (today < period(thisMonth).start + 1) return null; // the 1st: they leave today, covered by the case above
       const b = await bill("C001", thisMonth);
-      const out = b.result.detail.find((d) => d.concept === "out" && d.sku === "PUZZLE-500" && d.inDate === `${prevMonth}-20` && d.exitDate === `${thisMonth}-02`);
+      const out = b.result.detail.find((d) => d.concept === "out" && d.sku === "PUZZLE-500" && d.inDate === `${prevMonth}-20` && d.exitDate === `${thisMonth}-02` && d.pallets === 2);
       return out && out.pallets === 2 && b.result.checks.detailMatches ? null : `exit row ${JSON.stringify(out)}, detail ${b.result.checks.detailMatches}`;
     },
   },
