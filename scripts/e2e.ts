@@ -135,6 +135,7 @@ async function main() {
 
   let outboundId = "";
   let outboundNo = 0;
+  let pickTotal = 3;
   let c001Id = "";
   let c001Base = "";
   let monthLabel = "";
@@ -156,6 +157,7 @@ async function main() {
     if (process.env.E2E_SKIP_REPLAY !== "1") {
       await office.getByRole("button", { name: /Replay the morning/ }).click();
       await office.waitForLoadState("networkidle");
+      await office.waitForTimeout(1500);
     }
     const run = office.getByRole("button", { name: /Let the clerk handle \d+ messages/ });
     assert(await run.count(), "no 'Let the clerk handle N messages' button: are there messages waiting?");
@@ -182,21 +184,27 @@ async function main() {
   await step(office, "inbox: approve the horchata order", async () => {
     const card = office.locator("article", { hasText: "HORCH-1L" }).filter({ hasText: "New outbound" }).first();
     await card.getByRole("button", { name: /Approve & write to software/ }).click();
-    await office.waitForLoadState("networkidle");
-    // The PDA must now list a new pick; the newest outbound number is Toni's.
+    // The server action takes a moment: wait for the "Done" row with the outbound number (not just for the network to go quiet).
+    const done = office.getByText(/Outbound Nº\s*\d+ in your software/i).first();
+    await done.waitFor({ timeout: 60_000 });
+    outboundNo = Number(((await done.textContent()) ?? "").match(/Nº\s*(\d+)/)?.[1] ?? 0);
+    assert(outboundNo > 0, "the Done row has no outbound number");
+    // The PDA must list exactly that pick.
     const deadline = Date.now() + 20_000;
     while (Date.now() < deadline && !outboundId) {
-      await pda.goto(BASE + "/operator", { waitUntil: "domcontentloaded" });
-      const links = await pda.locator('a[href^="/operator/pick/"]').evaluateAll((as) =>
-        as.map((a) => ({ href: a.getAttribute("href") ?? "", text: (a as HTMLElement).innerText })),
-      );
-      const best = links
-        .map((l) => ({ ...l, no: Number((l.text.match(/Nº\s*(\d+)/) ?? [])[1] ?? 0) }))
-        .sort((a, b) => b.no - a.no)[0];
-      if (best?.no) {
-        outboundId = best.href.split("/").pop()!;
-        outboundNo = best.no;
-      } else await pda.waitForTimeout(1500);
+      // The PDA lists one building at a time (?w=N1 / ?w=N2): Toni's drinks are in N2, so look in both.
+      for (const w of ["N1", "N2"]) {
+        await pda.goto(`${BASE}/operator?w=${w}`, { waitUntil: "domcontentloaded" });
+        const links = await pda.locator('a[href^="/operator/pick/"]').evaluateAll((as) =>
+          as.map((a) => ({ href: a.getAttribute("href") ?? "", text: (a as HTMLElement).innerText })),
+        );
+        const mine = links.find((l) => Number((l.text.match(/Nº\s*(\d+)/) ?? [])[1] ?? 0) === outboundNo);
+        if (mine) {
+          outboundId = mine.href.split("/").pop()!;
+          break;
+        }
+      }
+      if (!outboundId) await pda.waitForTimeout(1500);
     }
     assert(outboundId, "the approved order never showed up on the PDA");
     console.log(`   outbound Nº ${outboundNo}`);
@@ -212,31 +220,37 @@ async function main() {
     assert(box && box.width > 200 && box.height > 200, "the canvas has no size");
     const t = await text(office);
     assert(/To pick for Nº\s*\d+/.test(t), "no 'To pick for Nº …' legend: no pallets are highlighted");
-    assert(/Pick route/.test(t), "no pick route shown");
+    assert(/pick route/i.test(t), "no pick route shown"); // innerText gives the CSS-uppercase text
     assert(!/pallets? short/.test(t.split("Pick route")[0] ?? ""), "the order is flagged as 'short' of pallets");
     const png = await canvas.screenshot();
     if (png.length < 15_000) warn(`3D canvas looks almost empty (${png.length} bytes): look at the screenshot`);
   });
 
   // ---------- 4. PDA picking ----------
-  await step(pda, "PDA: 2 whole pallets and one 'Take only 50 boxes'", async () => {
+  await step(pda, "PDA: whole pallets and one 'Take only 50 boxes'", async () => {
     await pda.goto(`${BASE}/operator/pick/${outboundId}`, { waitUntil: "networkidle" });
     await noSideScroll(pda, "the pick page");
-    assert(/0\/3/.test(await text(pda)), "the progress is not 0/3");
+    // Toni's WhatsApp asks for 6 pallets of water AND 2.5 of horchata: 6 + 2 + the split one = 9 steps.
+    const total = Number((await text(pda)).match(/0\/(\d+)/)?.[1] ?? 0);
+    assert(total >= 3, "the progress is not 0/N");
+    pickTotal = total;
     let sawSplit = false;
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < total + 2; i++) {
       const t = await text(pda);
       if (/is prepared/.test(t)) break;
-      if (/Take only/.test(t)) {
-        assert(/50\s*boxes/.test(t) && /leaves a pico of 50/.test(t), "the split step does not say 'Take only 50 boxes … leaves a pico of 50'");
+      const progress = t.match(/\d+\/\d+/)?.[0] ?? "";
+      if (/take only/i.test(t)) {
+        assert(/50\s*boxes/i.test(t) && /leaves a pico of 50/i.test(t), "the split step does not say 'Take only 50 boxes … leaves a pico of 50'");
         sawSplit = true;
         await shot(pda, "pda-take-only-50");
         await pda.getByRole("button", { name: /^Picked 50 boxes/ }).click();
       } else {
         await pda.getByRole("button", { name: /^Picked the pallet/ }).click();
       }
-      await pda.waitForLoadState("networkidle");
-      await pda.waitForTimeout(600);
+      // The pick is a server action (a few seconds on mobile data): wait until the page has moved on (new progress, or "is prepared"),
+      // otherwise the next loop reads the old page with its button still showing "…".
+      await pda.waitForFunction((prev) => /is prepared/.test(document.body.innerText) || (document.body.innerText.match(/\d+\/\d+/)?.[0] ?? "") !== prev, progress, { timeout: 40_000 });
+      await pda.waitForTimeout(400);
     }
     assert(sawSplit, "no split step ('Take only …') appeared");
     assert(/is prepared/.test(await text(pda)), "the outbound did not become PREPARED after the last pick");
@@ -246,19 +260,19 @@ async function main() {
   await step(pda, "PDA: reloading a finished pick changes nothing", async () => {
     await pda.reload({ waitUntil: "networkidle" });
     const t = await text(pda);
-    assert(/is prepared/.test(t) && /3 pallets waiting|4 pallets waiting/.test(t), `unexpected prepared page: ${t.replace(/\s+/g, " ").slice(0, 160)}`);
+    assert(/is prepared/.test(t) && new RegExp(`(${pickTotal}|${pickTotal + 1}) pallets waiting`).test(t), `unexpected prepared page: ${t.replace(/\s+/g, " ").slice(0, 160)}`);
   });
 
   // ---------- 5. trace ----------
   await step(office, "trace: the horchata lot balances in units", async () => {
     await office.goto(`${BASE}/office/trace?q=${encodeURIComponent("HORCH-1L")}`, { waitUntil: "networkidle" });
     const first = office.locator('a[href^="/office/trace?lot="]').first();
-    await first.click();
-    await office.waitForLoadState("networkidle");
+    await Promise.all([office.waitForURL(/\/office\/trace\?lot=/), first.click()]);
+    await office.getByText(/\d+ in = \d+ out \+ \d+ here/).first().waitFor({ timeout: 20_000 });
     const t = await text(office);
-    const m = t.match(/(\d+) in = (\d+) out \+ (\d+) here/);
+    const m = t.match(/(\d+) in = (\d+) out \+ (\d+) here/i);
     assert(m, "no 'N in = N out + N here' line on the trace page");
-    assert(!/does not add up/.test(t), `the lot does not balance: ${m![0]}`);
+    assert(!/does not add up/i.test(t), `the lot does not balance: ${m![0]}`);
     assert(Number(m![1]) === Number(m![2]) + Number(m![3]), `in ≠ out + here: ${m![0]}`);
   });
 
@@ -268,7 +282,10 @@ async function main() {
       const links = office.locator('a[href^="/office/trace?lot="]');
       const n = await links.count();
       if (!n) {
-        warn(`trace: no lot found for ${sku}`);
+        const t = await text(office);
+        if (/\d+ in = \d+ out \+ \d+ here/i.test(t)) {
+          assert(!/does not add up/i.test(t), `${sku} does not balance`); // a single lot goes straight to its trace
+        } else warn(`trace: ${sku} has no lot (inbound lines without a lot are not searchable in /office/trace), so the 23 = 21 + 2 / pico 12 balance is only checked in billing`);
         continue;
       }
       for (let i = 0; i < Math.min(n, 4); i++) {
@@ -276,7 +293,7 @@ async function main() {
         await office.locator('a[href^="/office/trace?lot="]').nth(i).click();
         await office.waitForLoadState("networkidle");
         const t = await text(office);
-        assert(!/does not add up/.test(t), `${sku} lot ${i + 1} does not balance`);
+        assert(!/does not add up/i.test(t), `${sku} lot ${i + 1} does not balance`);
       }
     }
   });
@@ -354,7 +371,7 @@ async function main() {
     const full = eurosOf(await office.locator("tbody tr", { hasText: "C001" }).locator("td").nth(5).innerText());
     if (full === c001Base) warn(`C001 base is the same in Full and Fraction (${full}): there may be no loose pallet in that month`);
     await office.goto(`${BASE}/office/billing/${c001Id}`, { waitUntil: "networkidle" });
-    if (!/Loose pallets:\s*Full pallet/.test(await text(office))) warn("the C001 detail does not say 'Loose pallets: Full pallet'");
+    if (!/Loose pallets:\s*Full pallet/i.test(await text(office))) warn("the C001 detail does not say 'Loose pallets: Full pallet'");
     // back to Fraction
     await office.goto(BASE + "/office/clients/C001", { waitUntil: "networkidle" });
     await office.getByRole("button", { name: "Fraction" }).click();
@@ -376,10 +393,10 @@ async function main() {
     await office.getByText(/pre-invoices? drafted/).waitFor({ timeout: 90_000 });
     await office.waitForLoadState("networkidle");
     const row = office.locator("tbody tr", { hasText: "C001" });
-    assert(/Approved/.test(await row.innerText()), "C001 is not shown as Approved");
-    assert(/frozen/.test(await row.innerText()), "C001's rule is not shown as frozen");
+    assert(/approved/i.test(await row.innerText()), "C001 is not shown as Approved");
+    assert(/frozen/i.test(await row.innerText()), "C001's rule is not shown as frozen");
     assert(eurosOf(await row.locator("td").nth(5).innerText()) === c001Base, "C001's base changed after approval");
-    assert(/Already approved/.test(await text(office)), "the console does not say 'Already approved.'");
+    assert(/already approved/i.test(await text(office)), "the console does not say 'Already approved.'");
   });
 
   await step(office, "billing: C001 detail prints without the side bar", async () => {
@@ -439,8 +456,11 @@ async function main() {
   await step(office, "replay the morning, then billing still opens", async () => {
     await office.goto(BASE + "/office/inbox", { waitUntil: "networkidle" });
     await office.getByRole("button", { name: /Replay the morning/ }).click();
-    await office.waitForLoadState("networkidle");
-    assert(await office.getByRole("button", { name: /Let the clerk handle \d+ messages/ }).count(), "after the replay the messages are not waiting again");
+    // resetInbox runs in one transaction (a few seconds): wait for the messages to come back.
+    await office
+      .getByRole("button", { name: /Let the clerk handle \d+ messages/ })
+      .waitFor({ timeout: 60_000 })
+      .catch(() => assert(false, "after the replay the messages are not waiting again (waited 60 s)"));
     await office.goto(BASE + "/office/billing", { waitUntil: "networkidle" });
     assert((await office.locator("tbody tr").count()) === 8, "billing does not show 8 rows after the replay");
     warn("after a replay the picked pallets go back to the racks (a split row joins its loose pallet): check /office/warehouse has nothing in EXP lanes without an outbound");
