@@ -7,7 +7,7 @@
 
 import { describeUnits, readQuantity, splitUnits, toUnits } from "../src/lib/pallets/quantity";
 import { planRestore, type LaneRow } from "../src/lib/warehouse/restore";
-import { allocatePicks, type OpenOrder, type PickableStock, type PickPlan } from "../src/lib/warehouse/picking";
+import { allocatePicks, describeShortage, type OpenOrder, type PickableStock, type PickPlan } from "../src/lib/warehouse/picking";
 
 type Case = { name: string; check: () => string | null };
 
@@ -31,7 +31,7 @@ const row = (units: number, o: Partial<PickableStock> = {}): PickableStock => ({
   id: o.id ?? `s${++seq}`, warehouseId: "W1", itemId: "I1", location: o.location ?? `A-0${seq}-1`, units,
   expiresAt: null, receivedAt: day(1 + seq), outboundId: null, ...o,
 });
-const order = (units: number, itemId = "I1", id = "O1"): OpenOrder => ({ id, number: 1, date: day(20), deadline: null, lines: [{ itemId, units }] });
+const order = (units: number, itemId = "I1", id = "O1", unitsPerPallet = 40): OpenOrder => ({ id, number: 1, date: day(20), deadline: null, lines: [{ itemId, units, unitsPerPallet }] });
 
 const lrow = (id: string, units: number, location: string, o: Partial<LaneRow> = {}): LaneRow => ({
   id, warehouseId: "W1", itemId: "H", clientId: "C1", lot: "L1", expiresAt: day(28), inboundId: "IN1", units, location, ...o,
@@ -183,7 +183,27 @@ const CASES: Case[] = [
   } },
   { name: "R6 a shortage names the item: order 2 pallets + 20 boxes, 1 pallet in stock", check: () => {
     const p = planOf([row(100)], order(220));
-    return same({ lines: p.shortLines, short: p.shortUnits }, { lines: [{ itemId: "I1", units: 120 }], short: 120 });
+    return same({ lines: p.shortLines, short: p.shortUnits }, { lines: [{ itemId: "I1", units: 120, unitsPerPallet: 40 }], short: 120 });
+  } },
+  { name: "S1 faltante sin palés llenos en stock: solo hay un pico de 12 y piden 100 (40 por palé) → 88 = 3 huecos, «2 palés + 8 cajas»", check: () => {
+    const p = planOf([row(12, { id: "pico" })], order(100));
+    return same(
+      { units: p.shortUnits, slots: p.short, text: describeShortage(p.shortLines, () => ({ sku: "PELUCHE-30", unit: "BOX" })) },
+      { units: 88, slots: 3, text: "2 palés + 8 cajas of PELUCHE-30" },
+    );
+  } },
+  { name: "S2 artículo sin una sola fila en stock: 120 cajas (100 por palé) faltan como «1 palé + 20 cajas», no como 120 palés", check: () => {
+    const p = planOf([row(40, { id: "otro", itemId: "I2" })], order(120, "I1", "O1", 100));
+    return same(
+      { slots: p.short, text: describeShortage(p.shortLines, () => ({ sku: "HORCH-1L", unit: "BOX" })), warehouse: p.warehouseId },
+      { slots: 2, text: "1 palé + 20 cajas of HORCH-1L", warehouse: null },
+    );
+  } },
+  { name: "S3 faltante en dos artículos: cada uno en su unidad (sacos, cajas) y unidades por palé", check: () => {
+    const o: OpenOrder = { id: "O1", number: 1, date: day(20), deadline: null, lines: [{ itemId: "A", units: 60, unitsPerPallet: 55 }, { itemId: "B", units: 30, unitsPerPallet: 100 }] };
+    const p = planOf([], o);
+    const sku = new Map([["A", { sku: "PP-NAT", unit: "BAG" as const }], ["B", { sku: "PUZZLE-500", unit: "BOX" as const }]]);
+    return same({ slots: p.short, text: describeShortage(p.shortLines, (id) => sku.get(id)) }, { slots: 3, text: "1 palé + 5 sacos of PP-NAT and 30 cajas of PUZZLE-500" });
   } },
 ];
 

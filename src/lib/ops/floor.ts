@@ -206,11 +206,11 @@ export async function putAway(stockId: string, location: string) {
 export async function openPickPlans() {
   const [stock, open] = await Promise.all([
     db.stock.findMany({ include: { inbound: { select: { date: true } } } }),
-    db.outbound.findMany({ where: { status: "REQUESTED" }, include: { lines: true } }),
+    db.outbound.findMany({ where: { status: "REQUESTED" }, include: { lines: { include: { item: true } } } }),
   ]);
   const plans = allocatePicks(
     stock.map((s) => ({ ...s, receivedAt: s.inbound?.date ?? null })),
-    open.map((o) => ({ id: o.id, number: o.number, date: o.date, deadline: o.deadline, lines: o.lines.map((l) => ({ itemId: l.itemId, units: l.units })) })),
+    open.map((o) => ({ id: o.id, number: o.number, date: o.date, deadline: o.deadline, lines: o.lines.map((l) => ({ itemId: l.itemId, units: l.units, unitsPerPallet: l.item.unitsPerPallet })) })),
   );
   return { plans, stock, open };
 }

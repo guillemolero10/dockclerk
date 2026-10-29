@@ -4,7 +4,7 @@
 import { db } from "@/lib/db";
 import { firstName, fmtDate, madridDayRange, madridHm } from "@/lib/format";
 import { describeUnits, unitWordFor } from "@/lib/pallets/quantity";
-import { allocatePicks } from "@/lib/warehouse/picking";
+import { allocatePicks, describeShortage } from "@/lib/warehouse/picking";
 import { makeLayout } from "@/lib/warehouse/layout";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -106,7 +106,7 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
     id: s.id, warehouseId: s.warehouseId, itemId: s.itemId, location: s.location, units: s.units,
     expiresAt: s.expiresAt, receivedAt: s.inbound?.date ?? null, outboundId: s.outboundId,
   }));
-  const plans = allocatePicks(pickable, open.map((o) => ({ id: o.id, number: o.number, date: o.date, deadline: o.deadline, lines: o.lines.map((l) => ({ itemId: l.itemId, units: l.units })) })));
+  const plans = allocatePicks(pickable, open.map((o) => ({ id: o.id, number: o.number, date: o.date, deadline: o.deadline, lines: o.lines.map((l) => ({ itemId: l.itemId, units: l.units, unitsPerPallet: l.item.unitsPerPallet })) })));
   for (const o of open) {
     const plan = plans.get(o.id);
     const total = o.lines.reduce((sum, l) => sum + l.pallets, 0);
@@ -127,7 +127,7 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
         id: `short-${o.id}`,
         level: "red",
         kind: "stock",
-        title: `Outbound Nº ${o.number} is ${plural(plan.short, "pallet")} short`,
+        title: `Outbound Nº ${o.number} is short: ${describeShortage(plan.shortLines, (id) => o.lines.find((l) => l.itemId === id)?.item)}`,
         detail: `${o.client.name} → ${to}: ${lacking.map((l) => `${l.sku} ${l.ask} ordered, ${l.have} in stock`).join("; ")}. Ship part or wait for the next delivery.`,
         href: `/office/warehouse?pick=${o.id}`,
         action: "See it in 3D",

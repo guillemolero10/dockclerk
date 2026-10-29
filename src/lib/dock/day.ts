@@ -14,11 +14,11 @@ export const TRANSIT_H = 3;
 export async function plannedWarehouses() {
   const [stock, open] = await Promise.all([
     db.stock.findMany({ select: { id: true, warehouseId: true, itemId: true, location: true, units: true, expiresAt: true, outboundId: true, inbound: { select: { date: true } } } }),
-    db.outbound.findMany({ where: { status: "REQUESTED" }, include: { lines: true } }),
+    db.outbound.findMany({ where: { status: "REQUESTED" }, include: { lines: { include: { item: { select: { unitsPerPallet: true } } } } } }),
   ]);
   const plans = allocatePicks(
     stock.map((s) => ({ ...s, receivedAt: s.inbound?.date ?? null })),
-    open.map((o) => ({ id: o.id, number: o.number, date: o.date, deadline: o.deadline, lines: o.lines.map((l) => ({ itemId: l.itemId, units: l.units })) })),
+    open.map((o) => ({ id: o.id, number: o.number, date: o.date, deadline: o.deadline, lines: o.lines.map((l) => ({ itemId: l.itemId, units: l.units, unitsPerPallet: l.item.unitsPerPallet })) })),
   );
   return new Map([...plans].map(([id, plan]) => [id, plan.warehouseId]));
 }

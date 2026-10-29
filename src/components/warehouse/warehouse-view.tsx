@@ -256,7 +256,7 @@ export function WarehouseView({ snapshot, initialPick, initialMode = "customer" 
                     <span className="block truncate text-xs text-dock-ink/55">
                       → {o.consignee ?? "—"} · {when(o.deadline)}
                     </span>
-                    {o.short > 0 && <span className="mt-0.5 block text-xs font-semibold text-dock-red">{o.short} pallets short</span>}
+                    {o.shortText && <span className="mt-0.5 block text-xs font-semibold text-dock-red">Short: {o.shortText}</span>}
                   </button>
                   {active && route && (
                     <div className="dock-console m-2 px-3 py-2 text-[12px]">

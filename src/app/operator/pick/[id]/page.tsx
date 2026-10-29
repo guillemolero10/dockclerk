@@ -3,6 +3,7 @@ import { ArrowLeft, Check } from "lucide-react";
 import { PickStep } from "@/components/operator/pick-step";
 import { db } from "@/lib/db";
 import { openPickPlans } from "@/lib/ops/floor";
+import { describeShortage } from "@/lib/warehouse/picking";
 import { dispatchLane } from "@/lib/warehouse/lanes";
 import { makeLayout, parseLocation } from "@/lib/warehouse/layout";
 import { pickRoute } from "@/lib/warehouse/route";
@@ -32,7 +33,7 @@ export default async function PickPage({ params }: PageProps<"/operator/pick/[id
     );
   }
 
-  const { plans, stock } = await openPickPlans();
+  const { plans, stock, open } = await openPickPlans();
   const plan = plans.get(id);
   const warehouse = plan?.warehouseId ? await db.warehouse.findUnique({ where: { id: plan.warehouseId } }) : null;
   if (!plan || !warehouse) return <p className="p-6">There is no stock to pick this outbound.</p>;
@@ -74,7 +75,7 @@ export default async function PickPage({ params }: PageProps<"/operator/pick/[id
         lane={lane}
         done={plan.picked.length}
         total={plan.stockIds.length}
-        short={plan.short}
+        shortText={plan.shortLines.length ? describeShortage(plan.shortLines, (itemId) => open.find((o) => o.id === id)?.lines.find((l) => l.itemId === itemId)?.item) : null}
         metres={route.metres}
         steps={route.order.map(describe)}
       />

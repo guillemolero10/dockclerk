@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { madridDayRange } from "@/lib/format";
 import { dispatchLane } from "./lanes";
 import { makeLayout, parseLocation, type WarehouseDims } from "./layout";
-import { allocatePicks } from "./picking";
+import { allocatePicks, describeShortage } from "./picking";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -49,6 +49,8 @@ export type SnapshotOrder = {
   /** Dispatch lane its pallets go to. */
   lane: number;
   short: number;
+  /** What is missing, in the item's unit ("2 palés + 20 cajas of PELUCHE-30"), or null when the stock covers it. */
+  shortText: string | null;
   byClerk: boolean;
 };
 
@@ -115,7 +117,7 @@ export async function getWarehouseSnapshot(code?: string): Promise<WarehouseSnap
       id: s.id, warehouseId: s.warehouseId, itemId: s.itemId, location: s.location, units: s.units,
       expiresAt: s.expiresAt, receivedAt: s.inbound?.date ?? null, outboundId: s.outboundId,
     })),
-    open.map((o) => ({ id: o.id, number: o.number, date: o.date, deadline: o.deadline, lines: o.lines.map((l) => ({ itemId: l.itemId, units: l.units })) })),
+    open.map((o) => ({ id: o.id, number: o.number, date: o.date, deadline: o.deadline, lines: o.lines.map((l) => ({ itemId: l.itemId, units: l.units, unitsPerPallet: l.item.unitsPerPallet })) })),
   );
 
   const here = stockIn(current.id);
@@ -149,7 +151,7 @@ export async function getWarehouseSnapshot(code?: string): Promise<WarehouseSnap
       outbound: s.outboundId,
     })),
     orders: open.map((o) => {
-      const plan = plans.get(o.id) ?? { warehouseId: null, stockIds: [], picked: [], short: 0 };
+      const plan = plans.get(o.id) ?? { warehouseId: null, stockIds: [], picked: [], short: 0, shortLines: [] };
       return {
         id: o.id,
         number: o.number,
@@ -163,6 +165,7 @@ export async function getWarehouseSnapshot(code?: string): Promise<WarehouseSnap
         picked: plan.picked,
         lane: plan.warehouseId ? dispatchLane(layoutOf.get(plan.warehouseId)!, stockIn(plan.warehouseId), o.id) : 1,
         short: plan.short,
+        shortText: plan.shortLines.length ? describeShortage(plan.shortLines, (id) => o.lines.find((l) => l.itemId === id)?.item) : null,
         byClerk: o.notes?.startsWith("Alta DockClerk") ?? false,
       };
     }),

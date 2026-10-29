@@ -8,6 +8,8 @@
 // the whole row; what is left is taken from the next row ("take N boxes"), which stays behind
 // as a loose pallet in its slot.
 
+import { describeUnits, unitWordFor } from "../pallets/quantity";
+
 export type PickableStock = {
   id: string;
   warehouseId: string;
@@ -26,7 +28,8 @@ export type OpenOrder = {
   number: number;
   date: Date;
   deadline: Date | null;
-  lines: { itemId: string; units: number }[];
+  /** `unitsPerPallet` is the item's own figure (a full pallet), not what happens to be in stock. */
+  lines: { itemId: string; units: number; unitsPerPallet: number }[];
 };
 
 export type PickPlan = {
@@ -39,11 +42,28 @@ export type PickPlan = {
   split: { stockId: string; units: number }[];
   /** Units that cannot be served from stock. */
   shortUnits: number;
-  /** Same shortage in pallet positions (⌈shortUnits / units per pallet⌉), for screens that count pallets. */
+  /** Same shortage in pallet positions (⌈units / the item's units per pallet⌉, line by line). */
   short: number;
-  /** The shortage by item, for screens that name what is missing. */
-  shortLines: { itemId: string; units: number }[];
+  /** The shortage by item, for screens that name what is missing (see `describeShortage`). */
+  shortLines: { itemId: string; units: number; unitsPerPallet: number }[];
 };
+
+/**
+ * What is missing, in the item's own unit and sku, for the office screens: "2 palés + 20 cajas of PELUCHE-30"
+ * (several lines joined by " and ").
+ * A shortage of boxes is never written as pallets: 120 boxes of an item that has 100 per pallet are "1 palé + 20 cajas".
+ */
+export function describeShortage(
+  lines: PickPlan["shortLines"],
+  itemOf: (itemId: string) => { sku: string; unit: "PALLET" | "BOX" | "BAG" } | undefined,
+) {
+  return lines
+    .map((l) => {
+      const item = itemOf(l.itemId);
+      return `${describeUnits(l.units, l.unitsPerPallet, item ? unitWordFor(item.unit) : "cajas")}${item ? ` of ${item.sku}` : ""}`;
+    })
+    .join(" and ");
+}
 
 const time = (d: Date | null, fallback: number) => (d ? d.getTime() : fallback);
 
@@ -62,9 +82,6 @@ export function allocatePicks(stock: PickableStock[], orders: OpenOrder[]): Map<
     );
   }
   const warehouses = [...new Set(stock.map((s) => s.warehouseId))].sort();
-  // A full pallet of each item, to turn missing units into pallet positions.
-  const perPallet = new Map<string, number>();
-  for (const s of stock) perPallet.set(s.itemId, Math.max(perPallet.get(s.itemId) ?? 1, s.units));
 
   // The most urgent order gets first pick.
   const queue = [...orders].sort(
@@ -109,8 +126,9 @@ export function allocatePicks(stock: PickableStock[], orders: OpenOrder[]): Map<
       }
       if (missing > 0) {
         plan.shortUnits += missing;
-        plan.shortLines.push({ itemId: line.itemId, units: missing });
-        plan.short += Math.ceil(missing / (perPallet.get(line.itemId) ?? 1));
+        const perPallet = Math.max(1, line.unitsPerPallet);
+        plan.shortLines.push({ itemId: line.itemId, units: missing, unitsPerPallet: perPallet });
+        plan.short += Math.ceil(missing / perPallet);
       }
     }
     plans.set(order.id, plan);

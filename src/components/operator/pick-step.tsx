@@ -8,7 +8,7 @@ import { pick } from "@/app/operator/actions";
 type Step = { id: string; location: string; level: number | null; sku: string; lot: string | null; units: number; word: string; take: number | null };
 
 /** Walk the route: one big location at a time, the same order the office sees lit up in 3D. */
-export function PickStep({ outboundId, lane, done, total, short, metres, steps }: { outboundId: string; lane: number; done: number; total: number; short: number; metres: number; steps: Step[] }) {
+export function PickStep({ outboundId, lane, done, total, shortText, metres, steps }: { outboundId: string; lane: number; done: number; total: number; shortText: string | null; metres: number; steps: Step[] }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +24,7 @@ export function PickStep({ outboundId, lane, done, total, short, metres, steps }
           {done}/{total}
         </span>
       </div>
-      {short > 0 && <p className="bg-dock-red/10 px-3 py-2 text-sm text-dock-red">{short} pallets are missing in stock; the office knows.</p>}
+      {shortText && <p className="bg-dock-red/10 px-3 py-2 text-sm text-dock-red">Missing in stock: {shortText}. The office knows.</p>}
 
       {current && (
         <>
