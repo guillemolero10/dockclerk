@@ -60,13 +60,18 @@ const jsonDiff = (a: unknown, b: unknown) => {
 
 async function replay(office: Page) {
   await office.goto(BASE + "/office/inbox", { waitUntil: "networkidle" });
-  await office.getByRole("button", { name: /Replay the morning/ }).click();
-  await office.getByRole("button", { name: /Let the clerk handle \d+ messages/ }).waitFor({ timeout: 90_000 });
+  // The button of the clerk is already on the page before Replay: wait for the server action itself, then for the page to settle.
+  await Promise.all([
+    office.waitForResponse((r) => r.request().method() === "POST" && r.url().includes("/office/inbox"), { timeout: 90_000 }),
+    office.getByRole("button", { name: /Replay the morning/ }).click(),
+  ]);
   await office.waitForLoadState("networkidle");
+  await office.waitForTimeout(1500);
+  await office.getByRole("button", { name: /Let the clerk handle \d+ messages/i }).waitFor({ timeout: 90_000 });
 }
 const newButton = async (office: Page) => {
   const b = office.getByRole("button", { name: /Let the clerk handle \d+ messages/ });
-  return (await b.count()) ? Number(((await b.first().innerText()).match(/handle (\d+)/) ?? [])[1]) : 0;
+  return (await b.count()) ? Number(((await b.first().innerText()).match(/handle (\d+)/i) ?? [])[1]) : 0;
 };
 
 async function ask(c: Page, q: string) {
@@ -84,6 +89,7 @@ async function ask(c: Page, q: string) {
 }
 
 /** Picks every pallet of an outbound on the PDA (whole pallets and split picks). Returns the number of steps. */
+const pickSecs: number[] = [];
 async function pickAll(pda: Page, no: number) {
   let href = "";
   for (const w of ["N1", "N2"]) {
@@ -95,15 +101,29 @@ async function pickAll(pda: Page, no: number) {
   if (!href) return -1;
   await pda.goto(BASE + href, { waitUntil: "networkidle" });
   let steps = 0;
+  const progress = async () => Number(((await flat(pda)).match(/(\d+)\/\d+/) ?? [])[1] ?? -1);
   for (let i = 0; i < 80; i++) {
     const t = await flat(pda);
     if (/is prepared/i.test(t)) break;
     const split = pda.getByRole("button", { name: /^Picked \d+/ });
-    if (/take only/i.test(t) && (await split.count())) await split.click({ timeout: 40_000 });
-    else await pda.getByRole("button", { name: /^Picked the pallet/ }).click({ timeout: 40_000 });
+    const whole = pda.getByRole("button", { name: /^Picked the pallet/ });
+    // The button shows "…" while the pick is being saved: give it time (dev server, remote database) before calling it stuck.
+    const ready = await split.or(whole).first().waitFor({ timeout: 60_000 }).then(() => true, () => false);
+    if (!ready) {
+      console.log(`PDA stuck at step ${steps + 1}: ${(await flat(pda)).slice(0, 300)}`);
+      await shot(pda, "pda-stuck");
+      return -2;
+    }
+    const before = await progress();
+    const t0 = Date.now();
+    if (/take only/i.test(await flat(pda)) && (await split.count())) await split.click();
+    else await whole.click();
     steps++;
-    await pda.waitForLoadState("networkidle");
-    await pda.waitForTimeout(1200);
+    // done when the counter moves or the order is prepared
+    const t1 = Date.now();
+    while (Date.now() - t1 < 90_000 && !/is prepared/i.test(await flat(pda)) && (await progress()) === before) await pda.waitForTimeout(500);
+    pickSecs.push((Date.now() - t0) / 1000);
+    await pda.waitForTimeout(500);
   }
   return steps;
 }
@@ -140,7 +160,7 @@ async function portal() {
   log("a4", costLines.length === 1, `cost lines in the office log of that draft: ${costLines.length} (${costLines.map((s) => s.text).join(" | ").slice(0, 160)})`);
   await office.goto(BASE + "/office/inbox", { waitUntil: "networkidle" });
   const card = office.locator("article", { hasText: ORDER });
-  log("a5", (await card.count()) === 1 && /New outbound/.test(await card.innerText()) && (await card.getByRole("button", { name: /Approve & write to software/ }).count()) === 1,
+  log("a5", (await card.count()) === 1 && /New outbound/i.test(await card.innerText()) && (await card.getByRole("button", { name: /Approve & write to software/ }).count()) === 1,
     `inbox: card for the portal order = ${await card.count()}, with Approve button, no clerk pressed; clerk button still says ${await newButton(office)} (seed messages)`);
   await shot(office, "inbox-with-portal-order");
   const cardText = (await card.first().innerText().catch(() => "")).replace(/\s+/g, " ");
@@ -148,6 +168,8 @@ async function portal() {
 
   // (b)
   await replay(office);
+  // dev server: the page re-renders a moment after the action returns
+  for (let k = 0; k < 40 && (await office.locator("article", { hasText: ORDER }).count()) > 0; k++) await office.waitForTimeout(500);
   const afterB = await db.message.count();
   const gone = (await office.locator("article", { hasText: ORDER }).count()) === 0 && !(await db.message.findFirst({ where: { body: ORDER } }));
   log("b", gone && afterB === baseMsgs && (await newButton(office)) === 15, `Replay: portal message gone=${gone}, messages ${afterB} (seed ${baseMsgs}), seed messages NEW=${await newButton(office)}, drafts=${await db.draft.count()}`);
@@ -171,7 +193,7 @@ async function portal() {
   const gAfterApprove = await aiCalls();
   log("g1", no > 0, `approved: outbound Nº ${no}; model calls during approve: ${gAfterApprove - g1}`);
   const steps = await pickAll(pda, no);
-  log("g2", steps > 0, `PDA picked the outbound in ${steps} steps`);
+  log("g2", steps > 0, `PDA picked the outbound in ${steps} steps (seconds per pick: ${pickSecs.map((x) => x.toFixed(1)).join(" ")})`);
   const Smid = snapshot();
   log(null as never, null, `snapshot after picking differs from the start in ${jsonDiff(S0, Smid).length} lines`);
   await replay(office);
