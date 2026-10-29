@@ -6,7 +6,8 @@
 
 import { billPeriod, type BillResult, type HandlingInput, type TariffInput } from "../src/lib/billing/compute";
 import { dayNumber, dayOfYmd, period } from "../src/lib/billing/calendar";
-import { buildStays, type PalletKind, type Stay } from "../src/lib/billing/stays";
+import { mapLimit } from "../src/lib/billing/pool";
+import { buildStays, shippedInTime, type PalletKind, type Stay } from "../src/lib/billing/stays";
 
 const PER_PALLET = 40;
 
@@ -39,7 +40,7 @@ function byDays(stays: Stay[], ymd: string) {
   return total;
 }
 
-type Case = { name: string; run: () => string | null };
+type Case = { name: string; run: () => string | null | Promise<string | null> };
 const junePallets = () => [...rows(6, { sku: "A", inYmd: "2026-05-15", inbound: 1 }), ...rows(4, { sku: "A", inYmd: "2026-05-15", outYmd: "2026-06-21", inbound: 1 }), ...rows(5, { sku: "B", type: "AMERICAN", inYmd: "2026-06-11", inbound: 2 })];
 const day21: HandlingInput = { day: dayOfYmd("2026-06-21"), pallets: 2, unitPrice: 10, replacesExit: true };
 
@@ -339,18 +340,133 @@ const CASES: Case[] = [
       return null;
     },
   },
+  {
+    name: "B20 mapLimit: same results in the same order with 1, 2, 4 or 50 at a time; never more than the limit in flight",
+    async run() {
+      let seed = 99;
+      const rnd = () => ((seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296);
+      const items = Array.from({ length: 23 }, (_, i) => i);
+      const delays = items.map(() => Math.floor(rnd() * 6)); // the first ones finish last, the last ones first, at random
+      const runWith = async (limit: number) => {
+        let live = 0;
+        let peak = 0;
+        const out = await mapLimit(items, limit, async (n, index) => {
+          live++;
+          peak = Math.max(peak, live);
+          await new Promise((r) => setTimeout(r, delays[index]));
+          live--;
+          return `c${n * n}`;
+        });
+        return { out, peak };
+      };
+      const want = JSON.stringify(items.map((n) => `c${n * n}`));
+      for (const limit of [1, 2, 4, 50]) {
+        const { out, peak } = await runWith(limit);
+        if (JSON.stringify(out) !== want) return `limit ${limit}: results out of order`;
+        if (peak > limit) return `limit ${limit}: ${peak} in flight`;
+        if (limit <= items.length && limit > 1 && peak < 2) return `limit ${limit}: nothing ran together`;
+      }
+      const none = await mapLimit([], 4, async () => 1);
+      return none.length === 0 ? null : "empty list";
+    },
+  },
+  {
+    name: "B21 mapLimit: a failure stops new work and the first error comes out",
+    async run() {
+      const started: number[] = [];
+      try {
+        await mapLimit([0, 1, 2, 3, 4, 5, 6, 7], 2, async (n) => {
+          started.push(n);
+          await new Promise((r) => setTimeout(r, 2));
+          if (n === 2) throw new Error("boom 2");
+          return n;
+        });
+        return "did not throw";
+      } catch (error) {
+        if ((error as Error).message !== "boom 2") return `threw ${(error as Error).message}`;
+      }
+      await new Promise((r) => setTimeout(r, 30));
+      return started.length < 8 ? null : `all 8 started: ${started.join(",")}`;
+    },
+  },
+  {
+    name: "B22 shipments from before the period are not loaded and the bill does not change (both rules, 300 random cases)",
+    run() {
+      let seed = 4242;
+      const rnd = () => ((seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296);
+      const DAY_MS = 86_400_000;
+      const items = [
+        { id: "i1", sku: "A", unitsPerPallet: 40, palletType: "EURO" as const },
+        { id: "i2", sku: "B", unitsPerPallet: 55, palletType: "AMERICAN" as const },
+        { id: "i3", sku: "C", unitsPerPallet: 100, palletType: "EURO" as const },
+      ];
+      let dropped = 0;
+      let kept = 0;
+      for (let trial = 0; trial < 300; trial++) {
+        const p = trial % 2 ? period("2026-06") : period("2026-06-10", "2026-07-04");
+        const inbounds = Array.from({ length: 2 + Math.floor(rnd() * 4) }, (_, k) => {
+          const date = new Date(Date.UTC(2026, 3, 1) + Math.floor(rnd() * 80) * DAY_MS);
+          return { id: `n${k}`, number: 100 + k, clientDocRef: null, date, receivedAt: rnd() < 0.5 ? new Date(date.getTime() + Math.floor(rnd() * 3) * DAY_MS + Math.floor(rnd() * 20) * 3_600_000) : null };
+        });
+        const outbounds = Array.from({ length: 3 + Math.floor(rnd() * 8) }, (_, k) => {
+          const from = inbounds[Math.floor(rnd() * inbounds.length)];
+          const at = new Date((from.receivedAt ?? from.date).getTime() + Math.floor(rnd() * 75 * 24) * 3_600_000 + Math.floor(rnd() * 3_600_000));
+          const item = items[Math.floor(rnd() * items.length)];
+          const stamped = rnd() < 0.85;
+          return {
+            number: 900 + k, status: rnd() < 0.9 ? "SHIPPED" : "PREPARED",
+            date: new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate())), shippedAt: stamped ? at : null,
+            shipped: Array.from({ length: 1 + Math.floor(rnd() * 3) }, () => ({ itemId: item.id, lot: rnd() < 0.5 ? "L1" : "L2", units: 1 + Math.floor(rnd() * item.unitsPerPallet), inboundId: from.id })),
+          };
+        });
+        const stock = inbounds.filter(() => rnd() < 0.6).map((i) => {
+          const item = items[Math.floor(rnd() * items.length)];
+          return { itemId: item.id, lot: "L1", units: 1 + Math.floor(rnd() * item.unitsPerPallet), inboundId: i.id };
+        });
+        const inTime = outbounds.filter((o) => shippedInTime(o, p.start));
+        dropped += outbounds.length - inTime.length;
+        kept += inTime.length;
+        for (const rule of ["FRACTION", "FULL"] as const) {
+          const t = tariff({ partialPallets: rule, storagePrice: 0.0713, inPerPallet: 1.37 });
+          const all = billPeriod({ stays: buildStays({ items, inbounds, outbounds, stock, periodStart: p.start }), handling: [], tariff: t, period: p });
+          const some = billPeriod({ stays: buildStays({ items, inbounds, outbounds: inTime, stock, periodStart: p.start }), handling: [], tariff: t, period: p });
+          if (JSON.stringify(all) !== JSON.stringify(some)) return `trial ${trial} ${rule}: the bill changed (${all.totalCents} vs ${some.totalCents})`;
+        }
+      }
+      return dropped > 100 && kept > 100 ? null : `the test is empty: dropped ${dropped}, kept ${kept}`;
+    },
+  },
+  {
+    name: "B23 the shipment filter keeps every instant whose Madrid day is inside the period (clock changes included)",
+    run() {
+      const periods = [period("2026-06"), period("2026-03"), period("2026-04"), period("2026-10"), period("2026-11"), period("2026-03-29", "2026-03-31"), period("2026-10-25", "2026-10-31")];
+      for (const p of periods) {
+        for (let t = Date.UTC(2026, 0, 1) + (p.start - dayOfYmd("2026-01-01")) * 86_400_000 - 3 * 86_400_000; t < Date.UTC(2026, 0, 1) + (p.start - dayOfYmd("2026-01-01")) * 86_400_000 + 3 * 86_400_000; t += 15 * 60_000) {
+          const at = new Date(t);
+          const should = dayNumber(at) >= p.start;
+          if (should && !(shippedInTime({ shippedAt: at, date: new Date(0) }, p.start) && shippedInTime({ shippedAt: null, date: at }, p.start))) return `${p.first}: ${at.toISOString()} (Madrid day ${dayNumber(at)}) was dropped`;
+        }
+      }
+      // And it does drop the old ones, or the filter would be worth nothing.
+      const p = period("2026-06");
+      return shippedInTime({ shippedAt: new Date("2026-05-15T10:00:00Z"), date: new Date("2026-05-15") }, p.start) ? "an old shipment was kept" : null;
+    },
+  },
 ];
 
-let failed = 0;
-for (const c of CASES) {
-  let problem: string | null;
-  try {
-    problem = c.run();
-  } catch (error) {
-    problem = `threw: ${(error as Error).message}`;
+async function main() {
+  let failed = 0;
+  for (const c of CASES) {
+    let problem: string | null;
+    try {
+      problem = await c.run();
+    } catch (error) {
+      problem = `threw: ${(error as Error).message}`;
+    }
+    if (problem) failed++;
+    console.log(`${problem ? "FAIL" : "ok  "}  ${c.name}${problem ? `\n      -> ${problem}` : ""}`);
   }
-  if (problem) failed++;
-  console.log(`${problem ? "FAIL" : "ok  "}  ${c.name}${problem ? `\n      -> ${problem}` : ""}`);
+  console.log(`\n${CASES.length - failed}/${CASES.length} pass`);
+  process.exit(failed ? 1 : 0);
 }
-console.log(`\n${CASES.length - failed}/${CASES.length} pass`);
-process.exit(failed ? 1 : 0);
+main();

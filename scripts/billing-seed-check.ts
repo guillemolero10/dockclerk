@@ -8,7 +8,7 @@
 
 import { db } from "../src/lib/db";
 import { dateOfDay, dayNumber, period, ymdOfDay } from "../src/lib/billing/calendar";
-import { loadBilling, todayDay, type LoadedBilling } from "../src/lib/billing/load";
+import { loadBilling, prepareClients, todayDay, type LoadedBilling } from "../src/lib/billing/load";
 import { buildStays } from "../src/lib/billing/stays";
 
 const today = todayDay();
@@ -136,6 +136,18 @@ const CASES: Case[] = [
       if (checked === 0) return "no deliveries checked";
       if (orphans) bad.push(`${orphans} stays without a known entry`);
       return bad.length ? `${bad.length} problems, first: ${bad.slice(0, 5).join(" | ")}` : null;
+    },
+  },
+  {
+    name: `preparing ${prevMonth} in dry run gives the same result with 1, 4 or 50 customers at a time (same bills, same order, nothing written)`,
+    async run() {
+      const p = period(prevMonth);
+      const before = await db.preInvoice.count();
+      const runs: string[] = [];
+      for (const concurrency of [1, 4, 50]) runs.push(JSON.stringify(await prepareClients(p, { dryRun: true, concurrency })));
+      const after = await db.preInvoice.count();
+      if (before !== after) return `a dry run wrote: ${before} -> ${after} pre-invoices`;
+      return runs.every((r) => r === runs[0]) ? null : "the result changes with the number of customers at a time";
     },
   },
   {

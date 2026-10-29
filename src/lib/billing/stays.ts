@@ -1,7 +1,7 @@
 // A "stay" is a piece of goods that was inside the warehouse: a pallet or a loose bit of one.
 // There is no movements table. Stays come from documents DockClerk already has:
 //   live Stock rows (still inside)  +  Outbound.shipped elements (left on a truck, SHIPPED or CLOSED).
-import { dayNumber } from "./calendar";
+import { dateOfDay, dayNumber } from "./calendar";
 
 export type PalletKind = "EURO" | "AMERICAN";
 /** FRACTION: a loose bit counts units / units-per-pallet. FULL: each row with goods counts as one whole pallet while inside, and loose boxes enter and leave as a whole pallet. */
@@ -50,6 +50,18 @@ function readShipped(value: unknown): ShippedPiece[] {
   }
   return pieces;
 }
+
+/**
+ * Earliest instant of a shipment that can matter to a period: one day before it starts. Madrid is ahead of UTC, so a truck
+ * that left in the first hours of the first day has an instant before midnight UTC; the extra day keeps it.
+ * A piece that left before the period has no days inside it and no exit in it, and (in FULL) pieces that left earlier never
+ * change how the later ones are weighed, so loading them changes nothing in the bill. load.ts uses this in the query.
+ */
+export const shippedSince = (periodStart: number) => dateOfDay(periodStart - 1);
+
+/** Same rule as the database filter (`shippedAt`, or `date` when it was never stamped): true when the shipment may matter. */
+export const shippedInTime = (out: { shippedAt: Date | null; date: Date }, periodStart: number) =>
+  (out.shippedAt ?? out.date).getTime() >= shippedSince(periodStart).getTime();
 
 /** `periodStart` is where goods of an unknown entry are placed (they are not charged an entry, only storage). */
 export function buildStays(input: {
