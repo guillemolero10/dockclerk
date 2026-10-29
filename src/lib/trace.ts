@@ -8,6 +8,9 @@ export type ShippedPallet = { itemId: string; sku: string; lot: string | null; u
 
 export type LotOption = { lot: string; sku: string; description: string; client: string; date: Date };
 
+/** An article whose SKU matches the search but that carries no lot, so there is nothing to trace by lot. */
+export type UntrackedItem = { sku: string; description: string; client: string; clientCode: string };
+
 /** Lots matching a search on lot code or SKU, newest delivery first. */
 export async function findLots(q: string): Promise<LotOption[]> {
   const query = q.trim();
@@ -28,6 +31,20 @@ export async function findLots(q: string): Promise<LotOption[]> {
   return lines
     .filter((l) => l.lot && !seen.has(l.lot) && seen.add(l.lot))
     .map((l) => ({ lot: l.lot!, sku: l.item.sku, description: l.item.description, client: l.item.client.name, date: l.inbound.date }));
+}
+
+/** Articles matching a search on SKU that are not tracked by lot (no lot, no expiry): lot trace has nothing to say about them. */
+export async function findUntrackedItems(q: string): Promise<UntrackedItem[]> {
+  const query = q.trim();
+  if (!query) return [];
+  const like = query.replace(/[\\%_]/g, "\\$&");
+  const items = await db.item.findMany({
+    where: { tracksLot: false, sku: { contains: like, mode: "insensitive" } },
+    include: { client: { select: { name: true, code: true } } },
+    orderBy: [{ sku: "asc" }],
+    take: 6,
+  });
+  return items.map((i) => ({ sku: i.sku, description: i.description, client: i.client.name, clientCode: i.client.code }));
 }
 
 /** Lots of the goods that expire first and are still in the building: the ones a recall would hit. */

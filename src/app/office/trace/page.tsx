@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowDownToLine, ArrowRight, ArrowUpFromLine, CheckCircle2, FileText, Search, TriangleAlert, Warehouse } from "lucide-react";
 import { CopyNotice } from "@/components/alerts/copy-notice";
 import { firstName, fmtDate, fmtNumber } from "@/lib/format";
-import { findLots, lotsAtRisk, traceLot, type LotOption, type LotTrace } from "@/lib/trace";
+import { findLots, findUntrackedItems, lotsAtRisk, traceLot, type LotOption, type LotTrace, type UntrackedItem } from "@/lib/trace";
 import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -17,8 +17,9 @@ export default async function TracePage({ searchParams }: PageProps<"/office/tra
 
   let trace = lotCode ? await traceLot(lotCode) : null;
   let options: LotOption[] = [];
+  let untracked: UntrackedItem[] = [];
   if (!trace && query) {
-    options = await findLots(query);
+    [options, untracked] = await Promise.all([findLots(query), findUntrackedItems(query)]);
     // One exact match: go straight to it.
     const exact = options.find((o) => o.lot.toLowerCase() === query.toLowerCase());
     if (exact || options.length === 1) trace = await traceLot((exact ?? options[0]).lot);
@@ -41,13 +42,30 @@ export default async function TracePage({ searchParams }: PageProps<"/office/tra
       </form>
 
       {!trace && lotCode && !query && <p className="mt-6 text-sm text-dock-ink/60">No lot “{lotCode}” on record.</p>}
-      {!trace && query && options.length === 0 && <p className="mt-6 text-sm text-dock-ink/60">No lot matches “{query}”.</p>}
+      {!trace && query && options.length === 0 && untracked.length === 0 && <p className="mt-6 text-sm text-dock-ink/60">No lot matches “{query}”.</p>}
+      {!trace && untracked.length > 0 && <UntrackedNote items={untracked} lotMatches={options.length} />}
       {!trace && options.length > 1 && (
         <LotList title={`${options.length} lots match “${query}”${options.length > 24 ? " (first 24 shown)" : ""}`} lots={options.slice(0, 24)} />
       )}
       {suggestions.length > 0 && <LotList title="Lots a recall would hit first (soonest to expire, still in the building)" lots={suggestions} />}
       {trace && <Trail t={trace} />}
     </main>
+  );
+}
+
+/** The search hit an article that has no lot: say so plainly instead of "no lot matches", and point to where its stock lives. */
+function UntrackedNote({ items, lotMatches }: { items: UntrackedItem[]; lotMatches: number }) {
+  return (
+    <section className="mt-6 space-y-2" aria-label="Articles without lot tracking">
+      {items.map((i) => (
+        <p key={`${i.clientCode}-${i.sku}`} className="dock-card border-l-4 border-l-dock-yellow bg-white px-4 py-3 text-sm">
+          <span className="mono font-semibold">{i.sku}</span> is not tracked by lot (no expiry){lotMatches === 0 ? "" : ", so it has no lot in this list"}. See its stock and deliveries in the customer card{" "}
+          <Link href={`/office/clients/${i.clientCode}`} className="cond whitespace-nowrap font-semibold underline">
+            {i.client} <ArrowRight size={13} className="inline" aria-hidden />
+          </Link>
+        </p>
+      ))}
+    </section>
   );
 }
 
