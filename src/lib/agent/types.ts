@@ -35,6 +35,11 @@ export type OutboundLineDraft = {
   pallets: number;
   /** Set when the words did not give whole units (1,5 palés of 55 sacos): the two nearest whole numbers. */
   wholeOptions?: number[];
+  /**
+   * Set when Muse Spark gave these units but they are neither in the message nor in a convert_quantity result
+   * (`unitsGrounded`): the draft asks the office with a yellow doubt. `fromMessage` is what the message says, if it says one thing.
+   */
+  unconfirmed?: { fromMessage: number | null };
 };
 
 export type OutboundPayload = {

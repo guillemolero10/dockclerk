@@ -8,8 +8,9 @@
 
 import { billingIntent, ddmm, eurosEs, monthFromText, numEs, resolveWindow, shapeBill, shapeExplain, type BillIn, type DetailIn } from "../src/lib/agent/bill-format";
 import { convertLog, convertQuantity, type ConvertItem } from "../src/lib/agent/convert";
-import { figures, inventedFigures } from "../src/lib/agent/guard";
-import { draftMessage } from "../src/lib/agent/rules";
+import { figures, inventedFigures, unitsGrounded } from "../src/lib/agent/guard";
+import { buildLine, checkModelUnits, withUnits } from "../src/lib/agent/lines";
+import { draftMessage, outboundDraft } from "../src/lib/agent/rules";
 import { billPeriod, type TariffInput } from "../src/lib/billing/compute";
 import { dayOfYmd, period } from "../src/lib/billing/calendar";
 import type { Stay } from "../src/lib/billing/stays";
@@ -45,6 +46,17 @@ const bigBill: BillIn = { ...bill, lines: [{ concept: "storage", label: "Storage
 const fakeClient = { id: "c1", code: "C001", name: "Juguetes Levante", contact: "Marta" };
 const asMessage = (body: string) => ({ id: "m", channel: "EMAIL", fromName: "Marta Pérez (Juguetes Levante)", fromAddress: null, clientId: "c1", subject: null, body, audioUrl: null, attachmentUrl: null, receivedAt: new Date(), status: "NEW", client: fakeClient }) as never;
 const TODAY = "2026-10-28";
+
+/**
+ * What the model's `units` become: the same glue as settle() in muse.ts (buildLine → checkModelUnits → outboundDraft), without the database.
+ * `converted` are the units convert_quantity returned for this item in the conversation; `free` the stock free to promise.
+ */
+const draftFromModel = (item: ConvertItem, units: number, body: string, converted: number[] = [], free = 100_000, wholeOptions?: number[]) => {
+  const info = { id: `id-${item.sku}`, sku: item.sku, description: item.sku, unitsPerPallet: item.unitsPerPallet, unit: item.unit };
+  const line = checkModelUnits(buildLine(info, units, free, wholeOptions), body, converted);
+  const seed = outboundDraft(asMessage(body), fakeClient as never, [line], [{ id: "d1", name: "SuperBahía – Alicante", city: "Alicante" }], null, []);
+  return { line, doubts: seed.doubts, values: seed.doubts.flatMap((d) => d.options.map((o) => o.value)) };
+};
 
 const CASES: Case[] = [
   // ----- convert_quantity -----
@@ -108,6 +120,56 @@ const CASES: Case[] = [
       .map((t, i) => inventedFigures(t, [JSON.stringify([shaped, shapeBill(bigBill), shapeExplain(detail, may, { inbound: 1043 }, "draft")][i])]))
       .flat();
     return same(bad, []);
+  } },
+
+  // ----- the model's units go through the guard (muse.ts → settle) -----
+  { name: "M1 cifra inventada del modelo (77 con «3 palés» de horchata y sin convert_quantity) → duda units:HORCH-1L con 300 (el mensaje) y 77", check: () => {
+    const d = draftFromModel(HORCH, 77, "Mandad 3 palés de horchata a SuperBahía Alicante el lunes");
+    return same({ fields: d.doubts.map((x) => x.field), values: d.values, flagged: Boolean(d.line.unconfirmed) }, { fields: ["units:HORCH-1L"], values: ["300", "77"], flagged: true });
+  } },
+  { name: "M2 cifra del mensaje (130 cajas) → sin duda", check: () => same(draftFromModel(PELUCHE, 130, "Mandad 130 cajas de PELUCHE-30 a SuperBahía Alicante el viernes").doubts, []) },
+  { name: "M2b cifra escrita sin palabra de unidad («Mandad 120 PELUCHE-30») → sin duda; el 30 del SKU no vale", check: () => {
+    const ok = draftFromModel(PELUCHE, 120, "Mandad 120 PELUCHE-30 a SuperBahía Alicante").doubts.length;
+    const sku = draftFromModel(PELUCHE, 30, "Mandad 120 PELUCHE-30 a SuperBahía Alicante").doubts.length;
+    return same({ ok, sku }, { ok: 0, sku: 1 });
+  } },
+  { name: "M3 cifra que sale de convert_quantity (2,5 palés de HORCH-1L → 250) → sin duda, aunque el mensaje no tenga un 250", check: () => {
+    const q = convertQuantity(HORCH, 2.5, "pallets");
+    const units = "units" in q ? q.units : -1;
+    return same({ units, doubts: draftFromModel(HORCH, units, "Toni aquí. Mandadme 2 palés y medio de horchata a SuperBahía Alicante el lunes", [units]).doubts }, { units: 250, doubts: [] });
+  } },
+  { name: "M3b el modelo se salta convert_quantity pero la cifra es la que el código lee del mensaje («2 palés y medio» = 250) → sin duda", check: () =>
+    same(draftFromModel(HORCH, 250, "Mandadme 2 palés y medio de horchata").doubts, []) },
+  { name: "M3c convert_quantity de OTRO artículo no vale (250 de HORCH-1L no avala 250 de PELUCHE-30)", check: () =>
+    same(unitsGrounded(250, 40, "Mandad peluche a Alicante", []), false) },
+  { name: "M4 «3 palés» y el modelo pone 3 unidades → duda (3 no es 3 cajas) con 180 (3 palés de PUZZLE-500) y 3", check: () => {
+    const d = draftFromModel(PUZZLE, 3, "Mandad 3 palés de puzzle a SuperBahía Alicante");
+    return same({ fields: d.doubts.map((x) => x.field), values: d.values }, { fields: ["units:PUZZLE-500"], values: ["180", "3"] });
+  } },
+  { name: "M5 horas, fechas y referencias no avalan una cantidad (10 en «antes de las 10», 3 en «3 de noviembre», 4523 en «pedido 4523»)", check: () =>
+    same([
+      draftFromModel(PUZZLE, 10, "Mandad puzzle a SuperBahía Alicante antes de las 10:00").doubts.length,
+      draftFromModel(PUZZLE, 3, "Mandad puzzle a SuperBahía Alicante el 3 de noviembre").doubts.length,
+      draftFromModel(PUZZLE, 4523, "Mandad puzzle a SuperBahía Alicante, pedido 4523").doubts.length,
+    ], [1, 1, 1]) },
+  { name: "M5b «el 3 de noviembre» no se lee como 3 palés: la duda no ofrece «lo que dice el mensaje»", check: () =>
+    same(draftFromModel(PUZZLE, 77, "Mandad puzzle a SuperBahía Alicante el 3 de noviembre").values, ["77"]) },
+  { name: "M6 cantidad no entera (1,5 palés de PP-NAT): una sola duda, con las opciones 82 y 83 que calculó el código", check: () => {
+    const d = draftFromModel(PPNAT, 82, "Mandad 1,5 palés de PP natural a SuperBahía Alicante", [82, 83], 100_000, [82, 83]);
+    return same({ fields: d.doubts.map((x) => x.field), values: d.values, flagged: Boolean(d.line.unconfirmed) }, { fields: ["units:PP-NAT"], values: ["82", "83"], flagged: false });
+  } },
+  { name: "M7 cifra inventada y además poco stock → una sola duda units:SKU (no dos), con las opciones de stock", check: () => {
+    const d = draftFromModel(HORCH, 77, "Mandad 3 palés de horchata a SuperBahía Alicante", [], 50);
+    return same({ fields: d.doubts.map((x) => x.field), values: d.values, says: /not in the message/.test(d.doubts[0]?.question ?? "") }, { fields: ["units:HORCH-1L"], values: ["50", "77"], says: true });
+  } },
+  { name: "M8 la persona elige una opción → la línea ya no queda marcada y los palés se recalculan", check: () => {
+    const flagged = draftFromModel(HORCH, 77, "Mandad 3 palés de horchata a SuperBahía Alicante").line;
+    const chosen = withUnits(flagged, 300);
+    return same({ was: Boolean(flagged.unconfirmed), now: Boolean(chosen.unconfirmed), units: chosen.units, pallets: chosen.pallets, text: chosen.text }, { was: true, now: false, units: 300, pallets: 3, text: "3 palés" });
+  } },
+  { name: "M9 dos cantidades en el mensaje: sin lectura propia del mensaje (no se sabe a cuál línea pertenece), solo la cifra del modelo", check: () => {
+    const d = draftFromModel(HORCH, 77, "Mandad 3 palés de horchata y 40 cajas de peluche a SuperBahía Alicante");
+    return same(d.values, ["77"]);
   } },
 
   // ----- Spanish formats -----

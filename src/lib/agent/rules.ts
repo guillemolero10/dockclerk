@@ -288,7 +288,7 @@ export function outboundDraft(
       if (l.availableUnits > 0) lines[i] = withUnits(l, l.availableUnits);
       doubts.push({
         field: `units:${l.sku}`,
-        question: `${l.sku}: ${describeUnits(l.requestedUnits, l.unitsPerPallet, l.unitWord)} asked, ${describeUnits(l.availableUnits, l.unitsPerPallet, l.unitWord)} in stock`,
+        question: `${l.sku}: ${describeUnits(l.requestedUnits, l.unitsPerPallet, l.unitWord)} asked, ${describeUnits(l.availableUnits, l.unitsPerPallet, l.unitWord)} in stock${l.unconfirmed ? " (and that quantity is not in the message: check it)" : ""}`,
         options: [
           ...(l.availableUnits > 0 ? [{ label: `Ship the ${describeUnits(l.availableUnits, l.unitsPerPallet, l.unitWord)} in stock`, value: String(l.availableUnits) }] : []),
           { label: `Ship ${describeUnits(l.requestedUnits, l.unitsPerPallet, l.unitWord)} anyway`, value: String(l.requestedUnits) },
@@ -299,6 +299,17 @@ export function outboundDraft(
         field: `units:${l.sku}`,
         question: `${l.sku}: that is not a whole number of ${l.unitWord}`,
         options: l.wholeOptions.map((u) => ({ label: describeUnits(u, l.unitsPerPallet, l.unitWord), value: String(u) })),
+      });
+    } else if (l.unconfirmed) {
+      // Muse Spark's quantity is neither in the message nor in a convert_quantity result: a person checks it.
+      const said = l.unconfirmed.fromMessage;
+      doubts.push({
+        field: `units:${l.sku}`,
+        question: `${l.sku}: ${describeUnits(l.units, l.unitsPerPallet, l.unitWord)} is not in the message, check the quantity`,
+        options: [
+          ...(said !== null && said !== l.units ? [{ label: `Ship ${describeUnits(said, l.unitsPerPallet, l.unitWord)} (what the message says)`, value: String(said) }] : []),
+          { label: `Ship ${describeUnits(l.units, l.unitsPerPallet, l.unitWord)} (as the assistant read it)`, value: String(l.units) },
+        ],
       });
     }
   }

@@ -12,7 +12,7 @@ import { billSoFar, explainCharge } from "./bill-tools";
 import { convertLog, convertQuantity } from "./convert";
 import { inventedFigures } from "./guard";
 import { checkStock, findConsignees, findItem, inboundsThisMonth, lastShipmentTo } from "./tools";
-import { buildLine } from "./lines";
+import { buildLine, checkModelUnits } from "./lines";
 import { hello, human, outboundDraft, parseDelivery } from "./rules";
 import type { DraftSeed, OutboundLineDraft, Step } from "./types";
 
@@ -72,6 +72,9 @@ export async function draftWithMuse(message: Message & { client: Client }): Prom
     { kind: "tool", text: `brain → ${p.name} (${p.model})` },
   ];
 
+  // Units that convert_quantity returned in this conversation, by SKU: the only numbers (besides the customer's own words)
+  // the model may put in an order line without a person checking them.
+  const converted = new Map<string, number[]>();
   const tools: Record<string, (args: Record<string, unknown>) => Promise<unknown>> = {
     find_item: async ({ text }) => {
       const item = await findItem(client.id, String(text ?? ""));
@@ -89,6 +92,7 @@ export async function draftWithMuse(message: Message & { client: Client }): Prom
       const item = await db.item.findFirst({ where: { clientId: client.id, sku: String(sku ?? "") } });
       if (!item) return { error: "unknown SKU for this customer" };
       const out = convertQuantity(item, amount, unit);
+      converted.set(item.sku, [...(converted.get(item.sku) ?? []), ...("units" in out ? [out.units] : out.options.map((o) => o.units))]);
       steps.push({ kind: "error" in out && !out.options.length ? "ask" : "tool", text: convertLog(item.sku, amount, unit, out) });
       return out;
     },
@@ -161,7 +165,7 @@ export async function draftWithMuse(message: Message & { client: Client }): Prom
     const parsed = parseJson<Turn>(answer.content);
     conversation.push({ role: "assistant", content: answer.content ?? "" });
 
-    if (parsed.final) return finish(await settle(message, client, parsed.final, steps, [...evidence, message.body ?? "", todayText]));
+    if (parsed.final) return finish(await settle(message, client, parsed.final, steps, [...evidence, message.body ?? "", todayText], converted));
     const requested = (parsed.calls ?? (parsed.tool ? [{ tool: parsed.tool, args: parsed.args }] : [])).slice(0, MAX_CALLS_PER_TURN);
     if (!requested.length) throw new Error(`${p.name} answered with neither a tool nor a decision`);
     const results: string[] = [];
@@ -179,7 +183,7 @@ export async function draftWithMuse(message: Message & { client: Client }): Prom
 }
 
 /** Rebuilds the model's decision with code: only real SKUs, live stock, every ambiguity a doubt. */
-async function settle(message: Message & { client: Client }, client: Client, final: Final, steps: Step[], evidence: string[]): Promise<DraftSeed> {
+async function settle(message: Message & { client: Client }, client: Client, final: Final, steps: Step[], evidence: string[], converted: Map<string, number[]>): Promise<DraftSeed> {
   if (final.kind === "NEEDS_HUMAN") return human(final.reason || "the model asked for a person", steps);
 
   if (final.kind === "REPLY_ONLY") {
@@ -208,7 +212,9 @@ async function settle(message: Message & { client: Client }, client: Client, fin
     const units = "units" in asked ? asked.units : asked.options[0];
     const stock = await checkStock(client.id, item.id);
     if (units > stock.units) steps.push({ kind: "ask", text: `${item.sku}: ${units} units asked, only ${stock.units} in stock` });
-    lines.push(buildLine(item, units, stock.units, "error" in asked ? asked.options : undefined));
+    const line = checkModelUnits(buildLine(item, units, stock.units, "error" in asked ? asked.options : undefined), `${message.subject ?? ""}\n${message.body ?? ""}`, converted.get(item.sku) ?? []);
+    if (line.unconfirmed) steps.push({ kind: "ask", text: `${item.sku}: ${units} units are not in the message or in convert_quantity → the office checks them` });
+    lines.push(line);
   }
   if (!lines.length) return human("order for products I could not identify", steps);
   const consignees = await findConsignees(final.destination ?? message.body ?? "");
