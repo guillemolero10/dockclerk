@@ -35,6 +35,7 @@ export function DraftCard({ draft }: { draft: DraftView }) {
   const kind = KIND[draft.kind];
   const Icon = draft.message ? CHANNEL_ICON[draft.message.channel] : Mail;
   const order = draft.kind === "CREATE_OUTBOUND" ? (draft.payload as OutboundPayload) : null;
+  const hubDoubt = draft.doubts.some((d) => d.field === "consigneeId");
 
   return (
     <article className="dock-card flex flex-col overflow-hidden bg-white">
@@ -78,7 +79,7 @@ export function DraftCard({ draft }: { draft: DraftView }) {
             </ul>
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 border-t-[1.5px] border-dock-ink px-3 py-2 text-sm">
               <dt className="cond text-[11px] text-dock-ink/50">Deliver to</dt>
-              <dd>{order.consigneeName ?? "—"}</dd>
+              <dd>{hubDoubt ? <span className="font-medium">{order.consigneeName?.split("–")[0].trim()} · which hub? ↓</span> : order.consigneeName ?? "—"}</dd>
               <dt className="cond text-[11px] text-dock-ink/50">By</dt>
               <dd className="mono text-[13px]">{when(order.deliverBy)}</dd>
             </dl>
@@ -98,11 +99,16 @@ export function DraftCard({ draft }: { draft: DraftView }) {
           <label key={d.field} className="flex flex-wrap items-center gap-2 border-[1.5px] border-dock-ink bg-dock-yellow px-3 py-2 text-sm">
             <AlertTriangle size={15} className="shrink-0" />
             <span className="min-w-0 flex-1 basis-48 font-medium">{d.question}</span>
+            {/* Nothing chosen for the person: a yellow field is theirs to decide, so Approve waits until they pick. */}
             <select
               name={d.field}
-              defaultValue={d.field === "consigneeId" ? order?.consigneeId ?? d.options[0].value : String(order?.lines.find((l) => `units:${l.sku}` === d.field)?.units ?? d.options[0].value)}
+              defaultValue=""
+              required
               className="w-full min-w-0 border-[1.5px] border-dock-ink bg-white px-2 py-1 text-sm sm:w-auto"
             >
+              <option value="" disabled>
+                Choose…
+              </option>
               {d.options.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
@@ -131,7 +137,7 @@ export function DraftCard({ draft }: { draft: DraftView }) {
 
         <div className="mt-auto flex gap-2 pt-1">
           <ApproveButton label={kind.action} />
-          <button formAction={discardDraft} className="cond flex items-center gap-1.5 border-[1.5px] border-dock-ink px-3 py-2 text-sm hover:bg-dock-concrete">
+          <button formAction={discardDraft} formNoValidate className="cond flex items-center gap-1.5 border-[1.5px] border-dock-ink px-3 py-2 text-sm hover:bg-dock-concrete">
             <X size={15} /> Discard
           </button>
         </div>
