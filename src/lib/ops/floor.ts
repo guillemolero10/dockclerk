@@ -2,7 +2,7 @@
 // Every step writes into the same "legacy software" tables the office sees.
 
 import type { Prisma } from "@prisma/client";
-import { db } from "@/lib/db";
+import { db, longTransaction } from "@/lib/db";
 import { countLoad, readDeliveryNote } from "@/lib/ai/vision";
 import { saveUpload, type Media } from "@/lib/uploads";
 import { dispatchLane, receivingLane, suggestSlot } from "@/lib/warehouse/lanes";
@@ -252,7 +252,7 @@ export async function pickPallet(outboundId: string, stockId: string, units?: nu
       const moved = await tx.stock.updateMany({ where: { id: stockId, outboundId: null, units: row.units }, data: { outboundId, location: `EXP-${lane}` } });
       if (moved.count !== 1) throw stale;
     }
-  });
+  }, longTransaction);
 
   const done = plan.picked.length + 1 >= plan.stockIds.length && plan.shortUnits === 0;
   if (done) await db.outbound.update({ where: { id: outboundId }, data: { status: "PREPARED", warehouseId: warehouse.id } });

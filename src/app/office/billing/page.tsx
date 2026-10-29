@@ -10,6 +10,8 @@ import { requireRole } from "@/lib/session";
 import { clientColor } from "@/lib/warehouse/palette";
 
 export const dynamic = "force-dynamic";
+// The server actions of this page (prepare / pick) run under this limit; a transaction may take up to 20 s.
+export const maxDuration = 60;
 
 export default async function BillingPage({ searchParams }: PageProps<"/office/billing">) {
   await requireRole("office");

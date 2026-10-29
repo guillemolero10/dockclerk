@@ -6,7 +6,7 @@ import { runClerk } from "@/lib/agent";
 import { withUnits } from "@/lib/agent/lines";
 import { orderReply } from "@/lib/agent/rules";
 import type { Doubt, DraftSeed, OutboundPayload, Step } from "@/lib/agent/types";
-import { db } from "@/lib/db";
+import { db, longTransaction } from "@/lib/db";
 import { madridDayRange } from "@/lib/format";
 import { makeLayout } from "@/lib/warehouse/layout";
 import { suggestSlot } from "@/lib/warehouse/lanes";
@@ -102,7 +102,7 @@ export async function approveDraft(formData: FormData) {
       },
     });
     return created;
-  });
+  }, longTransaction);
   if (!outbound) return;
   revalidatePath("/office", "layout");
 }
@@ -142,6 +142,6 @@ export async function resetInbox() {
     await tx.outbound.deleteMany({ where: { id: { in: outboundIds } } });
     await tx.draft.deleteMany();
     await tx.message.updateMany({ data: { status: "NEW" } });
-  });
+  }, longTransaction);
   revalidatePath("/office", "layout");
 }

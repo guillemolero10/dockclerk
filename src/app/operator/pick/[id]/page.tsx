@@ -10,6 +10,8 @@ import { pickRoute } from "@/lib/warehouse/route";
 import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
+// The server actions of this page (prepare / pick) run under this limit; a transaction may take up to 20 s.
+export const maxDuration = 60;
 
 export default async function PickPage({ params }: PageProps<"/operator/pick/[id]">) {
   await requireRole("operator");
