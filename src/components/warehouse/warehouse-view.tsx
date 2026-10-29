@@ -29,6 +29,7 @@ export function WarehouseView({ snapshot, initialPick, initialMode = "customer" 
   const router = useRouter();
   const mount = useRef<HTMLDivElement>(null);
   const scene = useRef<WarehouseScene | null>(null);
+  const pickList = useRef<HTMLUListElement>(null);
   // Bumped each time a scene is built, so the effects below feed the new one.
   const [sceneVersion, setSceneVersion] = useState(0);
   const [failed, setFailed] = useState(false);
@@ -108,6 +109,14 @@ export function WarehouseView({ snapshot, initialPick, initialMode = "customer" 
     if (sceneVersion) scene.current?.setPicks(route?.order ?? [], route?.path ?? []);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the route itself changes
   }, [sceneVersion, routeKey]);
+
+  // The chosen order (also when it comes from ?pick=) can sit at the end of a long "To pick" list: bring it into view, route included.
+  const pickedKey = order?.id ?? "";
+  const hasRoute = !!route;
+  useEffect(() => {
+    if (!pickedKey) return;
+    pickList.current?.querySelector<HTMLElement>('[data-active="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [pickedKey, hasRoute]);
 
   const busyKey = snapshot.busyDocks.join(",");
   useEffect(() => {
@@ -231,12 +240,12 @@ export function WarehouseView({ snapshot, initialPick, initialMode = "customer" 
             To pick <span className="mono bg-dock-ink px-1.5 text-[11px] text-dock-yellow">{orders.length}</span>
             <span className="ml-auto normal-case tracking-normal text-dock-ink/40">tap one to light it up</span>
           </h2>
-          <ul className="overflow-y-auto">
+          <ul ref={pickList} className="overflow-y-auto">
             {orders.map((o) => {
               const active = o.id === order?.id;
               const elsewhere = o.warehouse !== here.code;
               return (
-                <li key={o.id} className="border-b border-dock-line last:border-0">
+                <li key={o.id} data-active={active} className="border-b border-dock-line last:border-0">
                   <button
                     onClick={() => choose(active ? null : o)}
                     className={`w-full px-4 py-2 text-left text-sm transition-colors ${active ? "bg-dock-yellow" : "hover:bg-dock-concrete-2"} ${elsewhere ? "opacity-60" : ""}`}
