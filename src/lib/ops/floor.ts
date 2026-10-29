@@ -125,7 +125,7 @@ export async function confirmReceipt(inboundId: string, lines: ReceivedLine[], d
   const units = lines.reduce((sum, l) => sum + l.pallets * l.unitsPerPallet, 0);
   const expected = inbound.expectedPallets ?? inbound.receipt?.notePallets ?? null;
   const mismatch = expected !== null && expected !== pallets ? `Delivery note says ${expected} pallets, ${pallets} received.` : null;
-  const note = [mismatch, damages.length ? `${damages.length} damaged boxes.` : null, incident].filter(Boolean).join(" ") || null;
+  const note = [mismatch, damages.length ? `${damages.length} damaged ${damages.length === 1 ? "box" : "boxes"}.` : null, incident].filter(Boolean).join(" ") || null;
 
   await db.$transaction([
     db.inboundLine.deleteMany({ where: { inboundId } }),

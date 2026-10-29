@@ -55,7 +55,7 @@ export function NoteStepOperator({ inboundId, aiReady, items }: { inboundId: str
             });
           }}
         >
-          <select value={sku} onChange={(e) => setSku(e.target.value)} className="dock-input text-sm">
+          <select value={sku} onChange={(e) => setSku(e.target.value)} aria-label="Item" className="dock-input text-sm">
             {items.map((i) => (
               <option key={i.sku} value={i.sku}>
                 {i.sku}
@@ -127,7 +127,7 @@ export function ReceiveForm({
         return (
           <div key={i} className="space-y-2 border-[1.5px] border-dock-line p-2.5">
             <div className="flex gap-2">
-              <select value={line.itemId} onChange={(e) => set(i, { itemId: e.target.value })} className="dock-input flex-1 text-sm">
+              <select value={line.itemId} onChange={(e) => set(i, { itemId: e.target.value })} aria-label="Item" className="dock-input flex-1 text-sm">
                 {items.map((x) => (
                   <option key={x.id} value={x.id}>
                     {x.sku} · {x.description}
@@ -141,14 +141,14 @@ export function ReceiveForm({
               )}
             </div>
             <div className="flex items-center gap-2">
-              {item?.tracksLot && <input value={line.lot} onChange={(e) => set(i, { lot: e.target.value })} placeholder="Lot" className="dock-input mono w-28 text-sm" />}
+              {item?.tracksLot && <input value={line.lot} onChange={(e) => set(i, { lot: e.target.value })} placeholder="Lot" aria-label="Lot" className="dock-input mono w-28 text-sm" />}
               <div className="ml-auto flex items-center">
-                <button type="button" onClick={() => set(i, { pallets: Math.max(0, line.pallets - 1) })} className="grid h-10 w-10 place-items-center border-[1.5px] border-dock-ink bg-white">
-                  <Minus size={16} />
+                <button type="button" onClick={() => set(i, { pallets: Math.max(0, line.pallets - 1) })} aria-label={`One pallet less${item ? ` of ${item.sku}` : ""}`} className="grid h-10 w-10 place-items-center border-[1.5px] border-dock-ink bg-white">
+                  <Minus size={16} aria-hidden />
                 </button>
                 <span className="mono w-12 text-center text-xl font-semibold">{line.pallets}</span>
-                <button type="button" onClick={() => set(i, { pallets: line.pallets + 1 })} className="grid h-10 w-10 place-items-center border-[1.5px] border-dock-ink bg-dock-yellow">
-                  <Plus size={16} />
+                <button type="button" onClick={() => set(i, { pallets: line.pallets + 1 })} aria-label={`One pallet more${item ? ` of ${item.sku}` : ""}`} className="grid h-10 w-10 place-items-center border-[1.5px] border-dock-ink bg-dock-yellow">
+                  <Plus size={16} aria-hidden />
                 </button>
               </div>
             </div>
@@ -163,16 +163,16 @@ export function ReceiveForm({
       <div className="flex items-center justify-between border-t border-dock-line pt-3 text-sm">
         <span>Damaged boxes</span>
         <span className="flex items-center">
-          <button type="button" onClick={() => setDamaged((d) => Math.max(0, d - 1))} className="grid h-9 w-9 place-items-center border-[1.5px] border-dock-ink bg-white">
-            <Minus size={14} />
+          <button type="button" onClick={() => setDamaged((d) => Math.max(0, d - 1))} aria-label="One damaged box less" className="grid h-9 w-9 place-items-center border-[1.5px] border-dock-ink bg-white">
+            <Minus size={14} aria-hidden />
           </button>
           <span className={`mono w-10 text-center text-lg font-semibold ${damaged ? "text-dock-red" : ""}`}>{damaged}</span>
-          <button type="button" onClick={() => setDamaged((d) => d + 1)} className="grid h-9 w-9 place-items-center border-[1.5px] border-dock-ink bg-white">
-            <Plus size={14} />
+          <button type="button" onClick={() => setDamaged((d) => d + 1)} aria-label="One damaged box more" className="grid h-9 w-9 place-items-center border-[1.5px] border-dock-ink bg-white">
+            <Plus size={14} aria-hidden />
           </button>
         </span>
       </div>
-      <input value={incident} onChange={(e) => setIncident(e.target.value)} placeholder="Anything else? (optional)" className="dock-input text-sm" />
+      <input value={incident} onChange={(e) => setIncident(e.target.value)} placeholder="Anything else? (optional)" aria-label="Anything else" className="dock-input text-sm" />
 
       {expected !== null && expected !== total && (
         <p className="bg-dock-yellow px-3 py-2 text-sm ring-[1.5px] ring-dock-ink">
