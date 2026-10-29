@@ -118,12 +118,16 @@ function ownedQuantities(t: string, catalog: ItemRef[]) {
   return found.map((q, i) => ({ amount: q.amount, unit: q.unit, owner: catalog.length ? ownerOf(t.slice(q.end, found[i + 1]?.start ?? t.length), catalog) : null }));
 }
 
-/** "120 PELUCHE-30", "120 x PELUCHE-30", "PELUCHE-30: 120", "PELUCHE-30 x 120": a bare number tied to the item's own code is units of it. */
+/**
+ * "120 PELUCHE-30", "120 x PELUCHE-30", "PELUCHE-30: 120", "PELUCHE-30 x 120": a bare number tied to the item's own code is units of it.
+ * Not when a unit follows it ("HORCH-1L: 2 palés" is 2 pallets, which the normal reading already takes).
+ */
 function bareUnits(t: string, sku: string): Quantity[] {
   const code = norm(sku).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const whole = "(\\d{1,3}(?:\\.\\d{3})+|\\d+)(?!\\d|[.,]\\d)";
+  const unitAfter = "(?!\\s*(?:pal|europal|caj|box|saco|bag|unid|uds|bult|kg|ml|litro|cm)|\\s*l\\b)";
   const before = new RegExp(`(?<![a-z0-9,.-])${whole}\\s*(?:x\\s*)?${code}(?![a-z0-9])`, "g");
-  const after = new RegExp(`(?<![a-z0-9])${code}\\s*(?:[:=×]|x\\b)\\s*${whole}`, "g");
+  const after = new RegExp(`(?<![a-z0-9])${code}\\s*(?:[:=×]|x\\b)\\s*${whole}${unitAfter}`, "g");
   return [...t.matchAll(before), ...t.matchAll(after)].map((m) => ({ amount: Number(m[1].replace(/\./g, "")), unit: "units" as const }));
 }
 

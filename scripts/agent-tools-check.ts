@@ -15,7 +15,7 @@ import { billPeriod, type TariffInput } from "../src/lib/billing/compute";
 import { dayOfYmd, period } from "../src/lib/billing/calendar";
 import type { Stay } from "../src/lib/billing/stays";
 import { clients as seedClients } from "../prisma/seed-data";
-import { norm, tradeName } from "../src/lib/agent/words";
+import { mentionsCompany, norm, tradeName } from "../src/lib/agent/words";
 
 type Case = { name: string; check: () => string | null | undefined | Promise<string | null> };
 
@@ -306,6 +306,14 @@ const CASES: Case[] = [
       ask("Mandad 1.360 PELUCHE-30 a SuperBahía Alicante", 1360), ask("Mandad 120 PELUCHE-30 a SuperBahía Alicante", 30),
     ], [0, 0, 0, 0, 0, 1]);
   } },
+  { name: "U8b una unidad detrás del número del SKU manda: «HORCH-1L: 2 palés» son 200 cajas (2 → duda), «PELUCHE-30 x 12 palés» son 480 (12 → duda)", check: () => {
+    const ask = (code: string, sku: string, body: string, units: number) => orderFromModel(code, body, [{ sku, units }]).fields.length;
+    return same([
+      ask("C004", "HORCH-1L", "Mandad HORCH-1L: 2 palés a SuperBahía Alicante", 2), ask("C004", "HORCH-1L", "Mandad HORCH-1L: 2 palés a SuperBahía Alicante", 200),
+      ask("C001", "PELUCHE-30", "Mandad PELUCHE-30 x 12 palés a SuperBahía Alicante", 12), ask("C001", "PELUCHE-30", "Mandad PELUCHE-30 x 12 palés a SuperBahía Alicante", 480),
+      ask("C001", "PELUCHE-30", "Mandad PELUCHE-30: 120 cajas a SuperBahía Alicante", 120),
+    ], [1, 0, 1, 0, 0]);
+  } },
   { name: "U9 con dos productos en el mensaje, cada línea ofrece SU cantidad («3 palés de horchata y 40 cajas de agua»: horchata dice 300)", check: () => {
     const d = orderFromModel("C004", "Mandad 3 palés de horchata y 40 cajas de agua a SuperBahía Alicante", [{ sku: "HORCH-1L", units: 77 }, { sku: "AGUA-15", units: 40 }]);
     return same({ fields: d.fields, says: d.values["units:HORCH-1L"] }, { fields: ["units:HORCH-1L"], says: ["300", "77"] });
@@ -417,7 +425,9 @@ const CASES: Case[] = [
     seedClients.map((c) => tradeName(c.name)).every((n) => n.length > 3 && !/[.,]$/.test(n) && !/\bs\.?\s?[al]\b/.test(n)),
     tradeName("Bebidas Montgó, S.A."), tradeName("Polímeros Serra Mariola, S.L."), tradeName("Ejemplo Uno S.L.U."), tradeName("Ejemplo Dos, S. A."),
     norm("¿Cuánto lleva Bebidas Montgó de almacenaje este mes?").includes(tradeName("Bebidas Montgó, S.A.")),
-  ], [true, "bebidas montgo", "polimeros serra mariola", "ejemplo uno", "ejemplo dos", true]) },
+    mentionsCompany("¿Cuánto lleva Bebidas Montgó de almacenaje este mes?", "Bebidas Montgó, S.A."),
+    mentionsCompany("¿Cuánto llevo de almacenaje este mes?", "S.L."), mentionsCompany("¿Cuánto llevo de almacenaje este mes?", "Ca Sa"),
+  ], [true, "bebidas montgo", "polimeros serra mariola", "ejemplo uno", "ejemplo dos", true, true, false, false]) },
   { name: "F6 el motor de reglas manda a una persona el mensaje sembrado de la factura (sin tocar la BD)", check: async () => {
     const [d] = await draftMessage(asMessage("Hola, no nos ha llegado la factura de septiembre, ¿nos la podéis reenviar?"));
     return d.kind === "NEEDS_HUMAN" ? null : `got ${d.kind}`;
