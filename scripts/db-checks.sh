@@ -3,7 +3,7 @@
 #
 #   bash scripts/db-checks.sh            asks before the steps that write, runs everything
 #   bash scripts/db-checks.sh --yes      no questions (writes are announced anyway)
-#   bash scripts/db-checks.sh --no-model skips the two steps that call the paid model (about 10 cents in total)
+#   bash scripts/db-checks.sh --no-model skips the two steps that call the paid model (about 0.25 $ in total, measured on 29/10)
 #   bash scripts/db-checks.sh --no-seed  keeps the current data (skips the two seeds)
 #
 # Run it from the dockclerk folder with the phone's data connected (the UMH wifi blocks Postgres).
@@ -97,7 +97,7 @@ fi
 step "clerk-edge, rules (BASETEN_MODEL=nope)" env BASETEN_MODEL=nope "${ENVRUN[@]}" scripts/clerk-edge.ts
 step "clerk-eval rules"                      eval_scores "${ENVRUN[@]}" scripts/clerk-eval.ts rules
 if [ $MODEL = 1 ]; then
-  if confirm "SPENDS about 10 cents of Baseten credit (clerk-edge and clerk-eval with the model). Go on?"; then
+  if confirm "SPENDS about 0.25 $ of Baseten credit (clerk-edge and clerk-eval with the model). Go on?"; then
     step "clerk-edge, Muse Spark"  "${ENVRUN[@]}" scripts/clerk-edge.ts
     step "clerk-eval, Muse Spark"  eval_scores "${ENVRUN[@]}" scripts/clerk-eval.ts
   else
