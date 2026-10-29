@@ -8,12 +8,13 @@
 
 import { billingIntent, ddmm, eurosEs, monthFromText, numEs, resolveWindow, shapeBill, shapeExplain, type BillIn, type DetailIn } from "../src/lib/agent/bill-format";
 import { convertLog, convertQuantity, type ConvertItem } from "../src/lib/agent/convert";
-import { figures, inventedFigures, unitsGrounded } from "../src/lib/agent/guard";
-import { buildLine, checkModelUnits, withUnits } from "../src/lib/agent/lines";
+import { amountInMessage, figures, inventedFigures, messageQuantities, unitsGrounded } from "../src/lib/agent/guard";
+import { buildLine, checkModelUnits, vouchConversion, withUnits } from "../src/lib/agent/lines";
 import { draftMessage, outboundDraft } from "../src/lib/agent/rules";
 import { billPeriod, type TariffInput } from "../src/lib/billing/compute";
 import { dayOfYmd, period } from "../src/lib/billing/calendar";
 import type { Stay } from "../src/lib/billing/stays";
+import { clients as seedClients } from "../prisma/seed-data";
 
 type Case = { name: string; check: () => string | null | undefined | Promise<string | null> };
 
@@ -57,6 +58,62 @@ const draftFromModel = (item: ConvertItem, units: number, body: string, converte
   const seed = outboundDraft(asMessage(body), fakeClient as never, [line], [{ id: "d1", name: "SuperBahía – Alicante", city: "Alicante" }], null, []);
   return { line, doubts: seed.doubts, values: seed.doubts.flatMap((d) => d.options.map((o) => o.value)) };
 };
+
+// ---------- the model's order for the seeded customers (real SKUs, descriptions and units per pallet) ----------
+const catalogOf = (code: string) =>
+  seedClients.find((c) => c.code === code)!.items.map(([sku, description, unit, unitsPerPallet]) => ({ sku, description, unit, unitsPerPallet }));
+/** A line of the model's final answer; `asked` is the convert_quantity call it made first (amount, unit), if any. */
+type ModelLine = { sku: string; units: number; asked?: [number, "pallets" | "units"] };
+/**
+ * What the model's lines become, through the same glue as muse.ts (vouchConversion → buildLine → checkModelUnits → outboundDraft),
+ * with the customer's real catalog so each quantity of the message can be tied to its product. No database, no model.
+ */
+const orderFromModel = (code: string, body: string, lines: ModelLine[]) => {
+  const catalog = catalogOf(code);
+  const converted = new Map<string, number[]>();
+  const drafted = lines.map((l) => {
+    const item = catalog.find((i) => i.sku === l.sku)!;
+    if (l.asked) vouchConversion(converted, item, convertQuantity(item, l.asked[0], l.asked[1]), l.asked[0], l.asked[1], body, catalog);
+    return checkModelUnits(buildLine({ id: `id-${l.sku}`, ...item }, l.units, 1_000_000), body, converted.get(l.sku) ?? [], catalog);
+  });
+  const seed = outboundDraft(asMessage(body), fakeClient as never, drafted, [{ id: "d1", name: "SuperBahía – Alicante", city: "Alicante" }], null, []);
+  return { fields: seed.doubts.map((d) => d.field), values: Object.fromEntries(seed.doubts.map((d) => [d.field, d.options.map((o) => o.value)])) as Record<string, string[]> };
+};
+/** Correct answers of the model for messages that must raise no doubt, both ways: converting first and sending the units straight. */
+type Good = { id: string; code: string; body: string; lines: ModelLine[] };
+const noDoubts = (rows: Good[]) =>
+  rows.flatMap((r) => [
+    { id: r.id, fields: orderFromModel(r.code, r.body, r.lines).fields },
+    { id: `${r.id} (sin convert_quantity)`, fields: orderFromModel(r.code, r.body, r.lines.map((l) => ({ sku: l.sku, units: l.units }))).fields },
+  ]).filter((x) => x.fields.length).map((x) => `${x.id}: ${x.fields.join(",")}`);
+
+const VIDEO: Good[] = [
+  { id: "V1 PELUCHE-30 12 palés", code: "C001", body: "Buenas, mañana mandad 12 palés de la ref. PELUCHE-30 a Hipermercados Turia, que lleguen antes de las 10. Gracias, Marta.",
+    lines: [{ sku: "PELUCHE-30", units: 480, asked: [12, "pallets"] }] },
+  { id: "V2 agua 6 palés + horchata 2,5", code: "C004", body: "Hola! Para el jueves necesito 6 palés de agua de litro y medio para SuperBahía Alicante. Y si puede ser 2 palés y medio de horchata también 👍",
+    lines: [{ sku: "AGUA-15", units: 504, asked: [6, "pallets"] }, { sku: "HORCH-1L", units: 250, asked: [2.5, "pallets"] }] },
+  { id: "V4 gel de 750, 3 palés", code: "C007", body: "Necesito sacar 3 palés de gel de 750 para Perfumerías Lucentum el viernes por la mañana.",
+    lines: [{ sku: "GEL-750", units: 210, asked: [3, "pallets"] }] },
+];
+const EVAL: Good[] = [
+  { id: "N1 dos palets + 5 de puzzles de 500 piezas", code: "C001", body: "Hola, necesitaríamos que salgan dos palets de muñecas clásicas y 5 de puzzles de 500 piezas hacia Hipermercados Turia el viernes. Gracias.",
+    lines: [{ sku: "MUNECA-CL", units: 96, asked: [2, "pallets"] }, { sku: "PUZZLE-500", units: 300, asked: [5, "pallets"] }] },
+  { id: "N2 media docena de palés de agua", code: "C004", body: "Toni aquí. Mandadme media docena de palés de agua de litro y medio a SuperBahía Alicante el lunes",
+    lines: [{ sku: "AGUA-15", units: 504, asked: [6, "pallets"] }] },
+  { id: "N7 40 palés de PP natural", code: "C002", body: "Necesito 40 palés de PP natural en Inyectados Castalla pasado mañana por la mañana",
+    lines: [{ sku: "PP-NAT", units: 2200, asked: [40, "pallets"] }] },
+  { id: "N8 10 de mazapán y 5 de polvorones", code: "C008", body: "Mandad 10 palés de mazapán y 5 de polvorones a Costablanca Castellón antes del viernes",
+    lines: [{ sku: "MAZAPAN", units: 800, asked: [10, "pallets"] }, { sku: "POLVORON", units: 400, asked: [5, "pallets"] }] },
+  { id: "N9 3 de zapatilla running talla 42", code: "C003", body: "oye, mañana a primera hora saca 3 de zapatilla running talla 42 para Hogar y Más Barcelona",
+    lines: [{ sku: "ZAP-RUN-42", units: 108, asked: [3, "pallets"] }] },
+  { id: "Q1 2,5 palés de PELUCHE-30", code: "C001", body: "Mandad 2,5 palés de PELUCHE-30 a SuperBahía Alicante el viernes", lines: [{ sku: "PELUCHE-30", units: 100, asked: [2.5, "pallets"] }] },
+  { id: "Q2 2 palés y medio de horchata", code: "C004", body: "Toni aquí. Mandadme 2 palés y medio de horchata a SuperBahía Alicante el lunes", lines: [{ sku: "HORCH-1L", units: 250, asked: [2.5, "pallets"] }] },
+  { id: "130 cajas de PELUCHE-30", code: "C001", body: "Mandad 130 cajas de PELUCHE-30 a SuperBahía Alicante el viernes", lines: [{ sku: "PELUCHE-30", units: 130, asked: [130, "units"] }] },
+  { id: "campaña: 20 palés de turrón duro y 15 de blando", code: "C008", body: "Hola equipo, para la semana que viene vamos a necesitar 20 palés de turrón duro y 15 de blando para Grupo Costablanca Elche. ¿Tenéis suficiente stock?",
+    lines: [{ sku: "TURRON-DUR", units: 1400, asked: [20, "pallets"] }, { sku: "TURRON-BLA", units: 1050, asked: [15, "pallets"] }] },
+  { id: "portal: 8 palés de refresco de naranja", code: "C004", body: "Mandad 8 palés de refresco de naranja a Hipermercados Turia Quart para el miércoles.", lines: [{ sku: "REFR-NAR", units: 640, asked: [8, "pallets"] }] },
+  { id: "10 palés de PP natural del lote más antiguo", code: "C002", body: "Por favor, preparad 10 palés de PP natural del lote más antiguo para Inyectados Castalla, recogida mañana a primera hora.", lines: [{ sku: "PP-NAT", units: 550, asked: [10, "pallets"] }] },
+];
 
 const CASES: Case[] = [
   // ----- convert_quantity -----
@@ -170,6 +227,117 @@ const CASES: Case[] = [
   { name: "M9 dos cantidades en el mensaje: sin lectura propia del mensaje (no se sabe a cuál línea pertenece), solo la cifra del modelo", check: () => {
     const d = draftFromModel(HORCH, 77, "Mandad 3 palés de horchata y 40 cajas de peluche a SuperBahía Alicante");
     return same(d.values, ["77"]);
+  } },
+
+  // ----- the model's units: a number only counts when the message reads it as a quantity of THAT item -----
+  { name: "U1 «gel de 750» (mensaje 4 del vídeo): 750 es ml; si el modelo pone 750 cajas → duda con lo que dice el mensaje (210) y 750", check: () => {
+    const body = "Necesito sacar 3 palés de gel de 750 para Perfumerías Lucentum el viernes por la mañana.";
+    const bad = orderFromModel("C007", body, [{ sku: "GEL-750", units: 750 }]);
+    const noQty = orderFromModel("C007", "Necesito sacar gel de 750 para Perfumerías Lucentum el viernes", [{ sku: "GEL-750", units: 750 }]);
+    return same({ bad: [bad.fields, bad.values["units:GEL-750"]], noQty: [noQty.fields, noQty.values["units:GEL-750"]] },
+      { bad: [["units:GEL-750"], ["210", "750"]], noQty: [["units:GEL-750"], ["750"]] });
+  } },
+  { name: "U2 matrícula 2210: no es una cantidad (con «4 palés» → duda con 128 y 2210; sin cantidad → duda), 4 palés de toallas sí", check: () => {
+    const body = "Buenas, mañana pasa nuestro camión a recoger 4 palés de toallas blancas, matrícula 2210 HBK";
+    const bad = orderFromModel("C005", body, [{ sku: "TOALLA-BL", units: 2210 }]);
+    const noQty = orderFromModel("C005", "Mañana pasa nuestro camión a recoger toallas, matrícula 2210 HBK", [{ sku: "TOALLA-BL", units: 2210 }]);
+    const good = orderFromModel("C005", body, [{ sku: "TOALLA-BL", units: 128, asked: [4, "pallets"] }]);
+    return same({ bad: [bad.fields, bad.values["units:TOALLA-BL"]], noQty: noQty.fields, good: good.fields }, { bad: [["units:TOALLA-BL"], ["128", "2210"]], noQty: ["units:TOALLA-BL"], good: [] });
+  } },
+  { name: "U3 medidas, teléfono, kilómetros, porcentajes y años no son cantidades (ml, L, kg, cm, 965 123 456, 3 km, 20 %, 2027)", check: () => {
+    const body = "Mandad crema de 50 ml, gel de 2 L y champú de 25 kg, caja de 40 cm, llamad al 965 123 456, está a 3 km, 20 % de descuento, año 2027";
+    const wrong = [50, 2, 25, 40, 965, 123, 456, 3, 20, 2027].filter((n) => orderFromModel("C007", body, [{ sku: "GEL-750", units: n }]).fields.length === 0);
+    return same(wrong, []);
+  } },
+  { name: "U4 líneas cruzadas (N8: mazapán 10, polvorones 5): el modelo las cambia (400 y 800) → una duda por línea con lo que dice el mensaje; bien puestas → ninguna", check: () => {
+    const body = "Mandad 10 palés de mazapán y 5 de polvorones a Costablanca Castellón antes del viernes";
+    const crossed = orderFromModel("C008", body, [{ sku: "MAZAPAN", units: 400 }, { sku: "POLVORON", units: 800 }]);
+    const fine = orderFromModel("C008", body, [{ sku: "MAZAPAN", units: 800 }, { sku: "POLVORON", units: 400 }]);
+    return same({ crossed: [crossed.fields, crossed.values["units:MAZAPAN"], crossed.values["units:POLVORON"]], fine: fine.fields },
+      { crossed: [["units:MAZAPAN", "units:POLVORON"], ["800", "400"], ["400", "800"]], fine: [] });
+  } },
+  { name: "U4b solo una línea cruzada: 800 en polvorones (los 10 palés son de mazapán) → duda en polvorones; mazapán bien → sin duda", check: () => {
+    const d = orderFromModel("C008", "Mandad 10 palés de mazapán y 5 de polvorones a Costablanca Castellón antes del viernes", [{ sku: "MAZAPAN", units: 800 }, { sku: "POLVORON", units: 800 }]);
+    return same({ fields: d.fields, says: d.values["units:POLVORON"] }, { fields: ["units:POLVORON"], says: ["400", "800"] });
+  } },
+  { name: "U5 convert_quantity solo vale con la cantidad que escribió el cliente para ese artículo (amountInMessage)", check: () => {
+    const horch = catalogOf("C004");
+    const n8 = catalogOf("C008");
+    const h = horch.find((i) => i.sku === "HORCH-1L")!;
+    const maz = n8.find((i) => i.sku === "MAZAPAN")!;
+    const msg = "Toni aquí. Mandadme 2 palés y medio de horchata a SuperBahía Alicante el lunes";
+    const n8msg = "Mandad 10 palés de mazapán y 5 de polvorones a Costablanca Castellón antes del viernes";
+    return same([
+      amountInMessage(2.5, "pallets", msg, h, horch), // lo que dijo
+      amountInMessage(3, "pallets", msg, h, horch), // inventada
+      amountInMessage(250, "units", msg, h, horch), // el resultado, no lo que dijo
+      amountInMessage(2.5, "units", msg, h, horch), // otra unidad
+      amountInMessage(10, "pallets", n8msg, maz, n8), // la suya
+      amountInMessage(5, "pallets", n8msg, maz, n8), // la de polvorones
+    ], [true, false, false, false, true, false]);
+  } },
+  { name: "U5b el modelo pide convert_quantity con una cantidad inventada (3 palés de horchata, el cliente dijo 2 y medio) y pone 300 → duda con 250 y 300 (antes pasaba por venir de convert_quantity)", check: () => {
+    const d = orderFromModel("C004", "Toni aquí. Mandadme 2 palés y medio de horchata a SuperBahía Alicante el lunes", [{ sku: "HORCH-1L", units: 300, asked: [3, "pallets"] }]);
+    return same({ fields: d.fields, values: d.values["units:HORCH-1L"] }, { fields: ["units:HORCH-1L"], values: ["250", "300"] });
+  } },
+  { name: "U5c convert_quantity con la cantidad de la otra línea (N8: 5 palés de mazapán, 10 de polvorones) → dudas en las dos líneas", check: () => {
+    const d = orderFromModel("C008", "Mandad 10 palés de mazapán y 5 de polvorones a Costablanca Castellón antes del viernes",
+      [{ sku: "MAZAPAN", units: 400, asked: [5, "pallets"] }, { sku: "POLVORON", units: 800, asked: [10, "pallets"] }]);
+    return same(d.fields, ["units:MAZAPAN", "units:POLVORON"]);
+  } },
+  { name: "U5d vouchConversion apunta las unidades solo si la cantidad es del cliente (y las opciones de «1,5 palés» de PP-NAT: 82 y 83)", check: () => {
+    const pp = catalogOf("C002");
+    const item = pp.find((i) => i.sku === "PP-NAT")!;
+    const msg = "Mandad 1,5 palés de PP natural a Inyectados Castalla el viernes";
+    const mine = new Map<string, number[]>();
+    const okMine = vouchConversion(mine, item, convertQuantity(item, 1.5, "pallets"), 1.5, "pallets", msg, pp);
+    const made = new Map<string, number[]>();
+    const okMade = vouchConversion(made, item, convertQuantity(item, 2, "pallets"), 2, "pallets", msg, pp);
+    return same({ okMine, mine: mine.get("PP-NAT"), okMade, made: made.get("PP-NAT") ?? null }, { okMine: true, mine: [82, 83], okMade: false, made: null });
+  } },
+  { name: "U6 los 3 mensajes del vídeo con pedido (V1 peluche, V2 agua + horchata, V4 gel) no dan ninguna duda de unidades, con y sin convert_quantity", check: () => same(noDoubts(VIDEO), []) },
+  { name: "U7 N1, N2, N7, N8, N9, Q1, Q2, «130 cajas», la campaña de turrón, el portal de Toni y PP natural: ninguna duda de unidades, con y sin convert_quantity", check: () => same(noDoubts(EVAL), []) },
+  { name: "U8 el código del SKU enlaza la cifra: «120 PELUCHE-30», «120 x PELUCHE-30», «PELUCHE-30: 120», «PELUCHE-30 x 120», «1.360 PELUCHE-30» sí; el 30 del SKU no", check: () => {
+    const ask = (body: string, units: number) => orderFromModel("C001", body, [{ sku: "PELUCHE-30", units }]).fields.length;
+    return same([
+      ask("Mandad 120 PELUCHE-30 a SuperBahía Alicante", 120), ask("Mandad 120 x PELUCHE-30 a SuperBahía Alicante", 120),
+      ask("Mandad PELUCHE-30: 120 a SuperBahía Alicante", 120), ask("Mandad PELUCHE-30 x 120 a SuperBahía Alicante", 120),
+      ask("Mandad 1.360 PELUCHE-30 a SuperBahía Alicante", 1360), ask("Mandad 120 PELUCHE-30 a SuperBahía Alicante", 30),
+    ], [0, 0, 0, 0, 0, 1]);
+  } },
+  { name: "U9 con dos productos en el mensaje, cada línea ofrece SU cantidad («3 palés de horchata y 40 cajas de agua»: horchata dice 300)", check: () => {
+    const d = orderFromModel("C004", "Mandad 3 palés de horchata y 40 cajas de agua a SuperBahía Alicante", [{ sku: "HORCH-1L", units: 77 }, { sku: "AGUA-15", units: 40 }]);
+    return same({ fields: d.fields, says: d.values["units:HORCH-1L"] }, { fields: ["units:HORCH-1L"], says: ["300", "77"] });
+  } },
+  { name: "U10 si no se puede asociar con seguridad, no bloquea: «3 palés de peluche» (30 o 50), «10 palés de mazapán y polvorones» (¿cada uno o entre los dos?), sin «de»", check: () => {
+    const peluche = orderFromModel("C001", "Mandad 3 palés de peluche a SuperBahía Alicante", [{ sku: "PELUCHE-30", units: 120 }, { sku: "PELUCHE-50", units: 90 }]).fields;
+    const list = orderFromModel("C008", "Mandad 10 palés de mazapán y polvorones a Costablanca Castellón", [{ sku: "MAZAPAN", units: 800 }, { sku: "POLVORON", units: 800 }]).fields;
+    const noDe = orderFromModel("C008", "Mandad 10 palés mazapán y 5 palés polvorones a Costablanca Castellón", [{ sku: "MAZAPAN", units: 400 }, { sku: "POLVORON", units: 800 }]).fields;
+    return same({ peluche, list, noDe }, { peluche: [], list: [], noDe: [] });
+  } },
+  { name: "U11 messageQuantities: de «3 palés de gel de 750 ml» solo sale 3 palés (ni 750 ni el resto de cifras)", check: () => {
+    const gel = catalogOf("C007");
+    return same(messageQuantities("Necesito sacar 3 palés de gel de 750 ml, 25 kg, el 3 de noviembre, a las 10:30, pedido 4523", gel.find((i) => i.sku === "GEL-750"), gel), [{ amount: 3, unit: "pallets" }]);
+  } },
+  { name: "U12 un pedido en inglés se lee igual que el español: «Send 3 pallets of PELUCHE-30», «two and a half pallets of horchata», «half a pallet», «100 boxes of PELUCHE-30»", check: () => {
+    const ask = (code: string, sku: string, units: number, body: string, asked?: [number, "pallets" | "units"]) => orderFromModel(code, body, [{ sku, units, asked }]).fields.length;
+    return same([
+      ask("C001", "PELUCHE-30", 120, "Please send 3 pallets of PELUCHE-30 to SuperBahía Alicante on Friday", [3, "pallets"]),
+      ask("C004", "HORCH-1L", 250, "Send two and a half pallets of horchata to SuperBahía Alicante on Monday", [2.5, "pallets"]),
+      ask("C004", "HORCH-1L", 200, "Send two pallets of horchata to SuperBahía Alicante on Monday", [2, "pallets"]),
+      ask("C001", "PUZZLE-500", 30, "Send half a pallet of puzzle-500 to SuperBahía Alicante", [0.5, "pallets"]),
+      ask("C001", "PELUCHE-30", 100, "Send 100 boxes of PELUCHE-30 to SuperBahía Alicante", [100, "units"]),
+      ask("C001", "PELUCHE-30", 160, "Please send 3 pallets of PELUCHE-30 to SuperBahía Alicante on Friday"), // 4 pallets: invented
+    ], [0, 0, 0, 0, 0, 1]);
+  } },
+  { name: "U13 números en letra de 21 en adelante y europalets: «treinta y cinco palés», «cincuenta cajas», «veinticinco europalets»; el guardián sigue exigiendo que cuadre", check: () => {
+    const ask = (code: string, sku: string, units: number, body: string, asked?: [number, "pallets" | "units"]) => orderFromModel(code, body, [{ sku, units, asked }]).fields.length;
+    return same([
+      ask("C002", "PP-NAT", 1925, "Necesito treinta y cinco palés de PP natural en Castalla", [35, "pallets"]),
+      ask("C001", "PELUCHE-30", 50, "Mandad cincuenta cajas de PELUCHE-30 a Alicante", [50, "units"]),
+      ask("C002", "PP-NAT", 1375, "Mandad veinticinco europalets de PP natural a Castalla", [25, "pallets"]),
+      ask("C002", "PP-NAT", 1925, "Mandad treinta palés de PP natural a Castalla", [35, "pallets"]), // 30, not 35
+    ], [0, 0, 0, 1]);
   } },
 
   // ----- Spanish formats -----

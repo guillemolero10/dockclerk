@@ -4,7 +4,7 @@
 // (real SKUs, live stock, every ambiguity a yellow doubt), so a model mistake can never
 // write anything: a person still approves every draft.
 
-import type { Client, Message } from "@prisma/client";
+import type { Client, Item, Message } from "@prisma/client";
 import { chat, parseJson, providers, type ChatMessage } from "@/lib/ai/client";
 import { db } from "@/lib/db";
 import { toUnits } from "@/lib/pallets/quantity";
@@ -12,7 +12,7 @@ import { billSoFar, explainCharge } from "./bill-tools";
 import { convertLog, convertQuantity } from "./convert";
 import { inventedFigures } from "./guard";
 import { checkStock, findConsignees, findItem, inboundsThisMonth, lastShipmentTo } from "./tools";
-import { buildLine, checkModelUnits } from "./lines";
+import { buildLine, checkModelUnits, vouchConversion } from "./lines";
 import { hello, human, outboundDraft, parseDelivery } from "./rules";
 import type { DraftSeed, OutboundLineDraft, Step } from "./types";
 
@@ -72,9 +72,13 @@ export async function draftWithMuse(message: Message & { client: Client }): Prom
     { kind: "tool", text: `brain → ${p.name} (${p.model})` },
   ];
 
-  // Units that convert_quantity returned in this conversation, by SKU: the only numbers (besides the customer's own words)
-  // the model may put in an order line without a person checking them.
+  // Units that convert_quantity returned in this conversation, by SKU, for an amount the customer really wrote for that item:
+  // the only numbers (besides the customer's own words) the model may put in an order line without a person checking them.
   const converted = new Map<string, number[]>();
+  const text = `${message.subject ?? ""}\n${message.body ?? ""}`;
+  // The customer's items, once: to tell which quantity of the message belongs to which product.
+  let items: Promise<Item[]> | undefined;
+  const catalog = () => (items ??= db.item.findMany({ where: { clientId: client.id } }));
   const tools: Record<string, (args: Record<string, unknown>) => Promise<unknown>> = {
     find_item: async ({ text }) => {
       const item = await findItem(client.id, String(text ?? ""));
@@ -89,11 +93,12 @@ export async function draftWithMuse(message: Message & { client: Client }): Prom
       return { sku: item.sku, freeUnits: stock.units, fullPallets: stock.full, looseUnits: stock.loose, unitsPerPallet: stock.unitsPerPallet, picos: stock.picos, text: stock.text };
     },
     convert_quantity: async ({ sku, amount, unit }) => {
-      const item = await db.item.findFirst({ where: { clientId: client.id, sku: String(sku ?? "") } });
+      const all = await catalog();
+      const item = all.find((i) => i.sku === String(sku ?? ""));
       if (!item) return { error: "unknown SKU for this customer" };
       const out = convertQuantity(item, amount, unit);
-      converted.set(item.sku, [...(converted.get(item.sku) ?? []), ...("units" in out ? [out.units] : out.options.map((o) => o.units))]);
-      steps.push({ kind: "error" in out && !out.options.length ? "ask" : "tool", text: convertLog(item.sku, amount, unit, out) });
+      const vouched = vouchConversion(converted, item, out, amount, unit, text, all);
+      steps.push({ kind: "error" in out && !out.options.length ? "ask" : "tool", text: convertLog(item.sku, amount, unit, out) + (vouched ? "" : " · that amount is not in the message") });
       return out;
     },
     // The customer id below is always the sender's (or the portal session's): the model's arguments never choose it.
@@ -165,7 +170,7 @@ export async function draftWithMuse(message: Message & { client: Client }): Prom
     const parsed = parseJson<Turn>(answer.content);
     conversation.push({ role: "assistant", content: answer.content ?? "" });
 
-    if (parsed.final) return finish(await settle(message, client, parsed.final, steps, [...evidence, message.body ?? "", todayText], converted));
+    if (parsed.final) return finish(await settle(message, client, parsed.final, steps, [...evidence, message.body ?? "", todayText], converted, catalog));
     const requested = (parsed.calls ?? (parsed.tool ? [{ tool: parsed.tool, args: parsed.args }] : [])).slice(0, MAX_CALLS_PER_TURN);
     if (!requested.length) throw new Error(`${p.name} answered with neither a tool nor a decision`);
     const results: string[] = [];
@@ -183,7 +188,7 @@ export async function draftWithMuse(message: Message & { client: Client }): Prom
 }
 
 /** Rebuilds the model's decision with code: only real SKUs, live stock, every ambiguity a doubt. */
-async function settle(message: Message & { client: Client }, client: Client, final: Final, steps: Step[], evidence: string[], converted: Map<string, number[]>): Promise<DraftSeed> {
+async function settle(message: Message & { client: Client }, client: Client, final: Final, steps: Step[], evidence: string[], converted: Map<string, number[]>, catalog: () => Promise<Item[]>): Promise<DraftSeed> {
   if (final.kind === "NEEDS_HUMAN") return human(final.reason || "the model asked for a person", steps);
 
   if (final.kind === "REPLY_ONLY") {
@@ -203,6 +208,7 @@ async function settle(message: Message & { client: Client }, client: Client, fin
   }
 
   const lines: OutboundLineDraft[] = [];
+  const all = await catalog();
   for (const l of final.lines ?? []) {
     const item = (await db.item.findFirst({ where: { clientId: client.id, sku: l.sku } })) ?? (await findItem(client.id, l.sku));
     if (!item) continue;
@@ -212,7 +218,7 @@ async function settle(message: Message & { client: Client }, client: Client, fin
     const units = "units" in asked ? asked.units : asked.options[0];
     const stock = await checkStock(client.id, item.id);
     if (units > stock.units) steps.push({ kind: "ask", text: `${item.sku}: ${units} units asked, only ${stock.units} in stock` });
-    const line = checkModelUnits(buildLine(item, units, stock.units, "error" in asked ? asked.options : undefined), `${message.subject ?? ""}\n${message.body ?? ""}`, converted.get(item.sku) ?? []);
+    const line = checkModelUnits(buildLine(item, units, stock.units, "error" in asked ? asked.options : undefined), `${message.subject ?? ""}\n${message.body ?? ""}`, converted.get(item.sku) ?? [], all);
     if (line.unconfirmed) steps.push({ kind: "ask", text: `${item.sku}: ${units} units are not in the message or in convert_quantity → the office checks them` });
     lines.push(line);
   }
