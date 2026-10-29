@@ -4,6 +4,7 @@ import type { Channel } from "@prisma/client";
 import { getAlerts } from "@/lib/alerts";
 import { db } from "@/lib/db";
 import { fmtNumber, madridDayRange, madridHm } from "@/lib/format";
+import { splitUnits } from "@/lib/pallets/quantity";
 import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -34,7 +35,7 @@ export default async function OfficeToday() {
   await requireRole("office");
   const { start: startOfToday, end: endOfToday } = madridDayRange();
 
-  const [newMessages, latestMessages, trucksToday, nextShipments, stockTotals, stockByClient, clients, alerts] = await Promise.all([
+  const [newMessages, latestMessages, trucksToday, nextShipments, stockTotals, stockByClient, clients, alerts, stockRows, items] = await Promise.all([
     db.message.count({ where: { status: "NEW" } }),
     db.message.findMany({ where: { status: "NEW" }, orderBy: { receivedAt: "desc" }, take: 6, include: { client: true } }),
     db.dockAppointment.findMany({
@@ -56,6 +57,8 @@ export default async function OfficeToday() {
       console.error("Alerts failed", error);
       return [];
     }),
+    db.stock.findMany({ select: { clientId: true, itemId: true, units: true } }),
+    db.item.findMany({ select: { id: true, unitsPerPallet: true } }),
   ]);
   const urgent = alerts.filter((a) => a.level === "red");
 
@@ -63,6 +66,13 @@ export default async function OfficeToday() {
   const totalPallets = stockTotals._sum.pallets ?? 0;
   const maxClientPallets = Math.max(...stockByClient.map((s) => s._sum.pallets ?? 0), 1);
   const clientName = (id: string) => clients.find((c) => c.id === id)?.name ?? "";
+  // Whole pallets and loose ones (picos) apart, as on the customer cards: "33 plt + 1 pico", not "34 plt".
+  const perPallet = new Map(items.map((i) => [i.id, i.unitsPerPallet]));
+  const heldBy = (clientId: string) =>
+    stockRows.filter((r) => r.clientId === clientId).reduce((acc, r) => {
+      const split = splitUnits(r.units, perPallet.get(r.itemId) ?? 1);
+      return { full: acc.full + split.full, picos: acc.picos + (split.loose > 0 ? 1 : 0) };
+    }, { full: 0, picos: 0 });
   const today = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "Europe/Madrid" });
   const hour = Number(new Date().toLocaleString("en-GB", { hour: "2-digit", hour12: false, timeZone: "Europe/Madrid" }));
   const greeting = hour < 13 ? "Good morning" : hour < 20 ? "Good afternoon" : "Good evening";
@@ -194,11 +204,14 @@ export default async function OfficeToday() {
         <ul className="mt-4 grid gap-x-8 gap-y-3 md:grid-cols-2">
           {stockByClient.map((s) => {
             const pallets = s._sum.pallets ?? 0;
+            const held = heldBy(s.clientId);
             return (
               <li key={s.clientId}>
                 <div className="flex justify-between text-xs">
                   <span className="text-dock-ink/60">{clientName(s.clientId)}</span>
-                  <span className="mono">{fmtNumber(pallets)} plt</span>
+                  <span className="mono">
+                    {fmtNumber(held.full)} plt{held.picos > 0 && ` + ${held.picos} pico${held.picos === 1 ? "" : "s"}`}
+                  </span>
                 </div>
                 <div className="mt-1.5 h-2 overflow-hidden border border-dock-ink/20 bg-white">
                   <div className="h-full bg-dock-yellow" style={{ width: `${(pallets / maxClientPallets) * 100}%` }} />
