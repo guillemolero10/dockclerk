@@ -33,8 +33,9 @@ export function NoteStep({ token, askTyped }: { token: string; askTyped: boolean
             e.preventDefault();
             start(async () => {
               try {
-                await sendPallets(token, Number(pallets));
-                router.refresh();
+                const result = await sendPallets(token, Number(pallets));
+                setError(result.error ?? null);
+                if (!result.error) router.refresh();
               } catch (err) {
                 setError(err instanceof Error ? err.message : "Could not send it.");
               }

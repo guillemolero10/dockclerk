@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { transcribe } from "@/lib/ai/voice";
 import { db } from "@/lib/db";
+import { Fixable, orFixable } from "@/lib/fixable";
 import { checkIn, confirmReceipt, pickPallet, putAway, recordLoad, recordNote, suggestPutAway, typeNote, type ReceivedLine } from "@/lib/ops/floor";
 import { assertRole } from "@/lib/session";
 import { parseDataUrl, saveUpload } from "@/lib/uploads";
@@ -12,7 +13,7 @@ const requireFloor = () => assertRole("operator");
 
 /** A count typed on the PDA, checked here whatever the browser sends: a whole number, never negative or 2,5 pallets. */
 function wholeCount(n: unknown, min: number, max: number, what: string) {
-  if (typeof n !== "number" || !Number.isInteger(n) || n < min || n > max) throw new Error(`Type the number of ${what} (${min} to ${max}).`);
+  if (typeof n !== "number" || !Number.isInteger(n) || n < min || n > max) throw new Fixable(`Type the number of ${what} (${min} to ${max}).`);
   return n;
 }
 
@@ -38,8 +39,10 @@ export async function notePhoto(inboundId: string, photo: string) {
 
 export async function notePallets(inboundId: string, pallets: number, sku: string | null) {
   await requireFloor();
-  await typeNote(inboundId, wholeCount(pallets, 1, 66, "pallets"), sku, "operator");
-  refresh();
+  return orFixable(async () => {
+    await typeNote(inboundId, wholeCount(pallets, 1, 66, "pallets"), sku, "operator");
+    refresh();
+  });
 }
 
 export async function loadPhoto(inboundId: string, photo: string) {
@@ -53,15 +56,19 @@ export async function loadPhoto(inboundId: string, photo: string) {
 
 export async function receive(inboundId: string, lines: ReceivedLine[], damaged: number, incident: string) {
   await requireFloor();
+  return orFixable(() => receiveChecked(inboundId, lines, damaged, incident));
+}
+
+async function receiveChecked(inboundId: string, lines: ReceivedLine[], damaged: number, incident: string) {
   // A line left at 0 is an empty line; anything else must be a whole number of pallets.
   const clean = lines.filter((l) => l.itemId && l.pallets !== 0);
   for (const l of clean) wholeCount(l.pallets, 1, 66, "pallets");
-  if (!clean.length) throw new Error("Add at least one line with pallets.");
+  if (!clean.length) throw new Fixable("Add at least one line with pallets.");
   wholeCount(damaged, 0, 500, "damaged boxes");
   // Only this customer's items: the stock is booked to the customer of the delivery.
   const inbound = await db.inbound.findUniqueOrThrow({ where: { id: inboundId }, select: { clientId: true } });
   const items = await db.item.findMany({ where: { id: { in: clean.map((l) => l.itemId) }, clientId: inbound.clientId } });
-  if (clean.some((l) => !items.some((i) => i.id === l.itemId))) throw new Error("That item is not one of this customer's. Reload and pick it again.");
+  if (clean.some((l) => !items.some((i) => i.id === l.itemId))) throw new Fixable("That item is not one of this customer's. Reload and pick it again.");
   const withUnits = clean.map((l) => ({ ...l, lot: l.lot?.trim() || null, unitsPerPallet: items.find((i) => i.id === l.itemId)!.unitsPerPallet }));
   const receipt = await db.dockReceipt.findUnique({ where: { inboundId } });
   const found = (receipt?.damages as { box: number; note: string }[] | null) ?? [];

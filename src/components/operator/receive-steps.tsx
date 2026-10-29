@@ -31,6 +31,7 @@ export function NoteStepOperator({ inboundId, aiReady, items }: { inboundId: str
   const [pallets, setPallets] = useState("");
   const [sku, setSku] = useState(items[0]?.sku ?? "");
   const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
 
   return (
     <div className="space-y-2">
@@ -49,9 +50,16 @@ export function NoteStepOperator({ inboundId, aiReady, items }: { inboundId: str
           className="grid grid-cols-[1fr_88px_auto] gap-2"
           onSubmit={(e) => {
             e.preventDefault();
+            const n = Number(pallets);
+            if (!Number.isInteger(n) || n < 1 || n > 66) return setError("Type the number of pallets (1 to 66).");
             start(async () => {
-              await notePallets(inboundId, Number(pallets), sku || null);
-              router.refresh();
+              try {
+                const result = await notePallets(inboundId, n, sku || null);
+                setError(result.error ?? null);
+                if (!result.error) router.refresh();
+              } catch {
+                setError("Could not save it. Try again.");
+              }
             });
           }}
         >
@@ -68,6 +76,7 @@ export function NoteStepOperator({ inboundId, aiReady, items }: { inboundId: str
           </button>
         </form>
       )}
+      {error && <p className="text-sm text-dock-red">{error}</p>}
     </div>
   );
 }
@@ -185,13 +194,14 @@ export function ReceiveForm({
         onClick={() =>
           begin(async () => {
             try {
-              await receive(
+              const result = await receive(
                 inboundId,
                 lines.map((l) => ({ itemId: l.itemId, lot: l.lot || null, pallets: l.pallets, unitsPerPallet: 0 })),
                 damaged,
                 incident,
               );
-              router.refresh();
+              setError(result.error ?? null);
+              if (!result.error) router.refresh();
             } catch (err) {
               setError(err instanceof Error ? err.message : "Could not save it.");
             }

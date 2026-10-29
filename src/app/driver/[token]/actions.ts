@@ -33,9 +33,11 @@ export async function sendNotePhoto(token: string, photo: string) {
 
 export async function sendPallets(token: string, pallets: number) {
   const inbound = await inboundOf(token);
-  if (!Number.isInteger(pallets) || pallets < 1 || pallets > 66) throw new Error("Type the number of pallets.");
+  // Returned, not thrown: in production Next hides the message of a thrown error.
+  if (!Number.isInteger(pallets) || pallets < 1 || pallets > 66) return { error: "Type the number of pallets (1 to 66)." };
   await typeNote(inbound.id, pallets, null, "driver");
   refresh(token);
+  return {};
 }
 
 export async function arrive(token: string) {
