@@ -115,7 +115,7 @@ export async function discardDraft(formData: FormData) {
   revalidatePath("/office", "layout");
 }
 
-/** Demo helper: put the morning's messages back in the inbox, forget the drafts and what the portal sent meanwhile, to replay the morning. */
+/** Demo helper: put the morning's messages back in the inbox, forget the drafts and what the portal and the floor sent meanwhile, to replay the morning. */
 export async function resetInbox() {
   await requireOffice();
   const created = await db.draft.findMany({ where: { status: "APPROVED", kind: "CREATE_OUTBOUND" } });
@@ -142,8 +142,9 @@ export async function resetInbox() {
     }
     await tx.outbound.deleteMany({ where: { id: { in: outboundIds } } });
     await tx.draft.deleteMany();
-    // What customers asked in the portal during the demo is not part of the morning.
-    await tx.message.deleteMany({ where: { channel: "PORTAL", fromAddress: PORTAL_LIVE_ADDRESS } });
+    // What customers asked in the portal and the voice notes recorded on the floor during the demo are not part of the morning
+    // (the seed has no floor notes).
+    await tx.message.deleteMany({ where: { OR: [{ channel: "PORTAL", fromAddress: PORTAL_LIVE_ADDRESS }, { channel: "FLOOR" }] } });
     await tx.message.updateMany({ data: { status: "NEW" } });
   }, longTransaction);
   revalidatePath("/office", "layout");
