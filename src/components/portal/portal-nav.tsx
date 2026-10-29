@@ -13,7 +13,7 @@ const NAV = [
 export function PortalNav() {
   const pathname = usePathname();
   return (
-    <nav className="flex gap-1">
+    <nav className="flex min-w-0 flex-wrap gap-1">
       {NAV.map((n) => {
         const active = n.exact ? pathname === n.href : pathname.startsWith(n.href);
         return (

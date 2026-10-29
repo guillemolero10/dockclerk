@@ -57,7 +57,7 @@ export function AskClerk({ examples }: { examples: string[] }) {
                 </p>
                 <details className="dock-console px-3 py-1.5">
                   <summary className="cond cursor-pointer text-[10px] text-white/50">How the clerk got here</summary>
-                  <div className="mono mt-1 space-y-0.5 text-[11px]">
+                  <div className="mono mt-1 space-y-0.5 break-words text-[11px]">
                     {t.result.steps.map((s, j) => (
                       <div key={j} className={s.kind === "ok" ? "ok" : s.kind === "ask" ? "ask" : s.kind === "tool" ? "tool" : "text-white/50"}>
                         → {s.text}

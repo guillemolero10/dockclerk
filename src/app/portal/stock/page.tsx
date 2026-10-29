@@ -48,7 +48,7 @@ export default async function PortalStock() {
                         <td className="mono px-5 py-1.5">{l.lot ? `lot ${l.lot}` : "no lot"}</td>
                         <td className="text-dock-ink/60">{warehouses.find((w) => w.id === l.warehouseId)?.name}</td>
                         <td className="mono text-dock-ink/60">{l.expiresAt ? `expires ${fmtDate(l.expiresAt)}` : ""}</td>
-                        <td className="mono px-5 text-right">{l._sum.pallets} plt</td>
+                        <td className="mono whitespace-nowrap px-5 text-right">{l._sum.pallets} plt</td>
                       </tr>
                     ))}
                   </tbody>

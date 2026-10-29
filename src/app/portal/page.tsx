@@ -54,7 +54,7 @@ export default async function PortalHome() {
         </Link>
       </header>
 
-      <section className="grid gap-4 sm:grid-cols-3">
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div className="dock-card bg-white p-5">
           <p className="cond text-[11px] text-dock-ink/50">Pallets in storage</p>
           <p className="mono mt-1 text-4xl font-semibold">{total}</p>
@@ -74,8 +74,8 @@ export default async function PortalHome() {
         </div>
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-2">
-        <div>
+      <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="min-w-0">
           <h2 className="cond mb-2 text-sm">On its way out</h2>
           <ul className="dock-card divide-y divide-dock-line bg-white">
             {open.length === 0 && <li className="px-4 py-3 text-sm text-dock-ink/50">No outbounds in progress.</li>}
@@ -107,7 +107,7 @@ export default async function PortalHome() {
           </ul>
         </div>
 
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           {expiring.length > 0 && (
             <div>
               <h2 className="cond mb-2 text-sm">Expiring soon</h2>
