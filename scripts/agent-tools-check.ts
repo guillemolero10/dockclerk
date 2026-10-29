@@ -15,6 +15,7 @@ import { billPeriod, type TariffInput } from "../src/lib/billing/compute";
 import { dayOfYmd, period } from "../src/lib/billing/calendar";
 import type { Stay } from "../src/lib/billing/stays";
 import { clients as seedClients } from "../prisma/seed-data";
+import { stepsForCustomer } from "../src/lib/agent/public-steps";
 import { mentionsCompany, norm, tradeName } from "../src/lib/agent/words";
 
 type Case = { name: string; check: () => string | null | undefined | Promise<string | null> };
@@ -438,6 +439,17 @@ const CASES: Case[] = [
       (await draftMessage(asMessage("Reclamamos el almacenaje de octubre")))[0].kind,
     ];
     return same(kinds, ["NEEDS_HUMAN", "NEEDS_HUMAN"]);
+  } },
+  { name: "P1 el cliente del portal no ve la línea de coste del modelo ni el tope diario, y sí el resto del registro", check: () => {
+    const log = [
+      { kind: "read" as const, text: "read message from Juguetes Levante (PORTAL)" },
+      { kind: "tool" as const, text: "brain → Muse Spark Open (meta-models/muse-spark-open-1026)" },
+      { kind: "tool" as const, text: "check_stock(PELUCHE-30) → 33 palés + 12 cajas" },
+      { kind: "tool" as const, text: "bill_so_far(septiembre) → 675,66 € de base" },
+      { kind: "ask" as const, text: "daily AI limit reached ($3.00 of $3.00) → rules engine (plan B)" },
+      { kind: "tool" as const, text: "Muse Spark Open · 2 calls · 2,114 tokens · ≈ $0.004 · 4.2s" },
+    ];
+    return same(stepsForCustomer(log).map((s) => s.text), ["read message from Juguetes Levante (PORTAL)", "brain → Muse Spark Open (meta-models/muse-spark-open-1026)", "check_stock(PELUCHE-30) → 33 palés + 12 cajas", "bill_so_far(septiembre) → 675,66 € de base"]);
   } },
 ];
 

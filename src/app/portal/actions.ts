@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { Message } from "@prisma/client";
 import { runClerk } from "@/lib/agent";
+import { stepsForCustomer } from "@/lib/agent/public-steps";
 import type { OutboundPayload, Step } from "@/lib/agent/types";
 import { db } from "@/lib/db";
 import { describeUnits } from "@/lib/pallets/quantity";
@@ -31,8 +32,10 @@ export async function askClerk(question: string): Promise<AskResult> {
     audioUrl: null, attachmentUrl: null, receivedAt: new Date(), status: "NEW", client,
   };
   const [draft] = await runClerk(preview);
+  // The log goes to the browser: take the cost line out here, on the server, not just out of the screen.
+  const steps = stepsForCustomer(draft.steps);
 
-  if (draft.kind === "REPLY_ONLY") return { kind: "answer", text: draft.reply, steps: draft.steps };
+  if (draft.kind === "REPLY_ONLY") return { kind: "answer", text: draft.reply, steps };
 
   await db.message.create({ data: { channel: "PORTAL", clientId: client.id, fromName, body } });
   revalidatePath("/office", "layout");
@@ -47,8 +50,8 @@ export async function askClerk(question: string): Promise<AskResult> {
     return {
       kind: "forwarded",
       text: `Recibido. He preparado tu pedido para la oficina: ${what} para ${where}${when}.${stockNote} Te confirmamos aquí en cuanto lo aprueben.`,
-      steps: draft.steps,
+      steps,
     };
   }
-  return { kind: "forwarded", text: "Recibido. Se lo he pasado a la oficina y te contestarán por aquí lo antes posible.", steps: draft.steps };
+  return { kind: "forwarded", text: "Recibido. Se lo he pasado a la oficina y te contestarán por aquí lo antes posible.", steps };
 }
