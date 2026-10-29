@@ -10,7 +10,7 @@ import { billSoFar, explainCharge } from "./bill-tools";
 import { checkStock, findConsignees, findItem, inboundsThisMonth, lastShipmentTo, norm } from "./tools";
 import { describeUnits, scanQuantities, toUnits, unitWordFor } from "@/lib/pallets/quantity";
 import { buildLine, withUnits } from "./lines";
-import { tradeName } from "./words";
+import { mentionsCompany } from "./words";
 import { convertLog, convertQuantity } from "./convert";
 import type { Doubt, DraftSeed, OutboundLineDraft, OutboundPayload, Step } from "./types";
 
@@ -128,7 +128,7 @@ export async function draftMessage(message: Message & { client: Client | null })
   if (intent) {
     // Only ever the sender's own bill: a question that names another customer goes to a person.
     const others = await db.client.findMany({ where: { id: { not: client.id } }, select: { name: true } });
-    if (others.some((o) => t.includes(tradeName(o.name)))) {
+    if (others.some((o) => mentionsCompany(t, o.name))) {
       steps.push({ kind: "tool", text: "classify → billing question about another customer" });
       return [human("asks about another customer's bill, a person must answer", steps)];
     }

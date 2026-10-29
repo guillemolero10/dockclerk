@@ -13,6 +13,12 @@ export function tradeName(name: string) {
     .trim();
 }
 
+/** Whether a text names this company. Names that are too short once the legal form is gone ("S.L.", "Ca Sa") never match. */
+export function mentionsCompany(text: string, name: string) {
+  const trade = tradeName(name);
+  return trade.length >= 4 && norm(text).includes(trade);
+}
+
 const GENERIC = new Set(["caja", "cajas", "pack", "saco", "uds", "unidades", "granza", "surtida", "surtidos", "juego", "con"]);
 
 /** The words that name an item: its SKU parts and its description without what is in brackets. */
