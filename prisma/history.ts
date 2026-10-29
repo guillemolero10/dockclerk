@@ -18,8 +18,10 @@
 // - delivery notes from the toy maker's Ibi warehouse often do not match the pallets on the truck;
 // - Rutas del Vinalopó delivers more damaged pallets than the other carriers;
 // - Polímeros Serra Mariola keeps a lot of slow stock (much space, little movement).
-// Planted for the pallet and billing demo (plantPalletCases, no random numbers so nothing else moves):
-// - 23 pallets of puzzles came in on the 20th of last month and 2 left on the 2nd of this one;
+// Planted for the pallet and billing demo (plantPalletCases; they use no random numbers and exist on every date):
+// - 23 pallets of puzzles came in on the 20th of last month and 2 left on the 2nd of this one. This delivery is
+//   *added* on top of the simulated history (the 21 pallets still in the building are held back from PUZZLE-500's
+//   target, see PLANTED_STOCK), so it never depends on what the random history happens to contain;
 // - one loose pallet of 12 boxes of PELUCHE-30 (a 28-box order took the rest of its pallet).
 
 import { firstFree, slotMinutes, type Busy } from "../src/lib/dock/slots";
@@ -75,6 +77,15 @@ export const TODAY_STOCK: Record<string, number> = {
   "TURRON-DUR": 18, "TURRON-BLA": 40, POLVORON: 42, MAZAPAN: 36,
 };
 
+/** The billing case: this many pallets came in on the 20th of last month and `leaving` of them go out on the 2nd of this one. */
+export const PUZZLE_CASE = { sku: "PUZZLE-500", clientCode: "C001", pallets: 23, leaving: 2, key: "in-case-puzzle" } as const;
+
+/**
+ * Pallets of today's stock that are not simulated: plantPalletCases adds them as a delivery of their own,
+ * so the simulated part of that item targets TODAY_STOCK minus this and the total stays what the table above says.
+ */
+export const PLANTED_STOCK: Record<string, number> = { [PUZZLE_CASE.sku]: PUZZLE_CASE.pallets - PUZZLE_CASE.leaving };
+
 /** Where each customer's goods usually go. */
 export const DESTINATIONS: Record<string, string[]> = {
   C001: ["D0412", "D0413", "D0950", "D0520"],
@@ -109,6 +120,8 @@ const WEEKDAY = [0, 1.3, 1.1, 1.0, 1.0, 0.8, 0.15]; // Sunday … Saturday
 
 export type HistoryInput = {
   today: Date; // local midnight
+  /** The clock, in ms: nothing "shipped" is dated after it. Defaults to the real time (tests pass a simulated one). */
+  now?: number;
   rand: () => number;
   items: { sku: string; clientCode: string; lotIndex: number; tracksLot: boolean; warehouse: string; docks: { n: number; kind: "in" | "out" }[] }[];
   carriers: number;
@@ -172,7 +185,7 @@ function seasonFactor(season: Season, date: Date) {
   }
 }
 
-export function simulateHistory({ today, rand, items, carriers }: HistoryInput) {
+export function simulateHistory({ today, now = Date.now(), rand, items, carriers }: HistoryInput) {
   const between = (min: number, max: number) => min + Math.floor(rand() * (max - min + 1));
   const pick = <T,>(list: T[]) => list[Math.floor(rand() * list.length)];
   const normal = () => Math.sqrt(-2 * Math.log(1 - rand())) * Math.cos(2 * Math.PI * rand());
@@ -208,8 +221,8 @@ export function simulateHistory({ today, rand, items, carriers }: HistoryInput) 
 
     // 2. Deliveries, backwards from today's stock.
     const deliveries = new Map<number, number>();
-    let level = TODAY_STOCK[item.sku];
-    const target = TODAY_STOCK[item.sku];
+    const target = TODAY_STOCK[item.sku] - (PLANTED_STOCK[item.sku] ?? 0);
+    let level = target;
     for (let day = 0; day >= first; day--) {
       const shipped = (out.get(day) ?? []).reduce((s, q) => s + q, 0);
       const start = level + shipped; // stock this morning if no truck came
@@ -301,7 +314,7 @@ export function simulateHistory({ today, rand, items, carriers }: HistoryInput) 
           day,
           date,
           deadline,
-          shippedAt: new Date(Math.min(deadline.getTime(), Date.now())),
+          shippedAt: new Date(Math.min(deadline.getTime(), now)),
           sku: item.sku,
           clientCode: item.clientCode,
           warehouse: item.warehouse,
@@ -359,55 +372,54 @@ export function simulateHistory({ today, rand, items, carriers }: HistoryInput) 
     }
   }
 
-  const extraOutbounds = plantPalletCases({ today, inbounds, slots, remaining });
+  const extraOutbounds = plantPalletCases({ today, now, items, inbounds, slots, remaining });
   return { inbounds, outbounds, extraOutbounds, slots, remaining };
 }
 
 /**
  * Two cases for the pallet and billing demo, planted on top of the finished history.
- * They only re-label what is already there and use no random numbers, so every other figure stays as it was.
+ * They use no random numbers and need nothing from the history, so they exist on every date and
+ * every other figure stays as it was.
  */
 function plantPalletCases({
-  today, inbounds, slots, remaining,
-}: { today: Date; inbounds: HistInbound[]; slots: HistSlot[]; remaining: Remaining[] }): HistOutbound[] {
+  today, now, items, inbounds, slots, remaining,
+}: { today: Date; now: number; items: HistoryInput["items"]; inbounds: HistInbound[]; slots: HistSlot[]; remaining: Remaining[] }): HistOutbound[] {
   const extra: HistOutbound[] = [];
   const dayNumber = (date: Date) => Math.round((new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime() - today.getTime()) / DAY);
   const outbound = (key: string, date: Date, sku: string, pallets: number, units: number | undefined, shipped: ShippedPallet[]): HistOutbound => {
     const from = inbounds.find((i) => i.key === shipped[0].inboundKey)!;
     return {
-      key, day: dayNumber(date), date, deadline: new Date(date.getTime() + 11 * 60 * MIN), shippedAt: new Date(Math.min(date.getTime() + 10 * 60 * MIN, Date.now())),
+      key, day: dayNumber(date), date, deadline: new Date(date.getTime() + 11 * 60 * MIN), shippedAt: new Date(Math.min(date.getTime() + 10 * 60 * MIN, now)),
       sku, clientCode: from.clientCode, warehouse: from.warehouse, pallets, units, consignee: DESTINATIONS[from.clientCode][0], carrier: 0, shipped,
     };
   };
 
   // 23 pallets in on the 20th of last month; 2 of them leave on the 2nd of this month (or today, if it is the 1st).
-  const lot = inbounds
-    .filter((i) => i.sku === "PUZZLE-500" && i.pallets === 23)
-    .sort((a, b) => b.date.getTime() - a.date.getTime())
-    .find((i) => remaining.some((r) => r.inboundKey === i.key && r.pallets === 23));
-  if (!lot) throw new Error("History has no 23-pallet delivery of PUZZLE-500 to plant the billing case on");
-  const old = lot.date;
-  const arrived = new Date(today.getFullYear(), today.getMonth() - 1, 20, old.getHours(), old.getMinutes());
-  const shift = arrived.getTime() - old.getTime();
-  lot.date = arrived;
-  lot.day = dayNumber(arrived);
-  const row = remaining.find((r) => r.inboundKey === lot.key)!;
-  row.received = arrived;
-  row.pallets = 21;
-  // Its dock slot moves with it, unless that would overlap another truck at the same door.
-  const slot = slots.find((s) => s.inbound === lot.key);
-  if (slot) {
-    const start = new Date(slot.start.getTime() + shift);
-    const end = new Date(slot.end.getTime() + shift);
-    const clash = slots.some((s) => s !== slot && s.warehouse === slot.warehouse && s.dock === slot.dock && s.start < end && start < s.end);
-    if (clash) slots.splice(slots.indexOf(slot), 1);
-    else Object.assign(slot, { start, end, arrivedAt: new Date(slot.arrivedAt.getTime() + shift) });
+  const puzzle = items.find((i) => i.sku === PUZZLE_CASE.sku && i.clientCode === PUZZLE_CASE.clientCode);
+  if (!puzzle) throw new Error(`The items have no ${PUZZLE_CASE.sku} of ${PUZZLE_CASE.clientCode} to plant the billing case on`);
+  const arrived = new Date(today.getFullYear(), today.getMonth() - 1, 20, 9, 30);
+  const delivery: HistInbound = {
+    key: PUZZLE_CASE.key, day: dayNumber(arrived), date: arrived, sku: PUZZLE_CASE.sku, clientCode: PUZZLE_CASE.clientCode, warehouse: puzzle.warehouse, lot: null,
+    expected: PUZZLE_CASE.pallets, pallets: PUZZLE_CASE.pallets, carrier: 0, supplier: PLANTS[PUZZLE_CASE.clientCode][0], incident: null,
+  };
+  inbounds.push(delivery);
+  // Its row of stock goes next to the other puzzles, so the customer keeps its stretch of racking.
+  const row: Remaining = { sku: PUZZLE_CASE.sku, clientCode: PUZZLE_CASE.clientCode, inboundKey: delivery.key, lot: null, pallets: PUZZLE_CASE.pallets - PUZZLE_CASE.leaving, received: arrived };
+  const same = remaining.map((r, i) => ({ r, i })).filter(({ r }) => r.sku === PUZZLE_CASE.sku);
+  const after = same.filter(({ r }) => r.received.getTime() <= arrived.getTime()).pop();
+  remaining.splice(after ? after.i + 1 : same.length ? same[0].i : remaining.length, 0, row);
+  // A door for the truck, if one is free at that hour (otherwise it "came without a booking", as happens).
+  const dayStart = new Date(arrived.getFullYear(), arrived.getMonth(), arrived.getDate()).getTime();
+  const busy: Busy[] = slots
+    .filter((s) => s.warehouse === puzzle.warehouse && s.start.getTime() >= dayStart && s.start.getTime() < dayStart + DAY)
+    .map((s) => ({ dock: s.dock, start: s.start.getTime(), end: s.end.getTime() }));
+  const door = firstFree(busy, puzzle.docks.filter((d) => d.kind === "in").map((d) => d.n), dayStart, arrived.getTime(), slotMinutes("in", PUZZLE_CASE.pallets));
+  if (door) {
+    slots.push({ warehouse: puzzle.warehouse, dock: door.dock, start: new Date(door.start), end: new Date(door.end), arrivedAt: new Date(door.start + 3 * MIN), carrier: 0, inbound: delivery.key });
   }
   const leaves = new Date(today.getFullYear(), today.getMonth(), Math.min(2, today.getDate()));
-  extra.push(outbound("out-case-puzzle", leaves, "PUZZLE-500", 2, undefined, [
-    { sku: "PUZZLE-500", lot: null, inboundKey: lot.key },
-    { sku: "PUZZLE-500", lot: null, inboundKey: lot.key },
-  ]));
+  extra.push(outbound("out-case-puzzle", leaves, PUZZLE_CASE.sku, PUZZLE_CASE.leaving, undefined,
+    Array.from({ length: PUZZLE_CASE.leaving }, () => ({ sku: PUZZLE_CASE.sku, lot: null, inboundKey: delivery.key }))));
 
   // One loose pallet: a 28-box order took part of a pallet of the newest PELUCHE-30 delivery, 12 boxes stay on the rack.
   const toys = remaining.filter((r) => r.sku === "PELUCHE-30" && r.pallets > 0).sort((a, b) => b.received.getTime() - a.received.getTime())[0];
