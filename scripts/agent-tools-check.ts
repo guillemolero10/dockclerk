@@ -315,6 +315,14 @@ const CASES: Case[] = [
       ask("C001", "PELUCHE-30", "Mandad PELUCHE-30: 120 cajas a SuperBahía Alicante", 120),
     ], [1, 0, 1, 0, 0]);
   } },
+  { name: "U8c «plt», «(palés)» y «lts» detrás del número del SKU tampoco son cajas: «HORCH-1L: 2 plt» y «HORCH-1L: 2 (palés)» son 200 (2 → duda), «HORCH-1L x 2 lts» no da 2 cajas", check: () => {
+    const ask = (body: string, units: number) => orderFromModel("C004", body, [{ sku: "HORCH-1L", units }]).fields.length;
+    return same([
+      ask("Mandad HORCH-1L: 2 plt a SuperBahía Alicante", 2), ask("Mandad HORCH-1L: 2 plt a SuperBahía Alicante", 200),
+      ask("Mandad HORCH-1L: 2 (palés) a SuperBahía Alicante", 2), ask("Mandad HORCH-1L: 2 (palés) a SuperBahía Alicante", 200),
+      ask("Mandad HORCH-1L x 2 lts a SuperBahía Alicante", 2),
+    ], [1, 0, 1, 0, 1]);
+  } },
   { name: "U9 con dos productos en el mensaje, cada línea ofrece SU cantidad («3 palés de horchata y 40 cajas de agua»: horchata dice 300)", check: () => {
     const d = orderFromModel("C004", "Mandad 3 palés de horchata y 40 cajas de agua a SuperBahía Alicante", [{ sku: "HORCH-1L", units: 77 }, { sku: "AGUA-15", units: 40 }]);
     return same({ fields: d.fields, says: d.values["units:HORCH-1L"] }, { fields: ["units:HORCH-1L"], says: ["300", "77"] });

@@ -51,7 +51,7 @@ const EN_NUMBERS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, 
 
 /**
  * Words the quantity reader does not know, said the way it does (plain text in, plain text out): "treinta y cinco" is 35,
- * "europalets" are palets, and an English order ("two pallets of PELUCHE-30", "2 and a half pallets") reads like the Spanish one.
+ * "europalets" and "plt" are palets, "2 (palés)" is "2 palés", and an English order ("two pallets of PELUCHE-30", "2 and a half pallets") reads like the Spanish one.
  * Only the guard needs this: it must not call a quantity "invented" just because it is written differently.
  */
 function sameWords(t: string) {
@@ -64,6 +64,8 @@ function sameWords(t: string) {
     .replace(new RegExp(`\\b(${tens})\\b`, "g"), (d) => String(TENS[d]))
     .replace(/\bcien\b/g, "100")
     .replace(/\beuro-?(?=pal)/g, "")
+    .replace(/\bplts?\b/g, "palets")
+    .replace(/(\d) ?\((pal\w*|cajas?|sacos?|bultos?|unidades|uds?)\)/g, "$1 $2")
     .replace(new RegExp(`\\b(${en})\\b(?= (?:and a half )?(?:pallets?|boxes|box|cases?|bags?|units?)\\b)`, "g"), (w) => String(EN_NUMBERS[w]))
     .replace(/(\d+(?:[.,]\d+)?) and a half (pallets?)\b/g, "$1 $2 y medio")
     .replace(/\bhalf a (?=pallet\b)/g, "medio ")
@@ -120,12 +122,12 @@ function ownedQuantities(t: string, catalog: ItemRef[]) {
 
 /**
  * "120 PELUCHE-30", "120 x PELUCHE-30", "PELUCHE-30: 120", "PELUCHE-30 x 120": a bare number tied to the item's own code is units of it.
- * Not when a unit follows it ("HORCH-1L: 2 palés" is 2 pallets, which the normal reading already takes).
+ * Not when a unit follows it ("HORCH-1L: 2 palés", "2 plt", "2 (palés)" are 2 pallets, which the normal reading already takes; "2 lts" is litres).
  */
 function bareUnits(t: string, sku: string): Quantity[] {
   const code = norm(sku).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const whole = "(\\d{1,3}(?:\\.\\d{3})+|\\d+)(?!\\d|[.,]\\d)";
-  const unitAfter = "(?!\\s*(?:pal|europal|caj|box|saco|bag|unid|uds|bult|kg|ml|litro|cm)|\\s*l\\b)";
+  const unitAfter = "(?!\\s*\\(?\\s*(?:pal|europal|plt|caj|box|saco|bag|unid|uds|bult|kg|ml|lt|litro|cm)|\\s*\\(?\\s*l\\b)";
   const before = new RegExp(`(?<![a-z0-9,.-])${whole}\\s*(?:x\\s*)?${code}(?![a-z0-9])`, "g");
   const after = new RegExp(`(?<![a-z0-9])${code}\\s*(?:[:=×]|x\\b)\\s*${whole}${unitAfter}`, "g");
   return [...t.matchAll(before), ...t.matchAll(after)].map((m) => ({ amount: Number(m[1].replace(/\./g, "")), unit: "units" as const }));
