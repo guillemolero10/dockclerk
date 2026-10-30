@@ -98,11 +98,13 @@ export default async function ReceivePage({ params }: PageProps<"/operator/recei
                 {boxes.some((b) => b.damaged) && <span className="text-dock-red"> · {boxes.filter((b) => b.damaged).length} damaged</span>}
               </p>
             )}
-            <LoadStep inboundId={inbound.id} aiReady={!!(ai.segment || ai.vision)} again={!!r?.palletImageUrl} />
+            <LoadStep inboundId={inbound.id} aiReady={!!(ai.segment || ai.vision)} counter={ai.segment ? "SAM 3.1" : "Muse Spark"} again={!!r?.palletImageUrl} />
           </Step>
 
           <Step n={3} title="What came off the truck" done={false}>
             <ReceiveForm
+              // starts again from what the photos just read (its lines live in useState)
+              key={JSON.stringify([start, r?.notePallets, boxes?.length, boxes?.filter((b) => b.damaged).length])}
               inboundId={inbound.id}
               items={inbound.client.items.map((i) => ({ id: i.id, sku: i.sku, description: i.description, unitsPerPallet: i.unitsPerPallet, tracksLot: i.tracksLot }))}
               start={start.length ? start : [{ itemId: inbound.client.items[0]?.id ?? "", lot: "", pallets: r?.notePallets ?? 1 }]}

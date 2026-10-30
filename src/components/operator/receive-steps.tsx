@@ -44,7 +44,7 @@ export function NoteStepOperator({ inboundId, aiReady, items }: { inboundId: str
           router.refresh();
         }}
       />
-      {!aiReady && <p className="text-xs text-dock-ink/50">Reading needs the Meta key; the photo is kept and you type the pallets.</p>}
+      {!aiReady && <p className="text-xs text-dock-ink/50">Reading needs an AI key; the photo is kept and you type the pallets.</p>}
       {typing && (
         <form
           className="grid grid-cols-[1fr_88px_auto] gap-2"
@@ -81,22 +81,22 @@ export function NoteStepOperator({ inboundId, aiReady, items }: { inboundId: str
   );
 }
 
-export function LoadStep({ inboundId, aiReady, again }: { inboundId: string; aiReady: boolean; again: boolean }) {
+export function LoadStep({ inboundId, aiReady, counter, again }: { inboundId: string; aiReady: boolean; counter: string; again: boolean }) {
   const router = useRouter();
   const [note, setNote] = useState<string | null>(null);
   return (
     <div className="space-y-1.5">
       <PhotoButton
         label={again ? "Take it again" : "Photo of the load"}
-        busyLabel="SAM 3.1 is counting…"
+        busyLabel={`${counter} is counting…`}
         className={again ? "border-[1.5px] border-dock-ink bg-white text-dock-ink" : ""}
         onPhoto={async (photo) => {
           const result = await loadPhoto(inboundId, photo);
-          setNote(result ? null : "Photo kept for the receipt. Counting needs the Meta key: count below.");
+          setNote(result ? null : aiReady ? "Photo kept for the receipt. The count did not come back this time: count below." : "Photo kept for the receipt. Count below.");
           router.refresh();
         }}
       />
-      {!aiReady && !note && <p className="text-xs text-dock-ink/50">Counting boxes needs the Meta key; the photo still goes on the receipt.</p>}
+      {!aiReady && !note && <p className="text-xs text-dock-ink/50">Counting boxes needs an AI key; the photo still goes on the receipt.</p>}
       {note && <p className="text-xs text-dock-ink/60">{note}</p>}
     </div>
   );
