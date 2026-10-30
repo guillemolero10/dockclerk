@@ -3,6 +3,7 @@
 // then asks a person to type or count, so receiving never stops.
 
 import { chat, dataUrl, parseJson, providers } from "./client";
+import { readingOrder } from "./reading-order";
 
 type Image = { mime: string; base64: string };
 
@@ -69,7 +70,8 @@ export async function countLoad(image: Image): Promise<LoadCount | null> {
       if (!res.ok) throw new Error(`SAM 3.1 answered ${res.status}`);
       const data = (await res.json()) as { detections?: { label: string; box: [number, number, number, number]; score: number }[] };
       const found = (data.detections ?? []).filter((d) => d.score >= 0.5);
-      const boxes = found.filter((d) => d.label.includes("box")).map((d) => ({ x: d.box[0], y: d.box[1], w: d.box[2], h: d.box[3], damaged: false }));
+      // SAM gives them by score; spotDamage and the receipt number them in reading order.
+      const boxes = readingOrder(found.filter((d) => d.label.includes("box")).map((d) => ({ x: d.box[0], y: d.box[1], w: d.box[2], h: d.box[3], damaged: false })));
       const pallets = found.filter((d) => d.label.includes("pallet")).length || null;
       const damaged = await spotDamage(image, boxes.length);
       damaged.forEach((i) => boxes[i] && (boxes[i].damaged = true));

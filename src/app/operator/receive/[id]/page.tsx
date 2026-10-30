@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 120; // load photo: SAM (cold start up to 60 s) + Muse Spark damage check
 
 type NoteLine = { sku: string | null; description: string; lot: string | null; pallets: number | null; units: number | null };
 type Box = { x: number; y: number; w: number; h: number; damaged: boolean };

@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { madridHm, madridYmd } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 type NoteLine = { sku: string | null; description: string; lot: string | null; pallets: number | null; units: number | null };
 

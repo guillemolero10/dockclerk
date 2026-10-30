@@ -59,6 +59,7 @@ step "pallets-check"       npx tsx scripts/pallets-check.ts
 step "billing-check"       npx tsx scripts/billing-check.ts
 step "agent-tools-check"   npx tsx scripts/agent-tools-check.ts
 step "billing-view-check"  npx tsx scripts/billing-view-check.ts
+step "vision-check"        npx tsx scripts/vision-check.ts
 # the seed must work on any day: 45 days back and 60 ahead, three clock times each (only failing dates are printed)
 step "seed-days-check"     env TZ=Europe/Madrid npx tsx scripts/seed-days-check.ts --quiet
 
