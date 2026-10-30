@@ -18,7 +18,7 @@ export default async function ReceivePage({ params }: PageProps<"/operator/recei
   const { id } = await params;
   const inbound = await db.inbound.findUnique({
     where: { id },
-    include: { client: { include: { items: { orderBy: { sku: "asc" } } } }, warehouse: true, appointment: true, receipt: true, lines: true },
+    include: { client: { include: { items: { orderBy: { sku: "asc" } } } }, warehouse: true, appointment: true, receipt: true, lines: { orderBy: { id: "asc" } } },
   });
   if (!inbound) return <p className="p-6">Not found.</p>;
   const r = inbound.receipt;
@@ -94,7 +94,7 @@ export default async function ReceivePage({ params }: PageProps<"/operator/recei
             {r?.palletImageUrl && <LoadPhoto src={r.palletImageUrl} boxes={boxes} />}
             {r?.countedBy && boxes && (
               <p className="cond mt-2 flex items-center gap-1.5 text-xs">
-                <Bot size={13} /> {r.countedBy === "sam-3.1" ? "SAM 3.1" : "Muse Spark"} found {boxes.length} boxes
+                <Bot size={13} /> {r.countedBy === "sam-3.1" ? "SAM 3.1" : r.countedBy === "sam-3" ? "SAM 3" : "Muse Spark"} found {boxes.length} boxes
                 {boxes.some((b) => b.damaged) && <span className="text-dock-red"> · {boxes.filter((b) => b.damaged).length} damaged</span>}
               </p>
             )}

@@ -7,7 +7,7 @@ import { fmtDate, madridHm } from "@/lib/format";
 
 type Box = { x: number; y: number; w: number; h: number; damaged: boolean };
 
-const BY: Record<string, string> = { "muse-spark": "Muse Spark", "sam-3.1": "SAM 3.1", driver: "the driver", operator: "the operator" };
+const BY: Record<string, string> = { "muse-spark": "Muse Spark", "sam-3.1": "SAM 3.1", "sam-3": "SAM 3", driver: "the driver", operator: "the operator" };
 
 /** The dock receipt (acta de descarga): what the note said, what was counted, photos and signature. */
 export async function ReceiptSheet({ inboundId, driverToken }: { inboundId: string; driverToken?: string }) {

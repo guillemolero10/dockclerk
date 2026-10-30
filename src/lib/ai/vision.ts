@@ -38,7 +38,7 @@ export async function readDeliveryNote(image: Image, context: { customer: string
           ],
         },
       ],
-      { json: true },
+      { json: true, timeoutMs: 45_000 },
     );
     const reading = parseJson<NoteReading>(message.content);
     const known = new Set(context.items.map((i) => i.sku));
@@ -53,7 +53,7 @@ export type LoadCount = {
   /** Boxes found, in 0..1 image coordinates, for the numbered overlay. */
   boxes: { x: number; y: number; w: number; h: number; damaged: boolean }[];
   pallets: number | null;
-  by: "sam-3.1" | "muse-spark";
+  by: "sam-3.1" | "sam-3" | "muse-spark";
 };
 
 /** SAM 3.1 segments every "cardboard box"; Muse Spark then says which look damaged. Falls back to Muse Spark alone. */
@@ -65,17 +65,17 @@ export async function countLoad(image: Image): Promise<LoadCount | null> {
         method: "POST",
         headers: { Authorization: `Bearer ${sam.apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ model: sam.model, image: dataUrl(image), prompts: ["cardboard box", "pallet"] }),
-        signal: AbortSignal.timeout(60_000),
+        signal: AbortSignal.timeout(40_000), // + damage check and fallback must fit in the page's 120 s
       });
       if (!res.ok) throw new Error(`SAM 3.1 answered ${res.status}`);
-      const data = (await res.json()) as { detections?: { label: string; box: [number, number, number, number]; score: number }[] };
+      const data = (await res.json()) as { detections?: { label: string; box: [number, number, number, number]; score: number }[]; model?: string };
       const found = (data.detections ?? []).filter((d) => d.score >= 0.5);
       // SAM gives them by score; spotDamage and the receipt number them in reading order.
       const boxes = readingOrder(found.filter((d) => d.label.includes("box")).map((d) => ({ x: d.box[0], y: d.box[1], w: d.box[2], h: d.box[3], damaged: false })));
       const pallets = found.filter((d) => d.label.includes("pallet")).length || null;
       const damaged = await spotDamage(image, boxes.length);
       damaged.forEach((i) => boxes[i] && (boxes[i].damaged = true));
-      return { boxes, pallets, by: "sam-3.1" };
+      return { boxes, pallets, by: data.model === "sam3" ? "sam-3" : "sam-3.1" }; // the service falls back to SAM 3 and says so
     } catch (error) {
       console.error("countLoad SAM", error);
     }
@@ -96,7 +96,7 @@ export async function countLoad(image: Image): Promise<LoadCount | null> {
         },
         { role: "user", content: [{ type: "image_url", image_url: { url: dataUrl(image) } }] },
       ],
-      { json: true, maxTokens: 3000 },
+      { json: true, maxTokens: 3000, timeoutMs: 45_000 },
     );
     const result = parseJson<{ pallets: number | null; boxes: LoadCount["boxes"] }>(message.content);
     return { boxes: result.boxes ?? [], pallets: result.pallets ?? null, by: "muse-spark" };
