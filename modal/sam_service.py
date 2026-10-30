@@ -25,18 +25,22 @@ MAX_PROMPTS = 5
 MAX_PROMPT_CHARS = 40
 MAX_SIDE = 1536  # bigger photos are shrunk first: faster, and boxes are normalized anyway
 
-# facebook/sam3.1 ships "sam3.1_multiplex.pt" (video/multiplex checkpoint). The README's image builder
-# downloads facebook/sam3 by default, so we try 3.1 first and fall back to sam3. /health says which one loaded.
-SAM31_REPO = "facebook/sam3.1"
-SAM31_FILE = "sam3.1_multiplex.pt"
+SAM3_COMMIT = "f1647e8d0c1d280991f4d1b7d974c2704537fe66"  # facebookresearch/sam3, tested 30/10
+
+# facebook/sam3.1 ships "sam3.1_multiplex.pt" (video/multiplex checkpoint); the image builder expects facebook/sam3.
+# Measured 30/10: the 3.1 detector fills every weight of the image model except the 4 of one neck scale
+# (vision_backbone.convs.3), and on a test photo both found the same 12 boxes (mean IoU 0.89 with the truth).
+# So 3.1 is used when only those are missing; anything else missing -> facebook/sam3. /health says which and why.
+CHECKPOINTS = [("sam3.1", "facebook/sam3.1", "sam3.1_multiplex.pt"), ("sam3", "facebook/sam3", "sam3.pt")]
+KNOWN_GAP = "backbone.vision_backbone.convs.3."
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("git")
     .pip_install("torch==2.10.0", "torchvision", index_url="https://download.pytorch.org/whl/cu128")
-    .pip_install("fastapi[standard]", "pillow", "numpy", "huggingface_hub", "einops")
-    # Install from Meta's repo (README: pip install -e .). Pin a commit once it has been tested.
-    .run_commands("pip install git+https://github.com/facebookresearch/sam3.git")
+    # sam3 imports pycocotools, cv2, scipy and psutil at import time without declaring them (checked 30/10).
+    .pip_install("fastapi[standard]", "pillow", "numpy", "huggingface_hub", "einops", "pycocotools", "opencv-python-headless", "scipy", "psutil")
+    .run_commands(f"pip install git+https://github.com/facebookresearch/sam3.git@{SAM3_COMMIT}")
     .env({"HF_HOME": MODELS_DIR, "TOKENIZERS_PARALLELISM": "false"})
 )
 
@@ -61,18 +65,31 @@ class Sam:
         from sam3.model_builder import build_sam3_image_model
 
         self.torch = torch
-        self.model_name = "sam3.1"
         t0 = time.time()
-        try:
-            ckpt = hf_hub_download(SAM31_REPO, SAM31_FILE)  # uses HF_TOKEN from the secret
-            model = build_sam3_image_model(checkpoint_path=ckpt, load_from_HF=False)
-        except Exception as error:  # 3.1 checkpoint not usable by the image builder, or no access yet
-            print(f"SAM 3.1 checkpoint failed ({error!r}); falling back to facebook/sam3")
-            self.model_name = "sam3"
-            model = build_sam3_image_model()  # downloads facebook/sam3 into the volume
-        weights.commit()  # keep the downloaded weights for the next cold start
-        self.processor = Sam3Processor(model)
-        print(f"loaded {self.model_name} in {time.time() - t0:.1f}s")
+        # The builder's own loader uses strict=False and only prints missing weights, so we load and check ourselves.
+        for name, repo, filename in CHECKPOINTS:
+            try:
+                path = hf_hub_download(repo, filename)  # HF_TOKEN from the secret; cached in the volume
+                weights.commit()  # keep the downloaded weights for the next cold start
+                model = build_sam3_image_model(load_from_HF=False)
+                ckpt = torch.load(path, map_location="cpu", weights_only=True)
+                ckpt = ckpt["model"] if isinstance(ckpt.get("model"), dict) else ckpt
+                detector = {k.replace("detector.", ""): v for k, v in ckpt.items() if "detector" in k}
+                missing, _ = model.load_state_dict(detector, strict=False)
+                del ckpt, detector
+            except Exception as error:  # no access, download or shape problem
+                print(f"{name} failed: {error!r}")
+                continue
+            unknown = [k for k in missing if not (name == "sam3.1" and k.startswith(KNOWN_GAP))]
+            if unknown:
+                print(f"{name}: {len(unknown)} weights missing ({unknown[:3]}...), trying the next checkpoint")
+                continue
+            self.model_name, self.missing = name, len(missing)
+            break
+        else:
+            raise RuntimeError("No SAM checkpoint could be loaded")
+        self.processor = Sam3Processor(model.cuda().eval(), device="cuda")
+        print(f"loaded {self.model_name} ({self.missing} known-missing weights) in {time.time() - t0:.1f}s")
 
     @modal.asgi_app()
     def web(self):
@@ -96,7 +113,7 @@ class Sam:
         @api.get("/health")
         def health(authorization: str | None = Header(default=None)):
             check(authorization)
-            return {"ok": True, "model": self.model_name}
+            return {"ok": True, "model": self.model_name, "missing_weights": self.missing}
 
         @api.post("/")
         def segment(body: Body, authorization: str | None = Header(default=None)):

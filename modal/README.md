@@ -1,6 +1,14 @@
 # SAM 3.1 en Modal (cuenta cajas y palés)
 
-Servicio que habla el mismo contrato que `countLoad` (`src/lib/ai/vision.ts`). **No está desplegado**: sigue estos pasos.
+Servicio que habla el mismo contrato que `countLoad` (`src/lib/ai/vision.ts`). **No está desplegado** (30/10): Modal pide **una tarjeta en el workspace para cualquier GPU** (L4 y T4 probadas: «Please add a payment method»), aunque haya créditos. Con la tarjeta puesta se gastan antes los 100 $ de créditos; `max_containers=1` y `scaledown_window=60` dejan el gasto en céntimos. Mientras no esté, `countLoad` usa Muse Spark en Baseten (probado: 12 de 12 cajas y la dañada, ≈ 7 s, ≈ 0,5 céntimos).
+
+**Ya hecho (30/10):** secretos `dockclerk-hf` y `dockclerk-sam` creados; `SAM_API_KEY` (= `SAM_TOKEN`) ya está en `.env`. Faltan los pasos 5, 6 (solo `META_SAM_URL` en `.env`, y las dos variables en Vercel), 7 y 8.
+
+## Lo que se midió el 30/10 (en CPU de Modal, foto inventada de 12 cajas en un palé)
+- SAM 3.1 y SAM 3 encuentran las 12 cajas y el palé, con un solapamiento medio de 0,89 con las cajas reales. «damaged box» no encuentra nada: los daños los mira Muse Spark (`spotDamage`).
+- El checkpoint de 3.1 (`sam3.1_multiplex.pt`) rellena todo el modelo de imagen **menos 4 pesos de una escala del cuello** (`vision_backbone.convs.3`). El servicio lo comprueba al arrancar: usa 3.1 si solo faltan esos y, si no, `facebook/sam3`. `/health` dice cuál y cuántos faltan.
+- En CPU son **4-5 minutos por foto** (y hace falta parchear `cuda` y `pin_memory` en el código de Meta): no sirve. Con GPU, ≈ 1 s.
+- `sam3` importa `pycocotools`, `cv2`, `scipy` y `psutil` sin declararlos; ya están en la imagen, y el commit de `sam3` está fijado.
 
 Código de Meta: <https://github.com/facebookresearch/sam3>. Cajas del modelo: xyxy en píxeles; el servicio las pasa a xywh 0..1.
 
