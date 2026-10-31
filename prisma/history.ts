@@ -86,6 +86,24 @@ export const PUZZLE_CASE = { sku: "PUZZLE-500", clientCode: "C001", pallets: 23,
  */
 export const PLANTED_STOCK: Record<string, number> = { [PUZZLE_CASE.sku]: PUZZLE_CASE.pallets - PUZZLE_CASE.leaving };
 
+/**
+ * The mixed pallet: one pallet with two items of the same customer, delivered by its own truck two days ago.
+ * It is added on top of the simulated stock (it needs no history: one more pallet on the racks of its building).
+ * 35 of 70 + 40 of 80 boxes = 0.5 + 0.5 of a pallet. POLVORON carries the nearest best-before date of all the polvorones in stock,
+ * so first-expired-first-out picks it for any order of polvorones (nothing in the seed orders them).
+ * Worked out by planSeed (prisma/seed-plan.ts), before anything is wiped.
+ */
+export const MIXED_CASE = {
+  key: "in-case-mixed",
+  clientCode: "C008",
+  code: "OBR-JIJ-0042",
+  daysAgo: 2,
+  lines: [
+    { sku: "TURRON-BLA", units: 35 },
+    { sku: "POLVORON", units: 40 },
+  ],
+} as const;
+
 /** Where each customer's goods usually go. */
 export const DESTINATIONS: Record<string, string[]> = {
   C001: ["D0412", "D0413", "D0950", "D0520"],

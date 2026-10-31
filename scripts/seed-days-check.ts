@@ -3,7 +3,8 @@
 //   TZ=Europe/Madrid npx tsx scripts/seed-days-check.ts              45 days back and 60 days ahead of today
 //   TZ=Europe/Madrid npx tsx scripts/seed-days-check.ts --back=10 --ahead=10
 //   TZ=Europe/Madrid npx tsx scripts/seed-days-check.ts --quiet      only the failing dates and the summary
-//   TZ=Europe/Madrid npx tsx scripts/seed-days-check.ts --break      breaks the planted billing case on purpose: it must exit 1
+//   TZ=Europe/Madrid npx tsx scripts/seed-days-check.ts --break      breaks the planted cases on purpose: it must exit 1
+//   TZ=Europe/Madrid npx tsx scripts/seed-days-check.ts --break=billing | --break=codes   breaks only one of them (each must exit 1 too)
 //
 // Why it exists: the seed used to need a lucky 23-pallet delivery in its random history, so it failed on many dates
 // (the freeze day, 2 Nov, was one) and, because it wipes first, left the production database empty.
@@ -12,6 +13,10 @@
 //   - it does not throw (history, planted cases, racks, dock plan);
 //   - the billing case: 23 pallets in on the 20th of last month, 21 still inside, 2 out on the 2nd (PED-7001);
 //   - the loose pallet: 12 boxes of PELUCHE-30 left by a 28-box order (PED-7002);
+//   - the pallet IDs: every row of stock has one, they are unique among the pallets inside, the rows of a mixed pallet share
+//     place, customer and outbound and have one head, shares add up to 1, and pallets counted = rack slots taken;
+//     the mixed pallet OBR-JIJ-0042 (35 TURRON-BLA + 40 POLVORON, Dulces Carrascal, first to expire), the supplier IDs
+//     GMV-0581..0585, the counter of each building (`nextPalletNo`) and the ID of every piece that left (`shipped`);
 //   - every delivery adds up in units (in = out + here), today's stock is the table, the racks fit;
 //   - the dock plan: inside opening hours, no overlaps, nothing in the past;
 //   - the real billing engine, in memory: the 21 + 2 rows of last month's bill, and all 8 customers add up;
@@ -29,9 +34,9 @@ import { period, ymdOfDay } from "../src/lib/billing/calendar";
 import { buildStays, type PalletKind } from "../src/lib/billing/stays";
 import { DOCK_CLOSE_H, DOCK_OPEN_H } from "../src/lib/dock/slots";
 import { makeLayout } from "../src/lib/warehouse/layout";
-import { PUZZLE_CASE, TODAY_STOCK } from "../prisma/history";
+import { MIXED_CASE, PUZZLE_CASE, TODAY_STOCK } from "../prisma/history";
 import { AMERICAN_ITEMS, CONTACTS, PREPARED_TODAY, UPCOMING, carriers, clients, tariffs, warehouseOf, warehouses } from "../prisma/seed-data";
-import { REF, makeRand, outboundsInOrder, planSeed, startOfDay, takeOldest, type SeedPlan } from "../prisma/seed-plan";
+import { MORNING_CODES, REF, makeRand, outboundsInOrder, planSeed, startOfDay, takeOldest, type SeedPlan } from "../prisma/seed-plan";
 
 process.env.TZ = "Europe/Madrid"; // the seed runs on Guillermo's Mac, in Madrid time
 const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -52,7 +57,13 @@ const arg = (name: string, fallback: number) => {
 const BACK = arg("back", 45);
 const AHEAD = arg("ahead", 60);
 const QUIET = process.argv.includes("--quiet");
-const BREAK = process.argv.includes("--break");
+const breakArg = process.argv.find((a) => a === "--break" || a.startsWith("--break="));
+const BREAK = Boolean(breakArg);
+const BREAK_WHAT = breakArg?.split("=")[1] ?? "all";
+if (BREAK && !["all", "billing", "codes"].includes(BREAK_WHAT)) {
+  console.error("--break takes billing or codes (or nothing, for both)");
+  process.exit(2);
+}
 
 const MIN = 60 * 1000;
 const DAY = 24 * 60 * MIN;
@@ -133,9 +144,104 @@ function adds(plan: SeedPlan): string[] {
   }
   const preparedIn = (code: string) => PREPARED_TODAY.filter((p) => warehouseOf(p[0]).code === code).reduce((s, p) => s + p[3], 0);
   for (const r of plan.racks) {
-    const want = Object.entries(TODAY_STOCK).filter(([sku]) => warehouseOf(clients.find((c) => c.items.some((i) => i[0] === sku))!.code).code === r.warehouse).reduce((s, [, n]) => s + n, 0) - preparedIn(r.warehouse);
+    const want = Object.entries(TODAY_STOCK).filter(([sku]) => warehouseOf(clients.find((c) => c.items.some((i) => i[0] === sku))!.code).code === r.warehouse).reduce((s, [, n]) => s + n, 0) - preparedIn(r.warehouse) + (warehouseOf(MIXED_CASE.clientCode).code === r.warehouse ? 1 : 0); // + the mixed pallet
     if (r.pallets !== want) bad.push(`${r.warehouse}: ${r.pallets} pallets on the racks, want ${want}`);
   }
+  return bad;
+}
+
+// ─── 2b. every pallet has its ID ──────────────────────────────────────────────────────────────
+const CODE = /^[A-Z0-9][A-Z0-9-]{3,23}$/;
+const numberOf = (code: string) => (/^[A-Z0-9]+-(\d{6})$/.exec(code) ? Number(code.slice(-6)) : null);
+
+function palletIds(plan: SeedPlan, today: Date): string[] {
+  const bad: string[] = [];
+  const rows = plan.stock;
+  const byCode = new Map<string, typeof rows>();
+  for (const r of rows) {
+    if (!r.palletCode) bad.push(`pallet IDs: a row of ${r.sku} in ${r.location} has no pallet ID`);
+    if (!CODE.test(r.palletCode)) bad.push(`pallet IDs: ${r.palletCode} is not a valid ID`);
+    byCode.set(r.palletCode, [...(byCode.get(r.palletCode) ?? []), r]);
+  }
+  for (const [code, group] of byCode) {
+    const [first] = group;
+    // The same ID on two pallets is two groups in two places: the siblings test catches it.
+    if (group.some((r) => r.warehouse !== first.warehouse || r.location !== first.location || r.clientCode !== first.clientCode || r.outbound !== first.outbound)) {
+      bad.push(`pallet IDs: ${code} is on rows in different places / customers / outbounds (twice inside, or a mixed pallet that is not together)`);
+      continue;
+    }
+    const heads = group.filter((r) => r.pallets === 1).length;
+    if (heads !== 1 || group.some((r) => r.pallets !== 0 && r.pallets !== 1)) bad.push(`pallet IDs: ${code} has ${heads} rows that count as the pallet, want exactly 1`);
+    if (group.length === 1) {
+      if (first.palletShare !== null) bad.push(`pallet IDs: ${code} is a pallet of one item and has a share`);
+    } else {
+      const sum = group.reduce((s, r) => s + (r.palletShare ?? NaN), 0);
+      if (!(Math.abs(sum - 1) < 1e-9)) bad.push(`pallet IDs: the shares of mixed pallet ${code} add up to ${sum}, want 1`);
+      const head = group.reduce((best, r) => ((r.palletShare ?? 0) > (best.palletShare ?? 0) ? r : best), group[0]);
+      if (head.pallets !== 1) bad.push(`pallet IDs: the head of mixed pallet ${code} is not the row with the biggest share`);
+    }
+  }
+  // Pallets counted = places taken: one per rack slot; the lanes hold as many as they hold.
+  for (const w of warehouses) {
+    const mine = rows.filter((r) => r.warehouse === w.code);
+    const rack = mine.filter((r) => !/^(EXP|REC)-/.test(r.location));
+    const slots = new Set(rack.map((r) => r.location)).size;
+    const counted = rack.reduce((s, r) => s + r.pallets, 0);
+    if (counted !== slots) bad.push(`pallet IDs: ${w.code}: ${counted} pallets on the racks but ${slots} slots taken`);
+    const physical = new Set(mine.map((r) => r.palletCode)).size;
+    if (mine.reduce((s, r) => s + r.pallets, 0) !== physical) bad.push(`pallet IDs: ${w.code}: pallets counted (${mine.reduce((s, r) => s + r.pallets, 0)}) differ from pallets with an ID (${physical})`);
+    // The counter is ahead of every number handed out, those of the pieces that left included.
+    const used = [...mine.map((r) => numberOf(r.palletCode)), ...[...plan.shipped.entries()].flatMap(([key, list]) => (outboundsInOrder(plan.history).all.find((o) => o.key === key)?.warehouse === w.code ? list.map((x) => numberOf(x.palletCode)) : []))].filter((n): n is number => n !== null);
+    if (!(plan.nextPalletNo[w.code] > Math.max(0, ...used))) bad.push(`pallet IDs: ${w.code} counter is ${plan.nextPalletNo[w.code]} but ${Math.max(0, ...used)} is already in use`);
+  }
+  // The supplier's IDs on this morning's pallets.
+  const morning = rows.filter((r) => r.inbound === REF.morning).map((r) => r.palletCode).sort();
+  if (morning.join() !== MORNING_CODES.join() || rows.some((r) => r.inbound === REF.morning && r.location !== "REC-3")) bad.push(`pallet IDs: this morning's pallets must be ${MORNING_CODES[0]}…${MORNING_CODES[4]} in REC-3 (got ${morning.join(", ")})`);
+
+  // The mixed pallet.
+  const mixed = byCode.get(MIXED_CASE.code) ?? [];
+  const turron = mixed.find((r) => r.sku === "TURRON-BLA");
+  const polvoron = mixed.find((r) => r.sku === "POLVORON");
+  const nw = warehouseOf(MIXED_CASE.clientCode).code;
+  if (mixed.length !== 2 || !turron || !polvoron) bad.push(`mixed pallet: ${MIXED_CASE.code} must have a row of TURRON-BLA and one of POLVORON (has ${mixed.map((r) => r.sku).join(", ") || "none"})`);
+  else {
+    if (turron.units !== 35 || polvoron.units !== 40) bad.push(`mixed pallet: ${turron.units} + ${polvoron.units} boxes, want 35 + 40`);
+    if (turron.palletShare !== 0.5 || polvoron.palletShare !== 0.5) bad.push(`mixed pallet: shares ${turron.palletShare} + ${polvoron.palletShare}, want 0.5 + 0.5`);
+    if (turron.pallets !== 1 || polvoron.pallets !== 0) bad.push("mixed pallet: the head must be TURRON-BLA (the first row)");
+    if (turron.clientCode !== MIXED_CASE.clientCode || turron.warehouse !== nw || /^(EXP|REC)-/.test(turron.location)) bad.push("mixed pallet: it must sit on a rack of its customer's building");
+    if (!turron.lot || !polvoron.lot || !turron.expiresAt || !polvoron.expiresAt) bad.push("mixed pallet: both rows need a lot and a best-before date");
+    else {
+      const others = rows.filter((r) => r.sku === "POLVORON" && r.palletCode !== MIXED_CASE.code && r.expiresAt);
+      if (others.some((r) => r.expiresAt!.getTime() <= polvoron.expiresAt!.getTime())) bad.push("mixed pallet: its POLVORON must expire before every other polvorón (first-expired-first-out picks it)");
+      if (!others.length) bad.push("mixed pallet: no other polvorones to compare with");
+    }
+    const delivery = plan.mixed;
+    const want = new Date(today.getTime() - MIXED_CASE.daysAgo * DAY);
+    if (ymdOf(delivery.received) !== ymdOf(want)) bad.push(`mixed pallet: delivered on ${ymdOf(delivery.received)}, want ${ymdOf(want)}`);
+    if (turron.inbound !== REF.mixed || polvoron.inbound !== REF.mixed) bad.push("mixed pallet: both rows must come from its own delivery");
+  }
+  if (rows.some((r) => r.palletCode !== MIXED_CASE.code && r.inbound === REF.mixed)) bad.push("mixed pallet: another row points at its delivery");
+
+  // The pieces that left: one ID each, and the 28 boxes of PED-7002 say which pallet they came off.
+  const loose = rows.filter((r) => r.loose);
+  const inside = new Set(rows.map((r) => r.palletCode));
+  for (const o of outboundsInOrder(plan.history).all) {
+    const meta = plan.shipped.get(o.key);
+    if (!meta || meta.length !== o.shipped.length) {
+      bad.push(`shipped: ${o.key} has ${meta?.length ?? 0} pallet IDs for ${o.shipped.length} pieces`);
+      continue;
+    }
+    o.shipped.forEach((p, k) => {
+      const m = meta[k];
+      if (!m.palletCode || inside.has(m.palletCode)) bad.push(`shipped: a piece of ${o.key} has no ID or one that is inside the building`);
+      const piece = p.units !== undefined && p.units < upp(p.sku);
+      if (piece && (loose.length !== 1 || m.splitFrom !== loose[0].palletCode)) bad.push(`shipped: the ${p.units} boxes of ${o.key} must say they came off the loose pallet`);
+      if (!piece && m.splitFrom !== null) bad.push(`shipped: a whole pallet of ${o.key} has splitFrom`);
+      if (m.palletShare !== null) bad.push(`shipped: a piece of ${o.key} has a share`);
+    });
+  }
+  const gone = [...plan.shipped.values()].flat().map((m) => m.palletCode);
+  if (new Set(gone).size !== gone.length) bad.push("shipped: two pieces that left carry the same pallet ID");
   return bad;
 }
 
@@ -259,6 +365,8 @@ function analystData(plan: SeedPlan, today: Date, now: Date): AnalystData {
       }
     }
   }
+  // The mixed pallet: TURRON-BLA counts as the pallet, POLVORON rides on it.
+  plan.mixed.lines.forEach((l, k) => stock.push({ id: `mixed-${k}`, warehouseId: plan.mixed.warehouse, clientId: plan.mixed.clientCode, itemId: l.sku, location: "mixed", pallets: k === 0 ? 1 : 0, outboundId: null, received: plan.mixed.received }));
   const morning = new Date(today.getTime() + (7 * 60 + 40) * MIN);
   for (let i = 0; i < 5; i++) stock.push({ id: `rec-${i}`, warehouseId: warehouseOf("C006").code, clientId: "C006", itemId: "MB-ROJO", location: "REC-3", pallets: 1, outboundId: null, received: morning });
 
@@ -327,10 +435,17 @@ for (let d = -BACK; d <= AHEAD; d++) {
       problems.push(`planSeed at ${hhmm(clock)} threw: ${(error as Error).message}`);
       continue;
     }
-    if (BREAK && clock === CLOCKS[1]) plan.history.inbounds = plan.history.inbounds.filter((i) => i.key !== PUZZLE_CASE.key); // the break: no 23-pallet delivery
+    if (BREAK && ["all", "billing"].includes(BREAK_WHAT) && clock === CLOCKS[1]) plan.history.inbounds = plan.history.inbounds.filter((i) => i.key !== PUZZLE_CASE.key); // the break: no 23-pallet delivery
+    if (BREAK && ["all", "codes"].includes(BREAK_WHAT) && clock === CLOCKS[1]) {
+      // the break: a pallet ID used twice inside, and the head of the mixed pallet gone
+      plan.stock = plan.stock.map((r) => ({ ...r }));
+      plan.stock[1].palletCode = plan.stock[0].palletCode;
+      const head = plan.stock.find((r) => r.palletCode === MIXED_CASE.code && r.pallets === 1);
+      if (head) head.pallets = 0;
+    }
     if (clock === CLOCKS[1]) {
       main = plan;
-      problems.push(...plantedCases(plan, today), ...adds(plan), ...billing(plan, today));
+      problems.push(...plantedCases(plan, today), ...adds(plan), ...palletIds(plan, today), ...billing(plan, today));
     }
     problems.push(...dock(plan, today, now).map((p) => `${p} (at ${hhmm(clock)})`));
   }

@@ -7,12 +7,11 @@
 // the customers' ids (so each customer account stays linked), and the AI spend counters (the daily limit is not a reset button).
 
 import { randomUUID } from "node:crypto";
-import { PrismaClient, type PalletType, type Prisma } from "@prisma/client";
-import { makeLayout } from "../src/lib/warehouse/layout";
+import { PrismaClient, type PalletType } from "@prisma/client";
 import { runAnalysis } from "../src/lib/analyst";
 import { ensureDemoUsers } from "./demo-users";
 import { AMERICAN_ITEMS, CONTACTS, UPCOMING, PREPARED_TODAY, carriers, clients, consignees, tariffs, warehouses } from "./seed-data";
-import { REF, makeRand, outboundsInOrder, planSeed, startOfDay, takeOldest, type DockBooking } from "./seed-plan";
+import { REF, makeRand, outboundsInOrder, planSeed, startOfDay, type DockBooking } from "./seed-plan";
 
 const db = new PrismaClient();
 
@@ -57,7 +56,7 @@ async function main() {
   await wipe();
 
   const warehouseRows = await Promise.all(
-    warehouses.map((w) => db.warehouse.create({ data: { code: w.code, name: w.name, city: w.city, ...w.dims } })),
+    warehouses.map((w) => db.warehouse.create({ data: { code: w.code, name: w.name, city: w.city, ...w.dims, nextPalletNo: plan.nextPalletNo[w.code] } })),
   );
   const warehouseOfCode = (clientCode: string) => warehouseRows[warehouses.findIndex((w) => w.clients.includes(clientCode))].id;
   const warehouseOfClient = new Map<string, string>();
@@ -125,7 +124,10 @@ async function main() {
       clientDocRef: docRef, consigneeId: consigneeIdOf.get(o.consignee)!, carrierId: carrierRows[o.carrier].id,
       status: o.day < -3 ? ("CLOSED" as const) : ("SHIPPED" as const),
       // What left on the truck, pallet by pallet, as shipOutbound records it: the lot trail.
-      shipped: o.shipped.map((p) => ({ itemId: it.id, sku: p.sku, lot: p.lot, units: p.units ?? it.unitsPerPallet, location: "EXP-1", inboundId: inboundIdOf.get(p.inboundKey)! })),
+      shipped: o.shipped.map((p, k) => {
+        const id = plan.shipped.get(o.key)![k];
+        return { itemId: it.id, sku: p.sku, lot: p.lot, units: p.units ?? it.unitsPerPallet, location: "EXP-1", inboundId: inboundIdOf.get(p.inboundKey)!, palletCode: id.palletCode, palletShare: id.palletShare, splitFrom: id.splitFrom };
+      }),
     };
   };
   const lineRow = (o: (typeof pastOut)[number]) => {
@@ -144,13 +146,6 @@ async function main() {
       carrierId: carrierRows[t.carrier].id, plate: carrierRows[t.carrier].plate,
       inboundId: t.inbound ? inboundIdOf.get(t.inbound) : undefined, outboundId: t.outbound ? outboundIdOf.get(t.outbound) : undefined,
     })),
-  });
-
-  // What is left of each lot is today's stock.
-  type Balance = { itemId: string; sku: string; clientId: string; unitsPerPallet: number; pallets: number; lot: string | null; inboundId: string; received: Date; loose?: number };
-  const balances: Balance[] = history.remaining.map((r) => {
-    const it = itemOf.get(r.sku)!;
-    return { itemId: it.id, sku: r.sku, clientId: it.clientId, unitsPerPallet: it.unitsPerPallet, pallets: r.pallets, lot: r.lot, inboundId: inboundIdOf.get(r.inboundKey)!, received: r.received, loose: r.loose };
   });
 
   // Ids of the records created one by one that the dock plan points at (seed-plan.ts names them with REF).
@@ -179,15 +174,11 @@ async function main() {
   }
 
   // Picked this morning and waiting in the dispatch lanes for their trucks: off the shelves already.
-  const staged: Prisma.StockCreateManyInput[] = [];
   for (const [clientCode, sku, consigneeCode, pallets, hour] of PREPARED_TODAY) {
     const client = clientRows.find((c) => c.code === clientCode)!;
     const item = await db.item.findFirstOrThrow({ where: { clientId: client.id, sku } });
-    // Oldest lots first, as the picker would take them (planSeed has already checked there are enough).
-    const taken = takeOldest(balances.filter((x) => x.itemId === item.id), pallets);
-    if (!taken) throw new Error(`Not enough ${sku} for the prepared outbound`);
     idOfRef.set(REF.prepared(sku), randomUUID());
-    const outbound = await db.outbound.create({
+    await db.outbound.create({
       data: {
         id: idOfRef.get(REF.prepared(sku)),
         date: today,
@@ -201,55 +192,7 @@ async function main() {
         lines: { create: { itemId: item.id, pallets, units: pallets * item.unitsPerPallet } },
       },
     });
-    // The picked pallets wait in the next dispatch lane of their warehouse.
-    const warehouseId = warehouseOfClient.get(client.id)!;
-    const lane = new Set(staged.filter((x) => x.warehouseId === warehouseId).map((x) => x.outboundId)).size + 1;
-    for (const b of taken) {
-      staged.push({
-        warehouseId, clientId: client.id, itemId: item.id, lot: b.lot, pallets: 1, units: item.unitsPerPallet,
-        location: `EXP-${lane}`, inboundId: b.inboundId, outboundId: outbound.id,
-      });
-    }
   }
-
-  // Every pallet gets its own rack slot. Customers keep to their own stretch of racking,
-  // with the free slots scattered in between like in any real warehouse.
-  // Food and cosmetics carry a best-before date: made three days before it came in, plus the product's shelf life.
-  const shelfLife: Record<string, number> = {
-    "AGUA-15": 540, "REFR-NAR": 300, "HORCH-1L": 240, "CREMA-50": 900, "GEL-750": 900, "CHAMP-400": 900, "COLONIA-1": 900,
-    "TURRON-DUR": 365, "TURRON-BLA": 300, POLVORON: 240, MAZAPAN: 270,
-  };
-  const expiringSoon = new Map([["HORCH-1L", 19], ["MAZAPAN", 26]]); // so the expiry alert has something to say
-  const stockRows: Prisma.StockCreateManyInput[] = [];
-  for (const [w, warehouse] of warehouseRows.entries()) {
-    const slots = makeLayout(warehouses[w].dims).rackSlotsInFillOrder();
-    const physical = balances.filter((b) => b.pallets > 0 && warehouseOfClient.get(b.clientId) === warehouse.id);
-    const total = physical.reduce((sum, b) => sum + b.pallets, 0);
-    if (total > slots.length) throw new Error(`${warehouse.code} too small: ${total} pallets for ${slots.length} slots`);
-
-    let slot = 0;
-    let placed = 0;
-    for (const b of physical) {
-      const life = shelfLife[b.sku];
-      let expiresAt: Date | null = null;
-      if (b.lot && life) {
-        const soon = expiringSoon.get(b.sku);
-        expiringSoon.delete(b.sku); // only the oldest lot of that item
-        expiresAt = soon ? daysAgo(-soon) : new Date(b.received.getTime() + (life - 3) * DAY);
-      }
-      for (let i = 0; i < b.pallets; i++) {
-        // Skip a slot with the probability that spreads the free space evenly.
-        while (slots.length - slot > total - placed && rand() < (slots.length - slot - (total - placed)) / (slots.length - slot)) slot++;
-        stockRows.push({
-          warehouseId: warehouse.id, clientId: b.clientId, itemId: b.itemId, lot: b.lot, expiresAt,
-          // The last row of a balance with a loose pallet holds only its few boxes.
-          pallets: 1, units: b.loose && i === b.pallets - 1 ? b.loose : b.unitsPerPallet, location: slots[slot++], inboundId: b.inboundId,
-        });
-        placed++;
-      }
-    }
-  }
-  await db.stock.createMany({ data: [...stockRows, ...staged] });
 
   // Unloaded at 7:40 this morning, still on the floor of the receiving lane until put away.
   const granzas = clientRows.find((c) => c.code === "C006")!;
@@ -272,12 +215,43 @@ async function main() {
       lines: { create: { itemId: masterbatch.id, lot: "L2698-41", pallets: 5, units: 5 * masterbatch.unitsPerPallet } },
     },
   });
+  // The mixed pallet's own delivery, two days ago: one pallet (OBR-JIJ-0042) with two items of Dulces Carrascal.
+  const mixedClient = clientRows.find((c) => c.code === plan.mixed.clientCode)!;
+  const mixedItems = await Promise.all(plan.mixed.lines.map((l) => db.item.findFirstOrThrow({ where: { clientId: mixedClient.id, sku: l.sku } })));
+  const mixedUnits = plan.mixed.lines.reduce((sum, l) => sum + l.units, 0);
+  const mixedInbound = await db.inbound.create({
+    data: {
+      date: plan.mixed.received,
+      receivedAt: plan.mixed.received,
+      clientId: mixedClient.id,
+      warehouseId: warehouseOfClient.get(mixedClient.id),
+      clientDocRef: "ALB-40420",
+      supplier: "Dulces Carrascal – Obrador Jijona",
+      carrierId: carrierRows[3].id,
+      plate: carrierRows[3].plate,
+      expectedPallets: 1,
+      expectedUnits: mixedUnits,
+      receivedPallets: 1,
+      receivedUnits: mixedUnits,
+      status: "CLOSED",
+      lines: { create: plan.mixed.lines.map((l, i) => ({ itemId: mixedItems[i].id, lot: l.lot, pallets: 1, units: l.units })) },
+    },
+  });
+  idOfRef.set(REF.mixed, mixedInbound.id);
+  idOfRef.set(REF.morning, morning.id);
+
+  // All the stock, worked out by planSeed with its pallet IDs: racks, dispatch lanes, receiving lane and the mixed pallet.
+  const itemId = new Map(itemRows.map((it) => [it.sku, it.id]));
+  const clientId = new Map(clientRows.map((c) => [c.code, c.id]));
+  const inboundOf = (ref: string) => inboundIdOf.get(ref) ?? idOfRef.get(ref);
   await db.stock.createMany({
-    data: Array.from({ length: 5 }, () => ({
-      warehouseId: warehouseOfClient.get(granzas.id)!,
-      clientId: granzas.id, itemId: masterbatch.id, lot: "L2698-41", pallets: 1, units: masterbatch.unitsPerPallet, location: "REC-3", inboundId: morning.id,
+    data: plan.stock.map((r) => ({
+      warehouseId: warehouseIdOf.get(r.warehouse)!, clientId: clientId.get(r.clientCode)!, itemId: itemId.get(r.sku)!, lot: r.lot, expiresAt: r.expiresAt,
+      pallets: r.pallets, units: r.units, location: r.location, inboundId: inboundOf(r.inbound), outboundId: r.outbound ? idOfRef.get(r.outbound) : null,
+      palletCode: r.palletCode, palletShare: r.palletShare,
     })),
   });
+
 
   // Today's expected truck for the dock demo. Quantities arrive later with the driver's photo
   // of the delivery note, through the driver link created with it.
@@ -329,7 +303,6 @@ async function main() {
   if (lastWeek) await db.inbound.update({ where: { id: lastWeek.id }, data: { incident: "2 palés con cajas aplastadas" } });
 
   await seedHandling(clientRows);
-  idOfRef.set(REF.morning, morning.id);
   idOfRef.set(REF.expectedToys, expectedToys.id);
   idOfRef.set(REF.expectedDrinks, expectedDrinks.id);
   await seedDock(plan.dock, { warehouseIdOf, idOfRef, carrierRows });
