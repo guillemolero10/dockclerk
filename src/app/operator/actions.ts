@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { providers } from "@/lib/ai/client";
 import { transcribe } from "@/lib/ai/voice";
 import { db } from "@/lib/db";
 import { Fixable, orFixable } from "@/lib/fixable";
@@ -141,28 +142,36 @@ export async function pick(outboundId: string, stockId: string, units?: number):
   }
 }
 
-/** Customer and article names, so the voice model spells them right ("Bebidas Montgó", not "bebidas mogo"). */
+/**
+ * Customer names, so the voice model spells them right ("Bebidas Montgó", not "bebidas mogo"). Only the names: with the long
+ * article descriptions as well, "Montgó" came back as "mogó" more often (tester, 31/10).
+ */
 async function voiceHints() {
   try {
-    const [clients, items] = await Promise.all([db.client.findMany({ select: { name: true } }), db.item.findMany({ select: { description: true } })]);
-    return [...clients.map((c) => c.name.replace(/,?\s+S\.?[AL]\.?$/i, "")), ...items.map((i) => i.description)];
+    const clients = await db.client.findMany({ select: { name: true } });
+    return clients.map((c) => c.name.replace(/,?\s+S\.?[AL]\.?$/i, ""));
   } catch {
     return [];
   }
 }
 
-/** A voice note from the floor goes to the AI inbox like any other message. */
-export async function voiceNote(warehouseCode: string, audio: string) {
+const MAX_VOICE_BYTES = 3 * 1024 * 1024;
+
+/** A voice note from the floor goes to the AI inbox like any other message. The recording comes as a file in `form` ("audio"). */
+export async function voiceNote(warehouseCode: string, form: FormData) {
   await requireFloor();
-  const media = parseDataUrl(audio);
-  if (!media) throw new Error("That recording could not be read.");
+  const file = form.get("audio");
+  const mime = file instanceof Blob ? file.type.split(";")[0] : "";
+  if (!(file instanceof Blob) || !/^audio\/[\w.+-]+$/.test(mime) || !file.size) return { error: "That recording could not be read." };
+  if (file.size > MAX_VOICE_BYTES) return { error: "That note is too long: keep it under a minute." };
+  const media = { mime, base64: Buffer.from(await file.arrayBuffer()).toString("base64") };
   const url = await saveUpload("voice", media);
   const text = await transcribe(media, await voiceHints());
   await db.message.create({
     data: {
       channel: "FLOOR",
       fromName: `Operator · ${warehouseCode}`,
-      body: text ?? "Voice note (transcription needs the Meta key).",
+      body: text ?? (providers.voice() ? "Voice note (could not transcribe it: listen to the audio)." : "Voice note (transcription needs the Meta key)."),
       audioUrl: url,
     },
   });

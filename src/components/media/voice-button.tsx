@@ -4,11 +4,11 @@ import { useRef, useState } from "react";
 import { Loader2, Mic, Square } from "lucide-react";
 import { recordingToWav } from "@/lib/audio/to-wav";
 
-/** A note longer than this stops by itself (16 kHz WAV = 32 KB per second; keeps the upload under 3 MB). */
+/** A note longer than this stops by itself (16 kHz WAV = 32 KB per second, about 1.9 MB a minute; uploads take up to 3 MB). */
 const MAX_SECONDS = 60;
 
 /** Hold-free voice note: tap to record, tap to send. */
-export function VoiceButton({ onAudio, label = "Voice note to the office" }: { onAudio: (dataUrl: string) => Promise<void>; label?: string }) {
+export function VoiceButton({ onAudio, label = "Voice note to the office" }: { onAudio: (audio: Blob) => Promise<void>; label?: string }) {
   const recorder = useRef<MediaRecorder | null>(null);
   const [state, setState] = useState<"idle" | "recording" | "sending">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -32,13 +32,9 @@ export function VoiceButton({ onAudio, label = "Voice note to the office" }: { o
         } catch (err) {
           console.warn("voice note kept in its original format", err);
         }
-        const dataUrl = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(String(reader.result));
-          reader.readAsDataURL(blob);
-        });
+        // Sent as a file, not as a data URL: a server action refuses a string argument over 1,000,000 characters (≈ 23 s of WAV).
         try {
-          await onAudio(dataUrl);
+          await onAudio(blob);
         } catch (err) {
           setError(err instanceof Error ? err.message : "Could not send it.");
         }

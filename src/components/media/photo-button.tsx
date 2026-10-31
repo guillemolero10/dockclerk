@@ -3,15 +3,23 @@
 import { useRef, useState } from "react";
 import { Camera, Loader2 } from "lucide-react";
 
-/** Shrinks a photo in the browser so it travels fast over a phone connection. */
-async function shrink(file: File, max = 1600) {
+/** A server action refuses one argument longer than 1,000,000 characters (React's limit): keep the photo well under it. */
+const MAX_CHARS = 900_000;
+
+/** Shrinks a photo in the browser so it travels fast over a phone connection (smaller and lower quality until it fits). */
+async function shrink(file: File) {
   const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(bitmap.width * scale);
-  canvas.height = Math.round(bitmap.height * scale);
-  canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.82);
+  let url = "";
+  for (const [max, quality] of [[1600, 0.82], [1600, 0.7], [1280, 0.7], [1024, 0.65]] as const) {
+    const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    url = canvas.toDataURL("image/jpeg", quality);
+    if (url.length <= MAX_CHARS) break;
+  }
+  return url;
 }
 
 /** Opens the camera on a phone (or a file picker on a computer) and hands back the photo. */

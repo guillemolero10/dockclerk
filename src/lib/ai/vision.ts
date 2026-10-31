@@ -17,7 +17,7 @@ export type NoteReading = {
 
 /**
  * One question to the vision model. With a Meta key Muse Spark (Meta) answers; if it errors or times out, Muse Spark Open on
- * Baseten takes the same question, so a bad minute at Meta does not stop the dock. null = no model configured at all.
+ * Baseten takes the same question (also when the answer is not JSON), so a bad minute at Meta does not stop the dock. null = no model configured at all.
  */
 async function ask(messages: ChatMessage[], options: { json?: boolean; maxTokens?: number; timeoutMs: number }) {
   const chain = providers.visionChain();
@@ -25,7 +25,10 @@ async function ask(messages: ChatMessage[], options: { json?: boolean; maxTokens
   let last: unknown;
   for (const p of chain) {
     try {
-      return await chat(p, messages, options);
+      const message = await chat(p, messages, options);
+      // An answer that is not JSON counts as a failure too, so the next model gets the question.
+      if (options.json) parseJson(message.content);
+      return message;
     } catch (error) {
       last = error;
       if (p !== chain[chain.length - 1]) console.warn(`${p.name} failed, trying ${chain[chain.indexOf(p) + 1].name}:`, error instanceof Error ? error.message : error);

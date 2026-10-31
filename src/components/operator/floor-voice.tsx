@@ -11,8 +11,11 @@ export function FloorVoice({ warehouse }: { warehouse: string }) {
     <section className="space-y-1.5 pt-2">
       <VoiceButton
         onAudio={async (audio) => {
-          const result = await voiceNote(warehouse, audio);
-          setSent(result.transcribed ? "Sent and transcribed for the office." : "Sent to the office (no transcription without the Meta key).");
+          const form = new FormData();
+          form.append("audio", audio, "note");
+          const result = await voiceNote(warehouse, form);
+          if ("error" in result) throw new Error(result.error);
+          setSent(result.transcribed ? "Sent and transcribed for the office." : "Sent to the office as audio (no transcription).");
         }}
       />
       {sent && <p className="text-center text-xs text-dock-ink/60">{sent}</p>}
