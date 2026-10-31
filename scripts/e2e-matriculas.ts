@@ -150,6 +150,7 @@ async function stepA() {
   out(["GMV-004101", "GMV-004102", "GMV-004103", "JLV-MIX-0107"].every((c) => rb.includes(c)), `2. PDA list is prefilled with the IDs read from the note`);
   out(/MIXED/.test(rb), "2. the note's mixed pallet shows MIXED");
   out(null, `2. footer: ${rb.match(/\d+ lines? · \d+ pallets?[^C]*/)?.[0]}`);
+  out(/6 lines · 5 pallets · 1 mixed · 230 boxes/.test(rb), `2. prefilled footer: 5 pallets, 1 mixed, 230 boxes (${rb.match(/\d+ lines? · \d+ pallets?[^C]*/)?.[0]})`);
   await noSideScroll(pda, "receive");
 
   const rowsAll = pda.locator("ol > li");
@@ -376,6 +377,45 @@ async function billing(office: Page) {
   }
 }
 
+async function stepReplay() {
+  const browser = await chromium.launch({ args });
+  const office = await (await browser.newContext(desktop)).newPage();
+  const cli = await (await browser.newContext(phone)).newPage();
+  watch(office, "office"); watch(cli, "portal");
+  await login(office, process.env.E2E_OFFICE_USER!, process.env.E2E_OFFICE_PASS!);
+  await login(cli, process.env.E2E_C008_USER!, process.env.E2E_C008_PASS!);
+  await office.goto(`${BASE}/office/inbox`, { waitUntil: "networkidle" });
+  await office.getByRole("button", { name: /Replay the morning/ }).click();
+  await office.waitForLoadState("networkidle");
+  await office.waitForTimeout(5000);
+  const after = snapshot("after-replay-unloaded");
+  const before = readFileSync(join(DIR, "snap-before-step4.json"), "utf8");
+  out(before === after, `6. state-snapshot after Replay (truck NOT loaded) identical to before step 4: ${before === after ? "yes" : "NO"}`);
+  if (before !== after) writeFileSync(join(DIR, "snap-diff-unloaded.txt"), `--- before\n${before}\n--- after\n${after}\n`);
+  const rows = await db.stock.findMany({ where: { palletCode: "OBR-JIJ-0042" }, include: { item: true }, orderBy: { id: "asc" } });
+  out(rows.length === 2 && rows.every((r) => r.location === "C-13-4") && rows.filter((r) => r.pallets === 1).length === 1, `6. OBR-JIJ-0042: ${rows.map((r) => `${r.item.sku} ${r.units} pallets ${r.pallets} share ${r.palletShare?.toFixed(3)} ${r.location}`).join(" + ")}`);
+  out(Math.abs(rows.reduce((a, r) => a + (r.palletShare ?? 0), 0) - 1) < 1e-6, "6. shares add up to 1");
+  out((await db.stock.count({ where: { location: { startsWith: "EXP-" }, outboundId: null } })) === 0, "6. 0 orphans in EXP lanes");
+  out((await db.stock.count({ where: { splitFrom: { not: null } } })) === 0, "6. no piece with splitFrom left");
+  const c8 = await palletsOf("C008");
+  await office.goto(`${BASE}/office`, { waitUntil: "networkidle" });
+  const today = flat(await body(office));
+  await shot(office, "today");
+  const tl = today.slice(today.search(/stock by customer/i)).match(/Dulces Carrascal, S\.L\.\s*(\d+) plt( \+ \d+ picos?)?/);
+  out(!!tl && Number(tl[1]) === c8.distinct && !tl[2], `c. Today "Stock by customer" C008: ${tl?.[0]} (DB pallets ${c8.distinct})`);
+  await office.goto(`${BASE}/office/clients`, { waitUntil: "networkidle" });
+  const cl = flat(await body(office));
+  await shot(office, "clients");
+  const cm = cl.match(/Dulces Carrascal, S\.L\..{0,90}/)?.[0] ?? "";
+  out(new RegExp(`\\b${c8.distinct}\\b`).test(cm) && !/pico/i.test(cm), `c. /office/clients C008: ${cm}`);
+  await cli.goto(`${BASE}/portal`, { waitUntil: "networkidle" });
+  const pm = flat(await body(cli)).match(/Pallets in storage\s*(\d+)/i)?.[1];
+  out(Number(pm) === c8.distinct, `c. portal C008: ${pm} (DB ${c8.distinct})`);
+  await shot(cli, "portal");
+  await noSideScroll(cli, "portal C008");
+  await browser.close();
+}
+
 async function stepBilling() {
   const browser = await chromium.launch({ args });
   const office = await (await browser.newContext(desktop)).newPage();
@@ -518,6 +558,7 @@ async function stepRace() {
   else if (STEP === "b") await stepB();
   else if (STEP === "c") await stepC();
   else if (STEP === "race") await stepRace();
+  else if (STEP === "replay") await stepReplay();
   else if (STEP === "billing") await stepBilling();
   else throw new Error("STEP must be a, b or c");
   console.log("PROBLEMS", problems.length ? "\n  " + problems.join("\n  ") : "none");
