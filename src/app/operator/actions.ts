@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { transcribe } from "@/lib/ai/voice";
 import { db } from "@/lib/db";
 import { Fixable, orFixable } from "@/lib/fixable";
-import { checkIn, confirmReceipt, pickPallet, putAway, recordLoad, recordNote, suggestPutAway, typeNote, type ReceivedLine } from "@/lib/ops/floor";
+import { checkIn, confirmReceipt, pickPallet, putAway, recordLoad, recordNote, suggestPutAway, typeNote } from "@/lib/ops/floor";
+import { checkBreakdown, cleanDrafts, type PalletDraft } from "@/lib/pallets/breakdown";
 import { assertRole } from "@/lib/session";
 import { parseDataUrl, saveUpload } from "@/lib/uploads";
 
@@ -54,27 +55,39 @@ export async function loadPhoto(inboundId: string, photo: string) {
   return count ? { boxes: count.boxes.length, damaged: count.boxes.filter((b) => b.damaged).length, pallets: count.pallets, by: count.by } : null;
 }
 
-export async function receive(inboundId: string, lines: ReceivedLine[], damaged: number, incident: string) {
+/**
+ * The operator confirms what came off the truck, pallet by pallet.
+ * `pallets`: one entry per physical pallet, `{ code: string | null, lines: [{ itemId, lot, expiresAt: "YYYY-MM-DD" | null, units }] }`
+ * (blank code = the warehouse labels it; several lines = a mixed pallet of this customer).
+ * Returns `{ codes }` (the generated IDs, to label those pallets) or `{ error }` for anything the person can fix.
+ */
+export async function receive(inboundId: string, pallets: PalletDraft[], damaged: number, incident: string): Promise<{ error?: string; codes?: string[] }> {
   await requireFloor();
-  return orFixable(() => receiveChecked(inboundId, lines, damaged, incident));
+  let codes: string[] | undefined;
+  const result = await orFixable(async () => {
+    codes = await receiveChecked(inboundId, pallets, damaged, incident);
+  });
+  return result.error ? result : { codes };
 }
 
-async function receiveChecked(inboundId: string, lines: ReceivedLine[], damaged: number, incident: string) {
-  // A line left at 0 is an empty line; anything else must be a whole number of pallets.
-  const clean = lines.filter((l) => l.itemId && l.pallets !== 0);
-  for (const l of clean) wholeCount(l.pallets, 1, 66, "pallets");
-  if (!clean.length) throw new Fixable("Add at least one line with pallets.");
+async function receiveChecked(inboundId: string, input: PalletDraft[], damaged: number, incident: string) {
+  const cleaned = cleanDrafts(input);
+  if (!cleaned.ok) throw new Fixable(cleaned.error);
   wholeCount(damaged, 0, 500, "damaged boxes");
   // Only this customer's items: the stock is booked to the customer of the delivery.
   const inbound = await db.inbound.findUniqueOrThrow({ where: { id: inboundId }, select: { clientId: true } });
-  const items = await db.item.findMany({ where: { id: { in: clean.map((l) => l.itemId) }, clientId: inbound.clientId } });
-  if (clean.some((l) => !items.some((i) => i.id === l.itemId))) throw new Fixable("That item is not one of this customer's. Reload and pick it again.");
-  const withUnits = clean.map((l) => ({ ...l, lot: l.lot?.trim() || null, unitsPerPallet: items.find((i) => i.id === l.itemId)!.unitsPerPallet }));
+  const items = await db.item.findMany({ where: { clientId: inbound.clientId }, select: { id: true, sku: true, unitsPerPallet: true } });
+  const used = new Set(cleaned.drafts.flatMap((p) => p.lines.map((l) => l.itemId)));
+  if ([...used].some((id) => !items.some((i) => i.id === id))) throw new Fixable("That item is not one of this customer's. Reload and pick it again.");
+  // The same rules the transaction applies (it repeats them against the pallets inside at that moment).
+  const { errors } = checkBreakdown(cleaned.drafts, items, new Map());
+  if (errors.length) throw new Fixable(errors.slice(0, 3).join(" "));
   const receipt = await db.dockReceipt.findUnique({ where: { inboundId } });
   const found = (receipt?.damages as { box: number; note: string }[] | null) ?? [];
   const damages = found.length >= damaged ? found.slice(0, damaged) : [...found, ...Array.from({ length: damaged - found.length }, (_, i) => ({ box: found.length + i + 1, note: "Damaged (operator)" }))];
-  await confirmReceipt(inboundId, withUnits, damages, incident.trim() || null);
+  const { codes } = await confirmReceipt(inboundId, cleaned.drafts, damages, incident.trim() || null);
   refresh();
+  return codes;
 }
 
 export async function suggestSlotFor(stockId: string) {
@@ -88,20 +101,26 @@ export async function putAwayPallet(stockId: string, location: string) {
   refresh();
 }
 
-/** Puts every waiting pallet of a lane where the clerk suggests, one after the other. */
+/** Puts every waiting pallet of a lane where the clerk suggests, one after the other. Returns how many pallets (not rows) were waiting. */
 export async function putAwayAll(warehouseCode: string) {
   await requireFloor();
   const waiting = await db.stock.findMany({
     where: { warehouse: { code: warehouseCode }, location: { startsWith: "REC-" } },
     orderBy: [{ location: "asc" }, { id: "asc" }],
   });
-  for (const pallet of waiting) {
-    const slot = await suggestPutAway(pallet.id);
+  const placed = new Set<string>();
+  let pallets = 0;
+  for (const row of waiting) {
+    const key = row.palletCode ? `${row.location}|${row.palletCode}` : row.id;
+    if (placed.has(key)) continue; // a mixed pallet moved with its first row
+    pallets++;
+    const slot = await suggestPutAway(row.id);
     if (!slot) break;
-    await putAway(pallet.id, slot);
+    await putAway(row.id, slot);
+    placed.add(key);
   }
   refresh();
-  return waiting.length;
+  return pallets;
 }
 
 export async function pick(outboundId: string, stockId: string, units?: number) {

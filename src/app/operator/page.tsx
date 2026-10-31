@@ -26,7 +26,8 @@ export default async function OperatorHome({ searchParams }: PageProps<"/operato
       },
       include: { client: true, appointment: true, receipt: true },
     }),
-    db.stock.groupBy({ by: ["location"], where: { warehouseId: here.id, location: { startsWith: "REC-" } }, _count: true, orderBy: { location: "asc" } }),
+    // `pallets` is 1 on the head row of each physical pallet and 0 on the other rows of a mixed one: the sum counts pallets.
+    db.stock.groupBy({ by: ["location"], where: { warehouseId: here.id, location: { startsWith: "REC-" } }, _sum: { pallets: true }, orderBy: { location: "asc" } }),
     openPickPlans(),
     db.outbound.findMany({
       where: { status: "PREPARED", warehouseId: here.id },
@@ -41,7 +42,7 @@ export default async function OperatorHome({ searchParams }: PageProps<"/operato
     include: { client: true, consignee: true, appointment: true },
     orderBy: [{ deadline: "asc" }],
   });
-  const waitingTotal = waiting.reduce((sum, g) => sum + g._count, 0);
+  const waitingTotal = waiting.reduce((sum, g) => sum + (g._sum.pallets ?? 0), 0);
 
   return (
     <main className="space-y-5 px-4 py-4">
@@ -75,7 +76,7 @@ export default async function OperatorHome({ searchParams }: PageProps<"/operato
 
       <Section title="Put away" count={waitingTotal} icon={<MoveRight size={15} />}>
         {waiting.map((g) => (
-          <Task key={g.location} href={`/operator/putaway?w=${here.code}`} title={`${g._count} pallets in ${g.location.replace("-", " ")}`} detail="The clerk suggests a slot for each one" chip="Waiting" />
+          <Task key={g.location} href={`/operator/putaway?w=${here.code}`} title={`${g._sum.pallets ?? 0} pallets in ${g.location.replace("-", " ")}`} detail="The clerk suggests a slot for each one" chip="Waiting" />
         ))}
       </Section>
 

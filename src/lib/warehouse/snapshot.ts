@@ -115,7 +115,7 @@ export async function getWarehouseSnapshot(code?: string): Promise<WarehouseSnap
   const plans = allocatePicks(
     stock.map((s) => ({
       id: s.id, warehouseId: s.warehouseId, itemId: s.itemId, location: s.location, units: s.units,
-      expiresAt: s.expiresAt, receivedAt: s.inbound?.date ?? null, outboundId: s.outboundId,
+      expiresAt: s.expiresAt, receivedAt: s.inbound?.date ?? null, outboundId: s.outboundId, palletCode: s.palletCode,
     })),
     open.map((o) => ({ id: o.id, number: o.number, date: o.date, deadline: o.deadline, lines: o.lines.map((l) => ({ itemId: l.itemId, units: l.units, unitsPerPallet: l.item.unitsPerPallet })) })),
   );
@@ -175,7 +175,7 @@ export async function getWarehouseSnapshot(code?: string): Promise<WarehouseSnap
       client: clientIndex.get(o.clientId)!,
       consignee: o.consignee?.name ?? null,
       deadline: (o.deadline ?? o.date).toISOString(),
-      pallets: here.filter((s) => s.outboundId === o.id).length,
+      pallets: here.filter((s) => s.outboundId === o.id).reduce((sum, s) => sum + s.pallets, 0),
     })),
     truck: truck ? { number: truck.number, client: truck.client.name, plate: truck.plate, status: truck.status } : null,
     busyDocks: atDock.map((a) => a.dock),

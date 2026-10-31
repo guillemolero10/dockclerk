@@ -138,7 +138,10 @@ export async function resetInbox() {
         await tx.stock.update({ where: { id: m.intoId }, data: { units: { increment: m.units } } });
         await tx.stock.delete({ where: { id: m.fromId } });
       }
-      for (const m of plan.moves) await tx.stock.update({ where: { id: m.id }, data: { outboundId: null, location: m.location } });
+      for (const m of plan.moves) await tx.stock.update({ where: { id: m.id }, data: { outboundId: null, location: m.location, splitFrom: null } });
+      // A piece taken off a mixed pallet goes back onto it, under its ID; then every pallet that changed is re-shared.
+      for (const j of plan.joins ?? []) await tx.stock.update({ where: { id: j.id }, data: { outboundId: null, location: j.location, palletCode: j.palletCode, splitFrom: null } });
+      for (const u of plan.shares ?? []) await tx.stock.update({ where: { id: u.id }, data: { pallets: u.pallets, palletShare: u.palletShare } });
     }
     await tx.outbound.deleteMany({ where: { id: { in: outboundIds } } });
     await tx.draft.deleteMany();

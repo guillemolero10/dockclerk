@@ -104,7 +104,7 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
   // Open outbounds: short of stock, or close to the deadline with nothing picked.
   const pickable = stock.map((s) => ({
     id: s.id, warehouseId: s.warehouseId, itemId: s.itemId, location: s.location, units: s.units,
-    expiresAt: s.expiresAt, receivedAt: s.inbound?.date ?? null, outboundId: s.outboundId,
+    expiresAt: s.expiresAt, receivedAt: s.inbound?.date ?? null, outboundId: s.outboundId, palletCode: s.palletCode,
   }));
   const plans = allocatePicks(pickable, open.map((o) => ({ id: o.id, number: o.number, date: o.date, deadline: o.deadline, lines: o.lines.map((l) => ({ itemId: l.itemId, units: l.units, unitsPerPallet: l.item.unitsPerPallet })) })));
   for (const o of open) {
@@ -175,7 +175,8 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
 
   // Received pallets still in the receiving lanes.
   for (const w of warehouses) {
-    const waiting = stock.filter((s) => s.warehouseId === w.id && s.location.startsWith("REC-"));
+    // A mixed pallet is several rows with one pallet ID: count pallets, not rows.
+    const waiting = stock.filter((s) => s.warehouseId === w.id && s.location.startsWith("REC-") && s.pallets > 0);
     if (!waiting.length) continue;
     const oldest = Math.min(...waiting.map((s) => s.inbound?.date.getTime() ?? t));
     const hours = (t - oldest) / HOUR;

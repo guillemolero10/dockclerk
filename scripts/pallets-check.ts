@@ -6,6 +6,8 @@
 // Exit code 1 if any case fails, so it can run before recording the video.
 
 import { describeUnits, readQuantity, splitUnits, toUnits } from "../src/lib/pallets/quantity";
+import { checkBreakdown, cleanDrafts, expandPallets, fromNote, leadIndex, sharesOf, summarize, type ItemLite, type PalletDraft } from "../src/lib/pallets/breakdown";
+import { freshCodes, generatedCode, parseCode } from "../src/lib/pallets/codes";
 import { planRestore, type LaneRow } from "../src/lib/warehouse/restore";
 import { allocatePicks, describeShortage, type OpenOrder, type PickableStock, type PickPlan } from "../src/lib/warehouse/picking";
 
@@ -206,6 +208,165 @@ const CASES: Case[] = [
     return same({ slots: p.short, text: describeShortage(p.shortLines, (id) => sku.get(id)) }, { slots: 3, text: "1 palé + 5 sacos of PP-NAT and 30 cajas of PUZZLE-500" });
   } },
 ];
+
+// ---------- pallet by pallet: IDs, mixed pallets (breakdown.ts, codes.ts) ----------
+const ITEMS: ItemLite[] = [
+  { id: "AGUA", sku: "AGUA-15", unitsPerPallet: 84 },
+  { id: "HORCH", sku: "HORCH-1L", unitsPerPallet: 100 },
+  { id: "TURR", sku: "TURRON-BLA", unitsPerPallet: 70 },
+  { id: "POLV", sku: "POLVORON", unitsPerPallet: 80 },
+];
+const one = (itemId: string, units: number, code: string | null = null, lot: string | null = "L1"): PalletDraft => ({ code, lines: [{ itemId, lot, expiresAt: null, units }] });
+const errorsOf = (d: PalletDraft[], live: Record<string, string> = {}) => checkBreakdown(d, ITEMS, new Map(Object.entries(live))).errors;
+
+const BREAKDOWN_CASES: Case[] = [
+  { name: "P10 «38 × AGUA-15» + 2 de otra referencia: 40 palés válidos, resumen 38 y 2 palés", check: () => {
+    const d = [...expandPallets({ itemId: "AGUA", lot: "L1", expiresAt: null, units: 84 }, 38), ...expandPallets({ itemId: "HORCH", lot: "H1", expiresAt: null, units: 100 }, 2)];
+    return same({ n: d.length, errors: errorsOf(d), summary: summarize(d).map((s) => [s.itemId, s.pallets, s.units]) }, { n: 40, errors: [], summary: [["AGUA", 38, 3192], ["HORCH", 2, 200]] });
+  } },
+  { name: "P11 palé mixto 35 TURRON-BLA + 40 POLVORON: válido, shares 0,5 + 0,5, cabeza la primera, cada artículo cuenta 1 palé", check: () => {
+    const d = [{ code: "OBR-JIJ-0042", lines: [{ itemId: "TURR", lot: "T1", expiresAt: "2026-12-01", units: 35 }, { itemId: "POLV", lot: "P1", expiresAt: null, units: 40 }] }];
+    const sh = sharesOf(d[0].lines, ITEMS);
+    return same({ errors: errorsOf(d), sh, lead: leadIndex(sh), summary: summarize(d).map((s) => [s.itemId, s.pallets]) }, { errors: [], sh: [0.5, 0.5], lead: 0, summary: [["TURR", 1], ["POLV", 1]] });
+  } },
+  { name: "P11b la cabeza es la de más share y un palé de una línea no tiene share", check: () => {
+    const lines = [{ itemId: "TURR", lot: null, expiresAt: null, units: 20 }, { itemId: "POLV", lot: null, expiresAt: null, units: 40 }];
+    const sh = sharesOf(lines, ITEMS) as number[];
+    return same({ lead: leadIndex(sh), sum: Math.round((sh[0] + sh[1]) * 1e9) / 1e9, single: sharesOf([lines[0]], ITEMS) }, { lead: 1, sum: 1, single: [null] });
+  } },
+  { name: "P12 la misma matrícula dos veces en la lista → «is twice on this list»", check: () =>
+    same(errorsOf([one("AGUA", 84, "GMV-0581"), one("AGUA", 84, "GMV-0582"), one("HORCH", 100, "GMV-0581")]), ["Pallet ID GMV-0581 is twice on this list."]) },
+  { name: "P13 matrícula ya dentro del almacén → «already in the building (A-07-3)»", check: () =>
+    same(errorsOf([one("AGUA", 84, "N1-000123")], { "N1-000123": "A-07-3" }), ["Pallet ID N1-000123 is already in the building (A-07-3)."]) },
+  { name: "P14 no cabe en un palé: 120 cajas de AGUA-15 (84 máx.) y mixto 60 % + 55 % «more than full»; una línea de 0 cajas", check: () => {
+    const mixed: PalletDraft = { code: null, lines: [{ itemId: "TURR", lot: null, expiresAt: null, units: 42 }, { itemId: "POLV", lot: null, expiresAt: null, units: 44 }] };
+    return same([errorsOf([one("AGUA", 120)]), errorsOf([mixed]), errorsOf([one("AGUA", 0)]).length, errorsOf([]).length], [
+      ["Pallet 1: 120 boxes of AGUA-15 do not fit on one pallet (84 max)."],
+      ["Pallet 1 is more than full (60 % + 55 %)."],
+      1, 1,
+    ]);
+  } },
+  { name: "P14b límites: 67 palés, 5 líneas en un palé, fecha mala, artículo ajeno, mismo artículo y lote dos veces", check: () => {
+    const many = Array.from({ length: 67 }, () => one("AGUA", 1));
+    const five: PalletDraft = { code: null, lines: Array.from({ length: 5 }, (_, i) => ({ itemId: "AGUA", lot: `L${i}`, expiresAt: null, units: 1 })) };
+    const bad: PalletDraft = { code: null, lines: [{ itemId: "AGUA", lot: null, expiresAt: "2026-13-45", units: 1 }] };
+    const alien = one("ZZZ", 1);
+    const twice: PalletDraft = { code: null, lines: [{ itemId: "AGUA", lot: "L", expiresAt: null, units: 1 }, { itemId: "AGUA", lot: "L", expiresAt: null, units: 1 }] };
+    return same([errorsOf(many)[0], errorsOf([five])[0], errorsOf([bad]).length, errorsOf([alien]), errorsOf([twice])], [
+      "A delivery has at most 66 pallets here (this one has 67).",
+      "Pallet 1: at most 4 items on one pallet.",
+      1,
+      ["Pallet 1: that item is not one of this customer's."],
+      ["Pallet 1: AGUA-15 is listed twice with the same lot and date."],
+    ]);
+  } },
+  { name: "P15 fromNote con matrículas: 3 palés de AGUA con AA-1, AA-2, AA-3 y 1 de HORCH con AA-2 → 3 palés, el segundo mixto", check: () => {
+    const d = fromNote([
+      { sku: "AGUA-15", lot: "L1", pallets: 3, units: 252, palletCodes: ["aa-1", "AA-2", "AA-3"] },
+      { sku: "HORCH-1L", lot: "H1", pallets: 1, units: 40, palletCodes: ["AA-2"] },
+    ], ITEMS);
+    return same(d.map((p) => [p.code, p.lines.map((l) => [l.itemId, l.units])]), [["AA-1", [["AGUA", 84]]], ["AA-2", [["AGUA", 84], ["HORCH", 40]]], ["AA-3", [["AGUA", 84]]]]);
+  } },
+  { name: "P16 fromNote sin matrículas: 250 cajas en 3 palés de 84 → 84 + 83 + 83; sin cajas, palés llenos; matrícula inválida se descarta", check: () => {
+    const a = fromNote([{ sku: "AGUA-15", lot: null, pallets: 3, units: 250 }], ITEMS).map((p) => p.lines[0].units);
+    const b = fromNote([{ sku: "HORCH-1L", lot: " H ", pallets: 2, units: null, palletCodes: ["??", "OK-1234"] }, { sku: "NOPE", lot: null, pallets: 4, units: null }], ITEMS);
+    return same([a, b.map((p) => [p.code, p.lines[0].units, p.lines[0].lot])], [[84, 83, 83], [[null, 100, "H"], ["OK-1234", 100, "H"]]]);
+  } },
+  { name: "P17 matrículas: parseCode (mayúsculas, sin espacios, quita «(00)», vacío = ninguna, inválidas), generatedCode y freshCodes saltan las vivas", check: () => {
+    const taken = new Set(["N1-000002"]);
+    const f = freshCodes("N1", 1, 3, taken);
+    return same([
+      parseCode(" (00)n1-000123 "), parseCode("   "), parseCode("ab"), parseCode("a".repeat(30)).ok, parseCode("A B/C").ok, generatedCode("N1", 123),
+      f, [...taken].sort(),
+    ], [
+      { ok: true, code: "N1-000123" }, { ok: true, code: null }, { ok: false, error: 'Pallet ID "AB" is not valid: 4 to 24 letters, digits or dashes.' }, false, false, "N1-000123",
+      { codes: ["N1-000001", "N1-000003", "N1-000004"], used: 4 }, ["N1-000001", "N1-000002", "N1-000003", "N1-000004"],
+    ]);
+  } },
+  { name: "P18 cleanDrafts: limpia el código y el lote; lo que no es una lista de palés con líneas se rechaza", check: () => {
+    const ok = cleanDrafts([{ code: " gmv 0581 ", lines: [{ itemId: "AGUA", lot: " L1 ", expiresAt: "", units: 84 }] }, { code: "", lines: [{ itemId: "HORCH", units: 5 }] }]);
+    const bad = [cleanDrafts("x"), cleanDrafts([null]), cleanDrafts([{ code: 7, lines: [] }]), cleanDrafts([{ code: null, lines: [{ itemId: "A", units: "5" }] }]), cleanDrafts([{ code: "ab", lines: [] }])].map((r) => r.ok);
+    return same([ok.ok && ok.drafts, bad], [[{ code: "GMV0581", lines: [{ itemId: "AGUA", lot: "L1", expiresAt: null, units: 84 }] }, { code: null, lines: [{ itemId: "HORCH", lot: null, expiresAt: null, units: 5 }] }], [false, false, false, false, false]]);
+  } },
+];
+
+// ---------- picking and putting back pallets with IDs ----------
+let cseq = 0;
+const crow = (id: string, itemId: string, units: number, code: string | null, o: Partial<PickableStock> = {}): PickableStock => ({
+  id, warehouseId: "W1", itemId, location: "C-13-4", units, expiresAt: day(20 + ++cseq), receivedAt: day(1), outboundId: null, palletCode: code, ...o,
+});
+const mixedStock = () => [crow("t", "TURR", 35, "OBR-1"), crow("p", "POLV", 40, "OBR-1", { expiresAt: day(10) }), crow("solo", "AGUA", 84, "N1-000009", { location: "A-01-1" })];
+const askFor = (...lines: [string, number][]): OpenOrder => ({ id: "O1", number: 1, date: day(20), deadline: null, lines: lines.map(([itemId, units]) => ({ itemId, units, unitsPerPallet: ({ TURR: 70, POLV: 80, AGUA: 84 } as Record<string, number>)[itemId] })) });
+const crow2 = (id: string, itemId: string, units: number, location: string, o: Partial<LaneRow> = {}): LaneRow => ({
+  id, warehouseId: "W1", itemId, clientId: "C8", lot: "L", expiresAt: day(28), inboundId: "IN1", units, location, palletCode: null, palletShare: null, pallets: 1, splitFrom: null, ...o,
+});
+const upp = new Map([["TURR", 70], ["POLV", 80], ["AGUA", 84]]);
+
+const PICK_CASES: Case[] = [
+  { name: "R7 pedido que se lleva las dos filas de un palé mixto → UN paso «pallet» con las dos filas y su matrícula; un palé sin mixto, también", check: () => {
+    const p = planOf(mixedStock(), askFor(["TURR", 35], ["POLV", 40], ["AGUA", 84]));
+    return same(p.steps, [
+      { kind: "pallet", palletCode: "OBR-1", stockIds: ["t", "p"], location: "C-13-4" },
+      { kind: "pallet", palletCode: "N1-000009", stockIds: ["solo"], location: "A-01-1" },
+    ]);
+  } },
+  { name: "R8 pedido de una sola referencia del mixto (40 de POLVORON, la fila entera) → paso «boxes» mixed, y la fila entra en split aunque se lleve entera", check: () => {
+    const p = planOf(mixedStock(), askFor(["POLV", 40]));
+    return same({ steps: p.steps, split: p.split }, {
+      steps: [{ kind: "boxes", stockId: "p", units: 40, palletCode: "OBR-1", location: "C-13-4", mixed: true }],
+      split: [{ stockId: "p", units: 40 }],
+    });
+  } },
+  { name: "R8b cajas sueltas (30 de AGUA de un palé de 84) → boxes no mixed; FEFO no cambia: el mixto que caduca antes sale primero", check: () => {
+    const p = planOf(mixedStock(), askFor(["AGUA", 30]));
+    const q = planOf([crow("late", "POLV", 80, "N1-000011", { expiresAt: day(25) }), ...mixedStock()], askFor(["POLV", 40]));
+    return same([p.steps, q.steps.map((s) => (s.kind === "boxes" ? s.stockId : "pallet"))], [
+      [{ kind: "boxes", stockId: "solo", units: 30, palletCode: "N1-000009", location: "A-01-1", mixed: false }],
+      ["p"],
+    ]);
+  } },
+  { name: "R8c tras recoger parte: el palé ya recogido no vuelve a salir como paso; el mixto con una fila reservada por otro pedido no se lleva «entero»", check: () => {
+    const stock = mixedStock();
+    const orders = [askFor(["TURR", 35]), { ...askFor(["POLV", 40], ["TURR", 0]), id: "O2", number: 2 }];
+    const plans = allocatePicks(stock, orders);
+    return same([plans.get("O1")!.steps.map((s) => s.kind), plans.get("O2")!.steps.map((s) => s.kind)], [["boxes"], ["boxes"]]);
+  } },
+  { name: "R9 Replay: la fila POLVORON sacada del mixto (splitFrom OBR-1) vuelve a su palé con su matrícula, y las dos filas se reparten 0,5 + 0,5", check: () => {
+    const left = crow2("t", "TURR", 35, "C-13-4", { palletCode: "OBR-1", palletShare: null, pallets: 1 });
+    const piece = crow2("p", "POLV", 40, "EXP-1", { palletCode: "N2-000162", splitFrom: "OBR-1" });
+    const plan = planRestore([piece], [left, piece], upp, freeSlot());
+    return same({ joins: plan.joins, moves: plan.moves, shares: plan.shares }, {
+      joins: [{ id: "p", palletCode: "OBR-1", location: "C-13-4" }],
+      moves: [],
+      shares: [{ id: "p", pallets: 1, palletShare: 0.5 }, { id: "t", pallets: 0, palletShare: 0.5 }], // tie: the lowest id is the head
+    });
+  } },
+  { name: "R9b Replay: cajas sacadas de una fila (splitFrom) se suman a la fila de origen; el palé queda de una línea (sin share)", check: () => {
+    const rest = crow2("rest", "AGUA", 54, "A-01-1", { palletCode: "N1-000009" });
+    const piece = crow2("piece", "AGUA", 30, "EXP-1", { palletCode: "N1-000200", splitFrom: "N1-000009" });
+    const plan = planRestore([piece], [rest, piece], upp, freeSlot());
+    return same({ merges: plan.merges, joins: plan.joins ?? null, shares: plan.shares }, { merges: [{ fromId: "piece", intoId: "rest", units: 30 }], joins: null, shares: [{ id: "rest", pallets: 1, palletShare: null }] });
+  } },
+  { name: "R10 cabeza recalculada: si la fila de más share es la que vuelve, pasa a ser la cabeza (y la otra queda en 0 palés); un palé entero sale de nuevo junto con su matrícula", check: () => {
+    const rest = crow2("a", "TURR", 20, "C-13-4", { palletCode: "OBR-2", palletShare: null, pallets: 1 }); // 20/70 = 0,286
+    const piece = crow2("b", "POLV", 40, "EXP-1", { palletCode: "N2-000300", splitFrom: "OBR-2" }); // 40/80 = 0,5
+    const plan = planRestore([piece], [rest, piece], upp, freeSlot());
+    const sh = plan.shares ?? [];
+    const lead = sh.filter((x) => x.pallets === 1).map((x) => x.id);
+    const sum = sh.reduce((a, x) => a + (x.palletShare ?? 0), 0);
+    // A mixed pallet that left whole (pallet step) goes back whole: one slot for both rows, ID kept.
+    const whole = planRestore([crow2("x", "TURR", 35, "EXP-1", { palletCode: "OBR-3", palletShare: 0.5, pallets: 1 }), crow2("y", "POLV", 40, "EXP-1", { palletCode: "OBR-3", palletShare: 0.5, pallets: 0 })], [], upp, freeSlot());
+    return same({ lead, sum: Math.round(sum * 1e9) / 1e9, whole: whole.moves, noShares: whole.shares ?? null }, { lead: ["b"], sum: 1, whole: [{ id: "x", location: "Z-00-1" }, { id: "y", location: "Z-00-1" }], noShares: null });
+  } },
+  { name: "R10b pieza que ya no cabe en su palé de origen (más de 100 %) o cuyo origen ya no está: va a un hueco propio y no toca la matrícula", check: () => {
+    const origin = crow2("o", "AGUA", 84, "A-01-1", { palletCode: "N1-000009" });
+    const full = crow2("f", "TURR", 10, "EXP-1", { palletCode: "N2-1", splitFrom: "N1-000009" });
+    const gone = crow2("g", "TURR", 10, "EXP-1", { palletCode: "N2-2", splitFrom: "ZZ-GONE-1" });
+    const plan = planRestore([full, gone], [origin, full, gone], upp, freeSlot());
+    return same({ moves: plan.moves.length, joins: plan.joins ?? null, shares: plan.shares ?? null }, { moves: 2, joins: null, shares: null });
+  } },
+];
+CASES.push(...BREAKDOWN_CASES, ...PICK_CASES);
 
 let failed = 0;
 for (const c of CASES) {

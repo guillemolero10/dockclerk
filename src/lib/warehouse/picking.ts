@@ -21,6 +21,8 @@ export type PickableStock = {
   receivedAt: Date | null;
   /** Already picked for this outbound. */
   outboundId: string | null;
+  /** Pallet ID. Rows with the same ID are one physical (mixed) pallet. null/undefined = an old row without one. */
+  palletCode?: string | null;
 };
 
 export type OpenOrder = {
@@ -31,6 +33,14 @@ export type OpenOrder = {
   /** `unitsPerPallet` is the item's own figure (a full pallet), not what happens to be in stock. */
   lines: { itemId: string; units: number; unitsPerPallet: number }[];
 };
+
+/**
+ * What the operator does, one step at a time. A pallet that leaves with all its rows is one `pallet` step (it keeps its ID);
+ * anything else is a `boxes` step: those boxes go onto a new pallet with a new ID (a mixed pallet stays behind with the rest).
+ */
+export type PickStep =
+  | { kind: "pallet"; palletCode: string | null; stockIds: string[]; location: string }
+  | { kind: "boxes"; stockId: string; units: number; palletCode: string | null; location: string; mixed: boolean };
 
 export type PickPlan = {
   warehouseId: string | null;
@@ -46,6 +56,8 @@ export type PickPlan = {
   short: number;
   /** The shortage by item, for screens that name what is missing (see `describeShortage`). */
   shortLines: { itemId: string; units: number; unitsPerPallet: number }[];
+  /** The work still to do, grouped by physical pallet (rows already picked are not here). */
+  steps: PickStep[];
 };
 
 /**
@@ -110,7 +122,7 @@ export function allocatePicks(stock: PickableStock[], orders: OpenOrder[]): Map<
       }
     }
 
-    const plan: PickPlan = { warehouseId: best, stockIds: picked.map((s) => s.id), picked: picked.map((s) => s.id), split: [], shortUnits: 0, short: 0, shortLines: [] };
+    const plan: PickPlan = { warehouseId: best, stockIds: picked.map((s) => s.id), picked: picked.map((s) => s.id), split: [], shortUnits: 0, short: 0, shortLines: [], steps: [] };
     for (const line of order.lines) {
       let missing = line.units - pickedOf(line.itemId);
       for (const s of best ? free(line.itemId, best) : []) {
@@ -131,7 +143,38 @@ export function allocatePicks(stock: PickableStock[], orders: OpenOrder[]): Map<
         plan.short += Math.ceil(missing / perPallet);
       }
     }
+    plan.steps = stepsOf(plan, stock);
     plans.set(order.id, plan);
   }
   return plans;
+}
+
+/**
+ * Groups the rows still to pick by physical pallet. If the plan takes every row of a pallet whole, that is one `pallet` step.
+ * Otherwise each row it touches is a `boxes` step and goes in `split` even when the whole row is taken (the pallet stays behind).
+ */
+function stepsOf(plan: PickPlan, stock: PickableStock[]): PickStep[] {
+  const todo = plan.stockIds.filter((id) => !plan.picked.includes(id));
+  const todoSet = new Set(todo);
+  const byId = new Map(stock.map((s) => [s.id, s]));
+  const cut = new Map(plan.split.map((p) => [p.stockId, p.units]));
+  const steps: PickStep[] = [];
+  const done = new Set<string>();
+  for (const id of todo) {
+    if (done.has(id)) continue;
+    const row = byId.get(id)!;
+    const code = row.palletCode ?? null;
+    const siblings = code ? stock.filter((s) => s.palletCode === code && s.warehouseId === row.warehouseId) : [row];
+    const whole = siblings.every((s) => !s.outboundId && todoSet.has(s.id) && !cut.has(s.id));
+    if (whole) {
+      siblings.forEach((s) => done.add(s.id));
+      steps.push({ kind: "pallet", palletCode: code, stockIds: siblings.map((s) => s.id), location: row.location });
+      continue;
+    }
+    done.add(id);
+    const units = cut.get(id) ?? row.units;
+    if (!cut.has(id)) plan.split.push({ stockId: id, units });
+    steps.push({ kind: "boxes", stockId: id, units, palletCode: code, location: row.location, mixed: siblings.length > 1 });
+  }
+  return steps;
 }

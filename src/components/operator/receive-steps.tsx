@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Minus, Plus, Truck, X } from "lucide-react";
 import { loadPhoto, notePallets, notePhoto, receive, truckHere } from "@/app/operator/actions";
+import { expandPallets } from "@/lib/pallets/breakdown";
 import { PhotoButton } from "@/components/media/photo-button";
 
 export function TruckHereButton({ inboundId }: { inboundId: string }) {
@@ -196,7 +197,8 @@ export function ReceiveForm({
             try {
               const result = await receive(
                 inboundId,
-                lines.map((l) => ({ itemId: l.itemId, lot: l.lot || null, pallets: l.pallets, unitsPerPallet: 0 })),
+                // Until the pallet-by-pallet form: every pallet of a line is a full pallet with no ID (the warehouse labels it).
+                lines.filter((l) => l.pallets > 0).flatMap((l) => expandPallets({ itemId: l.itemId, lot: l.lot.trim() || null, expiresAt: null, units: items.find((x) => x.id === l.itemId)?.unitsPerPallet ?? 1 }, l.pallets)),
                 damaged,
                 incident,
               );

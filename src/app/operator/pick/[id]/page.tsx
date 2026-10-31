@@ -20,7 +20,7 @@ export default async function PickPage({ params }: PageProps<"/operator/pick/[id
   if (!outbound) return <p className="p-6">Not found.</p>;
 
   if (outbound.status !== "REQUESTED") {
-    const picked = await db.stock.count({ where: { outboundId: id } });
+    const picked = (await db.stock.aggregate({ where: { outboundId: id }, _sum: { pallets: true } }))._sum.pallets ?? 0;
     return (
       <main className="space-y-4 px-4 py-6">
         <Back code={outbound.warehouse?.code} />

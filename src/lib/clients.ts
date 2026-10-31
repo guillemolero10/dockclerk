@@ -90,7 +90,8 @@ export async function customerDetail(code: string, now = new Date()) {
     const pickedForOpenUnits = mine.filter((s) => s.outbound?.status === "REQUESTED").reduce((sum, s) => sum + s.units, 0);
     const reservedUnits = Math.max(0, (ordered.find((o) => o.itemId === item.id)?._sum.units ?? 0) - pickedForOpenUnits);
     const freeSplit = splitUnits(Math.max(0, units - pickedUnits - reservedUnits), item.unitsPerPallet);
-    const picos = mine.filter((s) => s.units % item.unitsPerPallet !== 0).length;
+    // A row of a mixed pallet holds part of a pallet by design: it is not a pico.
+    const picos = mine.filter((s) => s.palletShare === null && s.units % item.unitsPerPallet !== 0).length;
     const out30 = shipped.find((o) => o.itemId === item.id)?._sum.pallets ?? 0;
     const perWeek = (out30 / ROTATION_DAYS) * 7;
 
