@@ -42,6 +42,26 @@ export function splitUnits(units: number, perPallet: number): UnitSplit {
   return { full, loose: units - full * perPallet, equivalent: units / perPallet, slots: Math.ceil(units / perPallet) };
 }
 
+/**
+ * Whole pallets and picos held, from stock rows: a mixed pallet (its lines carry a share) is one whole pallet however full each line
+ * is; any other row is split by its own item ("33 plt + 1 pico", not "34").
+ */
+export function heldPallets(
+  rows: { itemId: string; units: number; palletCode: string | null; palletShare: number | null; warehouseId: string }[],
+  perPallet: Map<string, number>,
+) {
+  const mixed = new Set<string>();
+  let full = 0;
+  let picos = 0;
+  for (const r of rows) {
+    if (r.palletShare !== null && r.palletCode) { mixed.add(`${r.warehouseId}|${r.palletCode}`); continue; }
+    const split = splitUnits(r.units, perPallet.get(r.itemId) ?? 1);
+    full += split.full;
+    if (split.loose > 0) picos++;
+  }
+  return { full: full + mixed.size, picos };
+}
+
 const singular = (word: string) => (word.endsWith("s") ? word.slice(0, -1) : word);
 
 /** "2 palés + 20 cajas", "3 palés", "20 cajas", "1 palé + 1 caja". */

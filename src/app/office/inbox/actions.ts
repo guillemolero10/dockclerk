@@ -129,7 +129,9 @@ export async function resetInbox() {
     if (lane.length) {
       const warehouses = await tx.warehouse.findMany({ where: { id: { in: [...new Set(lane.map((r) => r.warehouseId))] } } });
       const here = await tx.stock.findMany({ where: { warehouseId: { in: warehouses.map((w) => w.id) } } });
-      const items = await tx.item.findMany({ where: { id: { in: [...new Set(lane.map((r) => r.itemId))] } }, select: { id: true, unitsPerPallet: true } });
+      // Every item in these buildings, not just the lane's: a piece going back onto a mixed pallet is measured against the
+      // other lines of that pallet too.
+      const items = await tx.item.findMany({ where: { id: { in: [...new Set([...lane, ...here].map((r) => r.itemId))] } }, select: { id: true, unitsPerPallet: true } });
       const layouts = new Map(warehouses.map((w) => [w.id, makeLayout(w)]));
       const plan = planRestore(lane, here, new Map(items.map((i) => [i.id, i.unitsPerPallet])), (row, taken) =>
         suggestSlot(layouts.get(row.warehouseId)!, taken, here.filter((s) => s.warehouseId === row.warehouseId && s.clientId === row.clientId).map((s) => s.location)),

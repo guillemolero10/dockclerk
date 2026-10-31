@@ -30,6 +30,13 @@ export function fromNote(lines: NoteLineLite[], items: ItemLite[]): PalletDraft[
   for (const l of lines) {
     const item = items.find((i) => i.sku === l.sku);
     const count = l.pallets ?? 0;
+    // A line with boxes but no pallets, under an ID already read: the second line of that mixed pallet.
+    if (item && !count && l.units && l.units > 0) {
+      const first = parseCode(l.palletCodes?.[0] ?? "");
+      const mixedWith = first.ok && first.code ? byCode.get(first.code) : undefined;
+      if (mixedWith) mixedWith.lines.push({ itemId: item.id, lot: l.lot?.trim() || null, expiresAt: null, units: l.units });
+      continue;
+    }
     if (!item || !Number.isInteger(count) || count < 1) continue;
     const total = l.units && l.units > 0 ? l.units : count * item.unitsPerPallet;
     const base = Math.floor(total / count);

@@ -4,7 +4,7 @@ import type { Channel } from "@prisma/client";
 import { getAlerts } from "@/lib/alerts";
 import { db } from "@/lib/db";
 import { fmtNumber, madridDayRange, madridHm } from "@/lib/format";
-import { splitUnits } from "@/lib/pallets/quantity";
+import { heldPallets } from "@/lib/pallets/quantity";
 import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -57,7 +57,7 @@ export default async function OfficeToday() {
       console.error("Alerts failed", error);
       return [];
     }),
-    db.stock.findMany({ select: { clientId: true, itemId: true, units: true } }),
+    db.stock.findMany({ select: { clientId: true, itemId: true, units: true, palletCode: true, palletShare: true, warehouseId: true } }),
     db.item.findMany({ select: { id: true, unitsPerPallet: true } }),
   ]);
   const urgent = alerts.filter((a) => a.level === "red");
@@ -66,13 +66,9 @@ export default async function OfficeToday() {
   const totalPallets = stockTotals._sum.pallets ?? 0;
   const maxClientPallets = Math.max(...stockByClient.map((s) => s._sum.pallets ?? 0), 1);
   const clientName = (id: string) => clients.find((c) => c.id === id)?.name ?? "";
-  // Whole pallets and loose ones (picos) apart, as on the customer cards: "33 plt + 1 pico", not "34 plt".
+  // Whole pallets and loose ones (picos) apart, as on the customer cards: "33 plt + 1 pico", not "34 plt"; a mixed pallet is one.
   const perPallet = new Map(items.map((i) => [i.id, i.unitsPerPallet]));
-  const heldBy = (clientId: string) =>
-    stockRows.filter((r) => r.clientId === clientId).reduce((acc, r) => {
-      const split = splitUnits(r.units, perPallet.get(r.itemId) ?? 1);
-      return { full: acc.full + split.full, picos: acc.picos + (split.loose > 0 ? 1 : 0) };
-    }, { full: 0, picos: 0 });
+  const heldBy = (clientId: string) => heldPallets(stockRows.filter((r) => r.clientId === clientId), perPallet);
   const today = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "Europe/Madrid" });
   const hour = Number(new Date().toLocaleString("en-GB", { hour: "2-digit", hour12: false, timeZone: "Europe/Madrid" }));
   const greeting = hour < 13 ? "Good morning" : hour < 20 ? "Good afternoon" : "Good evening";

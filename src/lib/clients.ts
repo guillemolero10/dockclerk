@@ -2,7 +2,7 @@
 // and what is promised to go out. Read in a handful of queries and added up in memory.
 
 import { db } from "@/lib/db";
-import { splitUnits } from "@/lib/pallets/quantity";
+import { heldPallets, splitUnits } from "@/lib/pallets/quantity";
 
 const DAY = 24 * 60 * 60 * 1000;
 /** Window used for rotation figures. */
@@ -16,7 +16,7 @@ export async function customerOverview(now = new Date()) {
     db.inboundLine.groupBy({ by: ["itemId"], where: { inbound: { date: { gte: since }, status: { in: ["RECEIVED", "CLOSED"] } } }, _sum: { pallets: true } }),
     db.outboundLine.groupBy({ by: ["itemId"], where: { outbound: { date: { gte: since }, status: { in: ["SHIPPED", "CLOSED"] } } }, _sum: { pallets: true } }),
     db.outbound.groupBy({ by: ["clientId"], where: { status: { in: ["REQUESTED", "PREPARED"] } }, _count: true }),
-    db.stock.findMany({ select: { clientId: true, itemId: true, units: true } }),
+    db.stock.findMany({ select: { clientId: true, itemId: true, units: true, palletCode: true, palletShare: true, warehouseId: true } }),
   ]);
   const items = await db.item.findMany({ select: { id: true, clientId: true, unitsPerPallet: true } });
   const perPallet = new Map(items.map((i) => [i.id, i.unitsPerPallet]));
@@ -30,14 +30,8 @@ export async function customerOverview(now = new Date()) {
   return clients.map((c) => {
     const mine = stock.filter((s) => s.clientId === c.id);
     const pallets = mine.reduce((sum, s) => sum + (s._sum.pallets ?? 0), 0);
-    // Whole pallets and loose ones (picos) apart: 33 pallets + 1 pico, not "34".
-    let fullPallets = 0;
-    let picos = 0;
-    for (const r of rows.filter((x) => x.clientId === c.id)) {
-      const split = splitUnits(r.units, perPallet.get(r.itemId) ?? 1);
-      fullPallets += split.full;
-      if (split.loose > 0) picos++;
-    }
+    // Whole pallets and loose ones (picos) apart: 33 pallets + 1 pico, not "34"; a mixed pallet is one.
+    const { full: fullPallets, picos } = heldPallets(rows.filter((x) => x.clientId === c.id), perPallet);
     const expiries = mine.map((s) => s._min.expiresAt).filter((d): d is Date => !!d);
     return {
       code: c.code,

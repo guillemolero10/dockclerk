@@ -5,7 +5,7 @@
 //
 // Exit code 1 if any case fails, so it can run before recording the video.
 
-import { describeUnits, readQuantity, splitUnits, toUnits } from "../src/lib/pallets/quantity";
+import { describeUnits, heldPallets, readQuantity, splitUnits, toUnits } from "../src/lib/pallets/quantity";
 import { checkBreakdown, cleanDrafts, expandPallets, fromNote, leadIndex, sharesOf, summarize, type ItemLite, type PalletDraft } from "../src/lib/pallets/breakdown";
 import { freshCodes, generatedCode, parseCode } from "../src/lib/pallets/codes";
 import { planRestore, type LaneRow } from "../src/lib/warehouse/restore";
@@ -266,6 +266,19 @@ const BREAKDOWN_CASES: Case[] = [
       { sku: "HORCH-1L", lot: "H1", pallets: 1, units: 40, palletCodes: ["AA-2"] },
     ], ITEMS);
     return same(d.map((p) => [p.code, p.lines.map((l) => [l.itemId, l.units])]), [["AA-1", [["AGUA", 84]]], ["AA-2", [["AGUA", 84], ["HORCH", 40]]], ["AA-3", [["AGUA", 84]]]]);
+  } },
+  { name: "P15b fromNote: la 2.ª línea de un mixto sin columna de palés (solo cajas y la matrícula ya leída) se une a ese palé; sin matrícula conocida se deja fuera", check: () => {
+    const d = fromNote([
+      { sku: "AGUA-15", lot: "L1", pallets: 2, units: 120, palletCodes: ["AA-1", "MIX-0107"] },
+      { sku: "HORCH-1L", lot: "H1", pallets: null, units: 30, palletCodes: ["mix-0107"] },
+      { sku: "HORCH-1L", lot: "H2", pallets: null, units: 30, palletCodes: ["ZZ-9999"] },
+    ], ITEMS);
+    return same(d.map((p) => [p.code, p.lines.map((l) => [l.itemId, l.lot, l.units])]), [["AA-1", [["AGUA", "L1", 60]]], ["MIX-0107", [["AGUA", "L1", 60], ["HORCH", "H1", 30]]]]);
+  } },
+  { name: "P15c heldPallets: un mixto de dos líneas es 1 palé (no 2 picos); las demás filas, palé o pico por su artículo", check: () => {
+    const per = new Map([["TURR", 70], ["POLV", 80], ["AGUA", 84]]);
+    const r = (itemId: string, units: number, palletCode: string | null, palletShare: number | null) => ({ itemId, units, palletCode, palletShare, warehouseId: "w2" });
+    return same(heldPallets([r("TURR", 35, "OBR-1", 0.5), r("POLV", 40, "OBR-1", 0.5), r("AGUA", 84, "N2-1", null), r("AGUA", 20, "N2-2", null)], per), { full: 2, picos: 1 });
   } },
   { name: "P16 fromNote sin matrículas: 250 cajas en 3 palés de 84 → 84 + 83 + 83; sin cajas, palés llenos; matrícula inválida se descarta", check: () => {
     const a = fromNote([{ sku: "AGUA-15", lot: null, pallets: 3, units: 250 }], ITEMS).map((p) => p.lines[0].units);
