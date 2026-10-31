@@ -3,6 +3,7 @@
 // then asks a person to type or count, so receiving never stops.
 
 import { chat, dataUrl, parseJson, providers } from "./client";
+import { cleanPalletCodes } from "./note-codes";
 import { readingOrder } from "./reading-order";
 
 type Image = { mime: string; base64: string };
@@ -10,7 +11,7 @@ type Image = { mime: string; base64: string };
 export type NoteReading = {
   docRef: string | null;
   supplier: string | null;
-  lines: { sku: string | null; description: string; lot: string | null; pallets: number | null; units: number | null }[];
+  lines: { sku: string | null; description: string; lot: string | null; pallets: number | null; units: number | null; /** Pallet IDs printed on the note for this line (SSCC, licence plates), only if there are any. */ palletCodes: string[] | null }[];
   totalPallets: number | null;
 };
 
@@ -25,9 +26,11 @@ export async function readDeliveryNote(image: Image, context: { customer: string
           role: "system",
           content:
             "You read photos of Spanish delivery notes (albaranes) at a warehouse dock. Answer only with JSON: " +
-            '{"docRef": string|null, "supplier": string|null, "totalPallets": number|null, "lines": [{"sku": string|null, "description": string, "lot": string|null, "pallets": number|null, "units": number|null}]}. ' +
+            '{"docRef": string|null, "supplier": string|null, "totalPallets": number|null, "lines": [{"sku": string|null, "description": string, "lot": string|null, "pallets": number|null, "units": number|null, "palletCodes": string[]|null}]}. ' +
             "Map each line to one of the customer's SKUs when the description clearly matches; otherwise sku is null. " +
             "units = the number of boxes (cajas, bultos) exactly as written on the line; never multiply by the pieces inside each box. " +
+            "If the note has a pallet ID column (Pallet ID, SSCC, matrícula, palet nº), copy the IDs of each line exactly as printed into palletCodes; " +
+            "when one ID appears under two lines it is one mixed pallet, so repeat it in both lines. Lines without IDs get null. Never invent or complete a pallet ID, and never copy the lot or the document number there. " +
             "Never invent numbers you cannot read: use null.",
         },
         {
@@ -42,7 +45,10 @@ export async function readDeliveryNote(image: Image, context: { customer: string
     );
     const reading = parseJson<NoteReading>(message.content);
     const known = new Set(context.items.map((i) => i.sku));
-    return { ...reading, lines: reading.lines.map((l) => ({ ...l, sku: l.sku && known.has(l.sku) ? l.sku : null })) };
+    return {
+      ...reading,
+      lines: reading.lines.map((l) => ({ ...l, sku: l.sku && known.has(l.sku) ? l.sku : null, palletCodes: cleanPalletCodes(l.palletCodes, l, reading.docRef) })),
+    };
   } catch (error) {
     console.error("readDeliveryNote", error);
     return null;

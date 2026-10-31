@@ -5,6 +5,7 @@
 //
 // Exit code 1 if any case fails.
 
+import { cleanPalletCodes } from "../src/lib/ai/note-codes";
 import { readingOrder } from "../src/lib/ai/reading-order";
 
 type Case = { name: string; check: () => string | null };
@@ -42,6 +43,21 @@ const cases: Case[] = [
       const input = [box("b", 0.6, 0.3), box("a", 0.2, 0.3)];
       readingOrder(input);
       return same(ids(input), "b a");
+    },
+  },
+  {
+    name: "V6 pallet IDs: invalid, repeated, lot/doc copies and surplus are dropped; nothing is invented; mixed repeats across lines stay",
+    check: () => {
+      const line = { pallets: 3, lot: "L2610A" };
+      const got = [
+        cleanPalletCodes(["(00) 3401 2345 6789", "x", "gmv-0581", "GMV-0581", "L2610A", "ALB-77", "GMV-0582", "GMV-0583"], line, "ALB-77"),
+        cleanPalletCodes(["a b", 12, null, {}], { pallets: 2, lot: null }, null),
+        cleanPalletCodes(null, line, null),
+        cleanPalletCodes([], line, null),
+        cleanPalletCodes(["OBR-JIJ-0042"], { pallets: 1, lot: null }, null),
+        cleanPalletCodes(["OBR-JIJ-0042"], { pallets: 1, lot: "L9" }, null),
+      ];
+      return same(got, [["340123456789", "GMV-0581", "GMV-0582"], null, null, null, ["OBR-JIJ-0042"], ["OBR-JIJ-0042"]]);
     },
   },
 ];
