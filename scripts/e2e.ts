@@ -232,25 +232,32 @@ async function main() {
     await pda.goto(`${BASE}/operator/pick/${outboundId}`, { waitUntil: "networkidle" });
     await noSideScroll(pda, "the pick page");
     // Toni's WhatsApp asks for 6 pallets of water AND 2.5 of horchata: 6 + 2 + the split one = 9 steps.
-    const total = Number((await text(pda)).match(/0\/(\d+)/)?.[1] ?? 0);
-    assert(total >= 3, "the progress is not 0/N");
+    const total = Number((await text(pda)).match(/Step 1 of (\d+)/)?.[1] ?? 0);
+    assert(total >= 3, "the progress is not 'Step 1 of N'");
     pickTotal = total;
     let sawSplit = false;
     for (let i = 0; i < total + 2; i++) {
       const t = await text(pda);
       if (/is prepared/.test(t)) break;
-      const progress = t.match(/\d+\/\d+/)?.[0] ?? "";
+      const progress = t.match(/Step \d+ of \d+/)?.[0] ?? "";
       if (/take only/i.test(t)) {
-        assert(/50\s*boxes/i.test(t) && /leaves a pico of 50/i.test(t), "the split step does not say 'Take only 50 boxes … leaves a pico of 50'");
+        // Pallet IDs: the boxes go onto a NEW pallet, and the PDA says which label to stick on it.
+        assert(/50\s*boxes/i.test(t) && /leaves 50 here/i.test(t), "the split step does not say 'Take only 50 boxes … leaves 50 here'");
+        assert(/new pallet/i.test(t), "the split step does not say the boxes go onto a new pallet");
         sawSplit = true;
         await shot(pda, "pda-take-only-50");
         await pda.getByRole("button", { name: /^Picked 50 boxes/ }).click();
+        await pda.getByText(/Label the new pallet/i).first().waitFor({ timeout: 40_000 });
+        const lt = await text(pda);
+        assert(/\b[A-Z0-9][A-Z0-9-]{3,23}\b/.test(lt) && /N\d-\d{6}/.test(lt), `no generated pallet ID (N1-000123) on the label screen: ${lt.replace(/\s+/g, " ").slice(0, 160)}`);
+        await shot(pda, "pda-label-new-pallet");
+        await pda.getByRole("button", { name: /^(Labelled, next step|Finish)$/ }).click();
       } else {
-        await pda.getByRole("button", { name: /^Picked the pallet/ }).click();
+        await pda.getByRole("button", { name: /^Picked / }).click();
       }
       // The pick is a server action (a few seconds on mobile data): wait until the page has moved on (new progress, or "is prepared"),
       // otherwise the next loop reads the old page with its button still showing "…".
-      await pda.waitForFunction((prev) => /is prepared/.test(document.body.innerText) || (document.body.innerText.match(/\d+\/\d+/)?.[0] ?? "") !== prev, progress, { timeout: 40_000 });
+      await pda.waitForFunction((prev) => /is prepared/.test(document.body.innerText) || (document.body.innerText.match(/Step \d+ of \d+/)?.[0] ?? "") !== prev, progress, { timeout: 40_000 });
       await pda.waitForTimeout(400);
     }
     assert(sawSplit, "no split step ('Take only …') appeared");
