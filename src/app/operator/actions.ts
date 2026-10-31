@@ -141,13 +141,23 @@ export async function pick(outboundId: string, stockId: string, units?: number):
   }
 }
 
+/** Customer and article names, so the voice model spells them right ("Bebidas Montgó", not "bebidas mogo"). */
+async function voiceHints() {
+  try {
+    const [clients, items] = await Promise.all([db.client.findMany({ select: { name: true } }), db.item.findMany({ select: { description: true } })]);
+    return [...clients.map((c) => c.name.replace(/,?\s+S\.?[AL]\.?$/i, "")), ...items.map((i) => i.description)];
+  } catch {
+    return [];
+  }
+}
+
 /** A voice note from the floor goes to the AI inbox like any other message. */
 export async function voiceNote(warehouseCode: string, audio: string) {
   await requireFloor();
   const media = parseDataUrl(audio);
   if (!media) throw new Error("That recording could not be read.");
   const url = await saveUpload("voice", media);
-  const text = await transcribe(media);
+  const text = await transcribe(media, await voiceHints());
   await db.message.create({
     data: {
       channel: "FLOOR",

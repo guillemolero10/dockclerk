@@ -5,6 +5,7 @@
 //
 // Exit code 1 if any case fails.
 
+import { providers } from "../src/lib/ai/client";
 import { cleanPalletCodes } from "../src/lib/ai/note-codes";
 import { readingOrder } from "../src/lib/ai/reading-order";
 
@@ -58,6 +59,30 @@ const cases: Case[] = [
         cleanPalletCodes(["OBR-JIJ-0042"], { pallets: 1, lot: "L9" }, null),
       ];
       return same(got, [["340123456789", "GMV-0581", "GMV-0582"], null, null, null, ["OBR-JIJ-0042"], ["OBR-JIJ-0042"]]);
+    },
+  },
+  {
+    name: "V7 vision provider: Meta key -> muse-spark-1.3 reasoning low and priced (it always reasons: without this the answer can come back empty); no key -> Baseten",
+    check: () => {
+      const saved = { meta: process.env.META_API_KEY, baseten: process.env.BASETEN_API_KEY, sam: process.env.SAM_API_KEY, samUrl: process.env.META_SAM_URL };
+      try {
+        process.env.BASETEN_API_KEY = "x";
+        process.env.META_API_KEY = "y";
+        const meta = providers.vision();
+        delete process.env.META_API_KEY;
+        const open = providers.vision();
+        const voiceOff = providers.voice();
+        process.env.META_API_KEY = "y";
+        const voiceOn = providers.voice();
+        return same(
+          [meta?.model, meta?.baseUrl, meta?.reasoning, !!meta?.price, open?.name, voiceOff, voiceOn?.model, voiceOn?.baseUrl],
+          ["muse-spark-1.3", "https://api.meta.ai/v1", "low", true, "Muse Spark Open", null, "muse-voice-transcribe-1.0", "https://api.meta.ai/v1"],
+        );
+      } finally {
+        for (const [k, v] of [["META_API_KEY", saved.meta], ["BASETEN_API_KEY", saved.baseten], ["SAM_API_KEY", saved.sam], ["META_SAM_URL", saved.samUrl]] as const) {
+          if (v === undefined) delete process.env[k]; else process.env[k] = v;
+        }
+      }
     },
   },
 ];

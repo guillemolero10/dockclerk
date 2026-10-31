@@ -2,7 +2,7 @@
 // Every function returns null when the model is not configured or fails; the screen
 // then asks a person to type or count, so receiving never stops.
 
-import { chat, dataUrl, parseJson, providers } from "./client";
+import { chat, dataUrl, parseJson, providers, type ChatMessage } from "./client";
 import { cleanPalletCodes } from "./note-codes";
 import { readingOrder } from "./reading-order";
 
@@ -15,12 +15,28 @@ export type NoteReading = {
   totalPallets: number | null;
 };
 
+/**
+ * One question to the vision model. With a Meta key Muse Spark (Meta) answers; if it errors or times out, Muse Spark Open on
+ * Baseten takes the same question, so a bad minute at Meta does not stop the dock. null = no model configured at all.
+ */
+async function ask(messages: ChatMessage[], options: { json?: boolean; maxTokens?: number; timeoutMs: number }) {
+  const chain = providers.visionChain();
+  if (!chain.length) return null;
+  let last: unknown;
+  for (const p of chain) {
+    try {
+      return await chat(p, messages, options);
+    } catch (error) {
+      last = error;
+      if (p !== chain[chain.length - 1]) console.warn(`${p.name} failed, trying ${chain[chain.indexOf(p) + 1].name}:`, error instanceof Error ? error.message : error);
+    }
+  }
+  throw last;
+}
+
 export async function readDeliveryNote(image: Image, context: { customer: string; items: { sku: string; description: string }[] }) {
-  const p = providers.vision();
-  if (!p) return null;
   try {
-    const message = await chat(
-      p,
+    const message = await ask(
       [
         {
           role: "system",
@@ -43,6 +59,7 @@ export async function readDeliveryNote(image: Image, context: { customer: string
       ],
       { json: true, timeoutMs: 45_000 },
     );
+    if (!message) return null;
     const reading = parseJson<NoteReading>(message.content);
     const known = new Set(context.items.map((i) => i.sku));
     return {
@@ -87,11 +104,8 @@ export async function countLoad(image: Image): Promise<LoadCount | null> {
     }
   }
 
-  const p = providers.vision();
-  if (!p) return null;
   try {
-    const message = await chat(
-      p,
+    const message = await ask(
       [
         {
           role: "system",
@@ -102,8 +116,9 @@ export async function countLoad(image: Image): Promise<LoadCount | null> {
         },
         { role: "user", content: [{ type: "image_url", image_url: { url: dataUrl(image) } }] },
       ],
-      { json: true, maxTokens: 3000, timeoutMs: 45_000 },
+      { json: true, maxTokens: 3000, timeoutMs: 30_000 },
     );
+    if (!message) return null;
     const result = parseJson<{ pallets: number | null; boxes: LoadCount["boxes"] }>(message.content);
     return { boxes: result.boxes ?? [], pallets: result.pallets ?? null, by: "muse-spark" };
   } catch (error) {
@@ -114,18 +129,16 @@ export async function countLoad(image: Image): Promise<LoadCount | null> {
 
 /** Indexes of the boxes that look damaged, asked to Muse Spark with the numbered list. */
 async function spotDamage(image: Image, boxes: number) {
-  const p = providers.vision();
-  if (!p || !boxes) return [];
+  if (!boxes) return [];
   try {
-    const message = await chat(
-      p,
+    const message = await ask(
       [
         { role: "system", content: 'Look at this photo of boxes on pallets. Answer only with JSON {"damaged": number[]}: positions (0-based, reading left to right, top to bottom) of boxes that are crushed, torn or wet.' },
         { role: "user", content: [{ type: "text", text: `There are ${boxes} boxes.` }, { type: "image_url", image_url: { url: dataUrl(image) } }] },
       ],
-      { json: true },
+      { json: true, timeoutMs: 20_000 },
     );
-    return parseJson<{ damaged: number[] }>(message.content).damaged ?? [];
+    return message ? (parseJson<{ damaged: number[] }>(message.content).damaged ?? []) : [];
   } catch {
     return [];
   }

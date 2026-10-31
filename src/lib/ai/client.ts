@@ -11,7 +11,7 @@ export type Provider = {
   apiKey: string;
   model: string;
   /** Reasoning models think before they answer and that thinking counts as output. Set the effort to keep it short. */
-  reasoning?: "low";
+  reasoning?: "minimal" | "low";
   /** USD per million tokens, to log what each call costs. */
   price?: { input: number; output: number };
 };
@@ -37,8 +37,13 @@ export const providers = {
    * Muse Spark reads photos (delivery notes, loads): the Meta Model API when there is a key,
    * otherwise Muse Spark Open on Baseten, which also takes images (checked 29/10/2026: an invented
    * albarán read right, ≈ 9 s and 0.006 $).
+   * muse-spark-1.3 also always reasons ("none" is a 400; docs and test of 31/10/2026): without `reasoning_effort`
+   * and room in max_tokens it can answer with an empty message (finish_reason "length"). Same prices as Open:
+   * $1.25 / $4.25 per million tokens in / out (dev.meta.ai/docs/pricing-rate-limits), so the daily budget counts it too.
    */
-  vision: () => provider("Muse Spark", "META_API_KEY", "META_API_BASE_URL", "https://api.meta.ai/v1", "META_VISION_MODEL", "muse-spark-1.3") ?? providers.agent(),
+  vision: () => provider("Muse Spark", "META_API_KEY", "META_API_BASE_URL", "https://api.meta.ai/v1", "META_VISION_MODEL", "muse-spark-1.3", { reasoning: "low", price: { input: 1.25, output: 4.25 } }) ?? providers.agent(),
+  /** Who may read photos, in order: Meta first (when there is a key), then Muse Spark Open on Baseten if Meta fails. */
+  visionChain: (): Provider[] => [providers.vision(), providers.agent()].filter((p, i, all): p is Provider => !!p && all.findIndex((q) => q?.name === p.name) === i),
   /**
    * SAM 3.1 on our own Modal service (modal/, see README there). SAM_API_KEY is a Modal proxy token written as
    * "<wk-id>.<ws-secret>" and sent as a Bearer token; Modal's edge rejects anything else before a GPU starts.

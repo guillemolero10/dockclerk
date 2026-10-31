@@ -76,6 +76,9 @@ const secs = (t: number) => ((Date.now() - t) / 1000).toFixed(1) + " s";
     // (c) load photo
     t = Date.now();
     await p.locator('input[type="file"]').last().setInputFiles(join(PH, "boxes.jpg"));
+    // the busy text names who counts (SAM 3.1 or Muse Spark)
+    const counting = await p.getByText(/is counting/i).first().innerText({ timeout: 10_000 }).catch(() => "");
+    out(/SAM 3\.1 is counting/i.test(counting), `busy text while counting: "${counting || "not seen"}"`);
     await p.waitForFunction(() => /found \d+ boxes|Counting needs|kept for the receipt/i.test(document.body.innerText), null, { timeout: 150_000 }).catch(() => out(false, "load: nothing after 150 s"));
     await p.waitForTimeout(2500);
     out(null, `load photo took ${secs(t)}`);
@@ -88,6 +91,13 @@ const secs = (t: number) => ((Date.now() - t) / 1000).toFixed(1) + " s";
     const confirm = p.getByRole("button", { name: /Confirm \d+ pallets/ });
     if (MODE === "fail") {
       out(await confirm.isEnabled().catch(() => false), `fail mode: confirm button usable by hand (${await confirm.innerText().catch(() => "missing")})`);
+    }
+    if (MODE === "operator") {
+      // the receipt page already shows the count, even before the pallets are confirmed
+      await p.goto(`${BASE}/receipts/${inbound.id}`, { waitUntil: "networkidle" });
+      const rt = (await p.locator("body").innerText()).replace(/\s+/g, " ");
+      out(/SAM 3\.1/.test(rt), `receipt names SAM 3.1: ${(rt.match(/.{0,60}(SAM 3(\.1)?|Muse Spark).{0,60}/g) ?? []).slice(0, 3).join(" | ")}`);
+      await shot(p, "receipt-count");
     }
     if (await confirm.count() && (await confirm.isEnabled())) {
       await confirm.click();

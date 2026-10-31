@@ -2,6 +2,10 @@
 
 import { useRef, useState } from "react";
 import { Loader2, Mic, Square } from "lucide-react";
+import { recordingToWav } from "@/lib/audio/to-wav";
+
+/** A note longer than this stops by itself (16 kHz WAV = 32 KB per second; keeps the upload under 3 MB). */
+const MAX_SECONDS = 60;
 
 /** Hold-free voice note: tap to record, tap to send. */
 export function VoiceButton({ onAudio, label = "Voice note to the office" }: { onAudio: (dataUrl: string) => Promise<void>; label?: string }) {
@@ -15,11 +19,19 @@ export function VoiceButton({ onAudio, label = "Voice note to the office" }: { o
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const chunks: Blob[] = [];
       const rec = new MediaRecorder(stream);
+      const limit = setTimeout(() => rec.state === "recording" && rec.stop(), MAX_SECONDS * 1000);
       rec.ondataavailable = (e) => chunks.push(e.data);
       rec.onstop = async () => {
+        clearTimeout(limit);
         stream.getTracks().forEach((t) => t.stop());
         setState("sending");
-        const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+        let blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+        // Meta's voice model only takes mono 16 kHz WAV: convert here. If this browser cannot, the original still goes to the office as audio.
+        try {
+          blob = await recordingToWav(blob);
+        } catch (err) {
+          console.warn("voice note kept in its original format", err);
+        }
         const dataUrl = await new Promise<string>((resolve) => {
           const reader = new FileReader();
           reader.onload = () => resolve(String(reader.result));
