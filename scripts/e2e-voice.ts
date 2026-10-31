@@ -14,7 +14,7 @@ import { wavInfo } from "../src/lib/audio/wav";
 const BASE = (process.env.E2E_BASE_URL || "http://localhost:3100").replace(/\/$/, "");
 if (!/^http:\/\/localhost:\d+$/.test(BASE)) throw new Error("local only (http://localhost:PORT)");
 const VOICE = process.env.E2E_VOICE || join(homedir(), "dockclerk-e2e", "2026-10-31-meta", "voice", "m3-24k.wav");
-const SHOTS = join(homedir(), "dockclerk-e2e", "2026-10-31-meta", "shots");
+const SHOTS = process.env.E2E_SHOTS || join(homedir(), "dockclerk-e2e", "2026-10-31-meta", "shots");
 mkdirSync(SHOTS, { recursive: true });
 const db = new PrismaClient();
 let failed = 0;
@@ -36,9 +36,15 @@ const out = (ok: boolean, s: string) => { if (!ok) failed++; console.log(`${ok ?
   const button = p.getByRole("button", { name: /voice note/i });
   await button.click();
   await p.getByText(/Recording/).waitFor({ timeout: 10_000 });
-  await p.waitForTimeout(10_000); // the file lasts about 9.7 s
-  await p.getByRole("button", { name: /Recording/ }).click();
-  await p.getByText(/Sent/).waitFor({ timeout: 60_000 }).catch(() => out(false, "nothing sent in 60 s"));
+  // The file lasts about 9.7 s and Chromium loops it. E2E_RECORD_MS=55000 records longer; E2E_AUTOSTOP=1 does not tap: the 60 s cut must send it by itself.
+  const t0 = Date.now();
+  if (process.env.E2E_AUTOSTOP === "1") await p.getByText(/Sending|Sent/).first().waitFor({ timeout: 90_000 });
+  else {
+    await p.waitForTimeout(Number(process.env.E2E_RECORD_MS || 10_000));
+    await p.getByRole("button", { name: /Recording/ }).click();
+  }
+  console.log(`recorded for ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+  await p.getByText(/Sent/).waitFor({ timeout: 120_000 }).catch(() => out(false, "nothing sent in 60 s"));
   await p.screenshot({ path: join(SHOTS, "voice-sent.png") });
   const screen = (await p.getByText(/^Sent/).first().innerText().catch(() => "")).trim();
   const msg = await db.message.findFirst({ where: { channel: "FLOOR" }, orderBy: { receivedAt: "desc" } });
