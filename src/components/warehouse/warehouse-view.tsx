@@ -283,7 +283,7 @@ export function WarehouseView({ snapshot, initialPick, initialMode = "customer" 
                                 {p?.loc}
                               </button>
                               <span className="truncate text-white/50">
-                                {p ? items[p.item].sku : ""} {p?.lot ? `· ${p.lot}` : ""}
+                                {p ? p.contents.map((c) => items[c.item].sku).join(" + ") : ""} {p?.code ? `· ${p.code}` : ""}
                               </span>
                             </li>
                           );
@@ -356,32 +356,41 @@ export function WarehouseView({ snapshot, initialPick, initialMode = "customer" 
             <p className="font-semibold">{selected.client.name}</p>
             {selected.kind === "stock" ? (
               <>
-                <p>
-                  <span className="mono font-semibold">{selected.item.sku}</span>
-                  <span className="text-dock-ink/60"> · {selected.item.description}</span>
-                </p>
-                <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-                  <dt className="cond text-dock-ink/50">Lot</dt>
-                  <dd className="mono">
-                    {selected.pallet.lot ? (
-                      <Link href={`/office/trace?lot=${encodeURIComponent(selected.pallet.lot)}`} className="underline" title="Trace this lot">
-                        {selected.pallet.lot}
-                      </Link>
-                    ) : (
-                      "—"
-                    )}
-                  </dd>
-                  <dt className="cond text-dock-ink/50">Quantity</dt>
-                  <dd className="mono">
-                    {selected.pallet.units} {UNIT[selected.item.unit]}
-                  </dd>
-                  <dt className="cond text-dock-ink/50">In storage</dt>
-                  <dd className="mono">{selected.pallet.days} days</dd>
-                  <dt className="cond text-dock-ink/50">Expires</dt>
-                  <dd className={`mono ${selected.pallet.expiresIn !== null && selected.pallet.expiresIn < 30 ? "font-semibold text-dock-red" : ""}`}>
-                    {selected.pallet.expiresIn === null ? "—" : `in ${selected.pallet.expiresIn} days`}
-                  </dd>
-                </dl>
+                {selected.pallet.code && (
+                  <p className="flex items-center gap-2">
+                    <span className="cond text-[11px] text-dock-ink/50">Pallet ID</span>
+                    <span className="mono font-semibold">{selected.pallet.code}</span>
+                    {selected.pallet.contents.length > 1 && <span className="cond bg-dock-ink px-1.5 py-0.5 text-[10px] text-dock-yellow">MIXED</span>}
+                  </p>
+                )}
+                {selected.pallet.contents.map((c, i) => (
+                  <div key={i} className={selected.pallet.contents.length > 1 ? "border-t border-dock-line pt-2" : ""}>
+                    <p>
+                      <span className="mono font-semibold">{items[c.item].sku}</span>
+                      <span className="text-dock-ink/60"> · {items[c.item].description}</span>
+                    </p>
+                    <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                      <dt className="cond text-dock-ink/50">Lot</dt>
+                      <dd className="mono">
+                        {c.lot ? (
+                          <Link href={`/office/trace?lot=${encodeURIComponent(c.lot)}`} className="underline" title="Trace this lot">
+                            {c.lot}
+                          </Link>
+                        ) : (
+                          "—"
+                        )}
+                      </dd>
+                      <dt className="cond text-dock-ink/50">Quantity</dt>
+                      <dd className="mono">
+                        {c.units} {UNIT[items[c.item].unit]}
+                      </dd>
+                      <dt className="cond text-dock-ink/50">In storage</dt>
+                      <dd className="mono">{c.days} days</dd>
+                      <dt className="cond text-dock-ink/50">Expires</dt>
+                      <dd className={`mono ${c.expiresIn !== null && c.expiresIn < 30 ? "font-semibold text-dock-red" : ""}`}>{c.expiresIn === null ? "—" : `in ${c.expiresIn} days`}</dd>
+                    </dl>
+                  </div>
+                ))}
                 {parseLocation(selected.loc)?.kind === "floor" && <p className="text-xs text-dock-ink/60">On the receiving floor, waiting for a rack slot.</p>}
                 {selected.reserved && (
                   <button onClick={() => choose(selected.reserved)} className="cond w-full bg-dock-ink px-3 py-1.5 text-left text-xs text-dock-yellow">

@@ -20,8 +20,15 @@ export type WarehouseSummary = {
   toShip: number;
 };
 
+export type PalletContent = { item: number; lot: string | null; units: number; days: number; expiresIn: number | null };
+
+/** One physical pallet. A mixed pallet (several rows with one pallet ID) is ONE entry: `contents` has a line per item. */
 export type SnapshotPallet = {
+  /** The head row (the one that counts as the pallet); picks and selections use it. */
   id: string;
+  /** Pallet ID, null on old rows without one. */
+  code: string | null;
+  contents: PalletContent[];
   loc: string;
   item: number;
   lot: string | null;
@@ -121,6 +128,22 @@ export async function getWarehouseSnapshot(code?: string): Promise<WarehouseSnap
   );
 
   const here = stockIn(current.id);
+  const contentOf = (s: (typeof stock)[number]): PalletContent => ({
+    item: itemIndex.get(s.itemId)!,
+    lot: s.lot,
+    units: s.units,
+    days: s.inbound ? Math.max(0, Math.floor((now - s.inbound.date.getTime()) / DAY)) : 0,
+    expiresIn: s.expiresAt ? Math.ceil((s.expiresAt.getTime() - now) / DAY) : null,
+  });
+  // One entry per physical pallet: the rows with the same pallet ID in the same place. The head row (biggest share) goes first.
+  const groups = new Map<string, typeof here>();
+  for (const s of here) {
+    const key = s.palletCode ? `${s.location}|${s.palletCode}` : s.id;
+    groups.set(key, [...(groups.get(key) ?? []), s]);
+  }
+  const physical = [...groups.values()].map((rows) => [...rows].sort((a, b) => (b.palletShare ?? 1) - (a.palletShare ?? 1) || b.pallets - a.pallets || a.id.localeCompare(b.id)));
+  const headOf = new Map(physical.flatMap((rows) => rows.map((r) => [r.id, rows[0].id] as const)));
+  const heads = (ids: string[]) => [...new Set(ids.map((id) => headOf.get(id) ?? id))];
   const count = (list: typeof stock, test: (loc: string) => boolean) => list.filter((s) => test(s.location)).reduce((sum, s) => sum + s.pallets, 0);
 
   return {
@@ -140,16 +163,23 @@ export async function getWarehouseSnapshot(code?: string): Promise<WarehouseSnap
     current: current.code,
     clients: clients.map((c) => ({ code: c.code, name: c.name })),
     items: items.map((it) => ({ sku: it.sku, description: it.description, client: clientIndex.get(it.clientId)!, unit: it.unit })),
-    pallets: here.map((s) => ({
-      id: s.id,
-      loc: s.location,
-      item: itemIndex.get(s.itemId)!,
-      lot: s.lot,
-      units: s.units,
-      days: s.inbound ? Math.max(0, Math.floor((now - s.inbound.date.getTime()) / DAY)) : 0,
-      expiresIn: s.expiresAt ? Math.ceil((s.expiresAt.getTime() - now) / DAY) : null,
-      outbound: s.outboundId,
-    })),
+    pallets: physical.map((rows) => {
+      const head = rows[0];
+      const contents = rows.map(contentOf);
+      const expiries = contents.map((c) => c.expiresIn).filter((e): e is number => e !== null);
+      return {
+        id: head.id,
+        code: head.palletCode,
+        contents,
+        loc: head.location,
+        item: contents[0].item,
+        lot: contents[0].lot,
+        units: contents.reduce((n, c) => n + c.units, 0),
+        days: Math.max(...contents.map((c) => c.days)),
+        expiresIn: expiries.length ? Math.min(...expiries) : null,
+        outbound: head.outboundId,
+      };
+    }),
     orders: open.map((o) => {
       const plan = plans.get(o.id) ?? { warehouseId: null, stockIds: [], picked: [], short: 0, shortLines: [] };
       return {
@@ -161,8 +191,8 @@ export async function getWarehouseSnapshot(code?: string): Promise<WarehouseSnap
         deadline: (o.deadline ?? o.date).toISOString(),
         pallets: o.lines.reduce((sum, l) => sum + l.pallets, 0),
         lines: o.lines.map((l) => ({ sku: l.item.sku, description: l.item.description, pallets: l.pallets })),
-        picks: plan.stockIds,
-        picked: plan.picked,
+        picks: heads(plan.stockIds),
+        picked: heads(plan.picked),
         lane: plan.warehouseId ? dispatchLane(layoutOf.get(plan.warehouseId)!, stockIn(plan.warehouseId), o.id) : 1,
         short: plan.short,
         shortText: plan.shortLines.length ? describeShortage(plan.shortLines, (id) => o.lines.find((l) => l.itemId === id)?.item) : null,

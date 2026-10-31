@@ -4,7 +4,7 @@
 import { db } from "@/lib/db";
 import { describeUnits, unitWordFor } from "@/lib/pallets/quantity";
 
-export type ShippedPallet = { itemId: string; sku: string; lot: string | null; units: number; location: string; inboundId: string | null };
+export type ShippedPallet = { itemId: string; sku: string; lot: string | null; units: number; location: string; inboundId: string | null; palletCode?: string | null; splitFrom?: string | null };
 
 export type LotOption = { lot: string; sku: string; description: string; client: string; date: Date };
 
@@ -65,7 +65,7 @@ export async function traceLot(lot: string) {
       where: { lot },
       include: {
         item: { include: { client: true } },
-        inbound: { include: { warehouse: true, carrier: true, receipt: { select: { id: true } } } },
+        inbound: { include: { warehouse: true, carrier: true, receipt: { select: { id: true, pallets: true } } } },
       },
       orderBy: { inbound: { date: "asc" } },
     }),
@@ -94,17 +94,21 @@ export async function traceLot(lot: string) {
     units: l.units,
     text: describeUnits(l.units, item.unitsPerPallet, unitWord),
     receipt: !!l.inbound.receipt,
+    // The IDs of the pallets of this lot as received (a mixed pallet carries the lot on one of its lines).
+    codes: (((l.inbound.receipt?.pallets as { code: string; lines: { lot: string | null }[] }[] | null) ?? []).filter((p) => p.lines.some((x) => x.lot === lot))).map((p) => p.code),
     incident: l.inbound.incident,
   }));
 
   // Pallets still in the building, grouped by where they stand.
-  const groups = new Map<string, { warehouse: string; area: "rack" | "receiving" | "dispatch"; locations: string[]; pallets: number; units: number; outbound: number | null }>();
+  const groups = new Map<string, { warehouse: string; area: "rack" | "receiving" | "dispatch"; locations: string[]; codes: { code: string; from: string | null }[]; pallets: number; units: number; outbound: number | null }>();
   for (const s of stock) {
     const area = s.location.startsWith("REC-") ? "receiving" : s.location.startsWith("EXP-") ? "dispatch" : "rack";
     const key = `${s.warehouse.code}|${area}|${s.outbound?.number ?? ""}`;
-    const g = groups.get(key) ?? { warehouse: s.warehouse.code, area, locations: [], pallets: 0, units: 0, outbound: s.outbound?.number ?? null };
+    const g = groups.get(key) ?? { warehouse: s.warehouse.code, area, locations: [], codes: [], pallets: 0, units: 0, outbound: s.outbound?.number ?? null };
     g.locations.push(s.location);
-    g.pallets += s.pallets;
+    if (s.palletCode && !g.codes.some((c) => c.code === s.palletCode)) g.codes.push({ code: s.palletCode, from: s.splitFrom });
+    // A mixed pallet counts once for the lot (its head row may hold another lot); a lot sits on one row of it.
+    g.pallets += s.palletShare !== null && s.palletCode !== null ? 1 : s.pallets;
     g.units += s.units;
     groups.set(key, g);
   }
@@ -119,6 +123,7 @@ export async function traceLot(lot: string) {
       city: o.consignee?.city ?? null,
       carrier: o.carrier?.name ?? null,
       docRef: o.clientDocRef,
+      codes: mine.filter((p) => p.palletCode).map((p) => ({ code: p.palletCode!, from: p.splitFrom ?? null })),
       pallets: mine.length,
       units: mine.reduce((sum, p) => sum + p.units, 0),
       text: describeUnits(mine.reduce((sum, p) => sum + p.units, 0), item.unitsPerPallet, unitWord),
@@ -132,7 +137,7 @@ export async function traceLot(lot: string) {
     in: sum(came, (c) => c.units),
     here: sum(stock, (s) => s.units),
     out: sum(went, (w) => w.units),
-    pallets: { in: sum(came, (c) => c.pallets), here: sum(stock, (s) => s.pallets), out: sum(went, (w) => w.pallets) },
+    pallets: { in: sum(came, (c) => c.pallets), here: sum([...groups.values()], (g) => g.pallets), out: sum(went, (w) => w.pallets) },
     hereText: describeUnits(sum(stock, (s) => s.units), item.unitsPerPallet, unitWord),
   };
 

@@ -27,7 +27,7 @@ export function PickStep({ outboundId, lane, done, total, shortText, metres, ste
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [label, setLabel] = useState<{ code: string; finished: boolean } | null>(null);
+  const [label, setLabel] = useState<{ code: string; finished: boolean; base: number } | null>(null);
   const current = steps[0];
 
   const leaves = current?.kind === "boxes" && current.take !== null ? current.rowUnits - current.take : 0;
@@ -39,7 +39,7 @@ export function PickStep({ outboundId, lane, done, total, shortText, metres, ste
         <div className="h-2.5 flex-1 border-[1.5px] border-dock-ink bg-white" role="progressbar" aria-valuenow={done} aria-valuemin={0} aria-valuemax={total} aria-label="Pick progress">
           <div className="h-full bg-dock-ink" style={{ width: `${(done / Math.max(1, total)) * 100}%` }} />
         </div>
-        <span className="mono text-sm font-semibold">{label || !current ? `${done}/${total}` : `Step ${done + 1} of ${total}`}</span>
+        <span className="mono text-sm font-semibold">{label ? `${Math.max(done, label.base + 1)}/${total}` : !current ? `${done}/${total}` : `Step ${done + 1} of ${total}`}</span>
       </div>
       {shortText && <p className="bg-dock-red/10 px-3 py-2 text-sm text-dock-red">Missing in stock: {shortText}. The office knows.</p>}
 
@@ -111,7 +111,7 @@ export function PickStep({ outboundId, lane, done, total, shortText, metres, ste
                   try {
                     const result = await pick(outboundId, current.stockId, current.take ?? undefined);
                     if (result.error) return setError(result.error);
-                    if (result.newCode) setLabel({ code: result.newCode, finished: !!result.done });
+                    if (result.newCode) setLabel({ code: result.newCode, finished: !!result.done, base: done });
                     else router.refresh();
                   } catch {
                     setError("Could not do it. Reload and try again.");

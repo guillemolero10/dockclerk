@@ -31,7 +31,7 @@ export default async function StockPage({ searchParams }: PageProps<"/office/leg
         <thead>
           <tr>
             <th>Cliente</th><th>Artículo</th><th>Descripción</th><th>Lote</th>
-            <th className="text-right">Palés</th><th className="text-right">Cantidad</th><th>Almacén</th><th>Ubicación</th>
+            <th className="text-right">Palés</th><th className="text-right">Cantidad</th><th>Almacén</th><th>Ubicación</th><th>Matrícula</th>
           </tr>
         </thead>
         <tbody>
@@ -45,6 +45,7 @@ export default async function StockPage({ searchParams }: PageProps<"/office/leg
               <td className="text-right">{fmtNumber(r.units)} {UNIT_LABEL[r.item.unit]}</td>
               <td>{r.warehouse.code}</td>
               <td>{r.location}</td>
+              <td>{r.palletCode}</td>
             </tr>
           ))}
         </tbody>

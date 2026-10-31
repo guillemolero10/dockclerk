@@ -32,13 +32,16 @@ export default async function PickPage({ params }: PageProps<"/operator/pick/[id
             <p className="mt-2 text-lg font-semibold">Nº {outbound.number} is prepared</p>
             <p className="text-sm text-white/60">{picked} {picked === 1 ? "pallet" : "pallets"} waiting in the dispatch lane for the truck.</p>
           </div>
-          {made.length > 0 && (
-            <div className="bg-white px-4 py-3 text-sm">
-              <p className="cond text-[11px] text-dock-ink/55">New pallets made from loose boxes: check they carry a label</p>
-              <p className="mono font-semibold">{made.map((m) => m.palletCode).join(" · ")}</p>
-            </div>
-          )}
         </div>
+        {made.length > 0 && (
+          <section className="dock-card bg-dock-yellow px-4 py-4 text-center" aria-label="Pallets to label">
+            <p className="cond text-xs font-semibold">Label the new {made.length === 1 ? "pallet" : "pallets"}</p>
+            {made.map((m) => (
+              <p key={m.palletCode} className="mono text-3xl font-bold tracking-wide">{m.palletCode}</p>
+            ))}
+            <p className="mt-1 text-sm">Made from loose boxes. Check each one carries its label before the truck.</p>
+          </section>
+        )}
       </main>
     );
   }

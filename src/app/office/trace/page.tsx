@@ -139,6 +139,7 @@ function Trail({ t }: { t: LotTrace }) {
               <p className="text-xs text-dock-ink/60">
                 {[c.carrier, c.plate, c.warehouse && `unloaded at ${c.warehouse}`].filter(Boolean).join(" · ")}
               </p>
+              {c.codes.length > 0 && <Codes list={c.codes.map((code) => ({ code, from: null }))} />}
               {c.incident && <p className="mt-1 bg-dock-red px-1.5 text-xs text-white">{c.incident}</p>}
               {c.receipt && (
                 <Link href={`/receipts/${c.inboundId}`} className="cond mt-2 inline-flex items-center gap-1 text-[11px] underline">
@@ -158,6 +159,7 @@ function Trail({ t }: { t: LotTrace }) {
               </p>
               {h.outbound && <p className="text-xs text-dock-ink/60">Picked for outbound Nº {h.outbound}</p>}
               <p className="mono mt-1 text-[11px] leading-relaxed text-dock-ink/60">{h.locations.join(" · ")}</p>
+              {h.codes.length > 0 && <Codes list={h.codes} />}
               <Link href={`/office/warehouse?w=${h.warehouse}&color=expiry`} className="cond mt-2 inline-flex items-center gap-1 text-[11px] underline">
                 See them in 3D
               </Link>
@@ -178,6 +180,7 @@ function Trail({ t }: { t: LotTrace }) {
                 {w.pallets} pallets · {fmtNumber(w.units)} units{w.city && ` · ${w.city}`}
               </p>
               <p className="text-xs text-dock-ink/60">{[w.carrier, w.docRef && `order ${w.docRef}`].filter(Boolean).join(" · ")}</p>
+              {w.codes.length > 0 && <Codes list={w.codes} />}
             </Card>
           ))}
         </Column>
@@ -215,5 +218,20 @@ function Arrow() {
     <div className="hidden items-center lg:flex">
       <ArrowRight size={22} className="text-dock-ink/30" />
     </div>
+  );
+}
+
+/** Pallet IDs; one that was made up from boxes taken off another pallet says where they came from. */
+function Codes({ list }: { list: { code: string; from: string | null }[] }) {
+  return (
+    <ul className="mono mt-1 space-y-0.5 text-[11px] text-dock-ink/70" aria-label="Pallet IDs">
+      {list.slice(0, 12).map((c) => (
+        <li key={c.code}>
+          <span className="font-semibold text-dock-ink">{c.code}</span>
+          {c.from && <span className="text-dock-ink/55"> · from pallet {c.from}</span>}
+        </li>
+      ))}
+      {list.length > 12 && <li className="text-dock-ink/50">… and {list.length - 12} more</li>}
+    </ul>
   );
 }
