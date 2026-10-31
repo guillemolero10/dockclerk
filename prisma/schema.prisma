@@ -33,6 +33,8 @@ model Warehouse {
   inbounds     Inbound[]
   outbounds    Outbound[]
   appointments DockAppointment[]
+  /// Next number for generated pallet codes (N1-000123). Taken with an atomic increment.
+  nextPalletNo Int               @default(1)
   createdAt    DateTime          @default(now())
 }
 
@@ -123,6 +125,7 @@ model Stock {
   itemId      String
   lot         String?
   expiresAt   DateTime?
+  /// Physical pallets this row stands for: 1, except the rows of a mixed pallet after the first (the head), which hold 0.
   pallets     Int
   units       Int
   location    String
@@ -130,9 +133,18 @@ model Stock {
   outboundId  String?
   outbound    Outbound? @relation(fields: [outboundId], references: [id], onDelete: SetNull)
   inboundId   String?
+  /// Pallet ID (licence plate), from the supplier label or generated. Rows of a mixed pallet share it,
+  /// with the same warehouse, location, client and outboundId. Unique among the pallets inside (checked in code).
+  palletCode  String?
+  /// Part of its physical pallet, for billing. null = a pallet of its own; the rows of a mixed pallet add up to 1.
+  palletShare Float?
+  /// Code of the pallet these boxes were taken off (loose pick or one item of a mixed pallet). Replay puts them back.
+  splitFrom   String?
   client      Client    @relation(fields: [clientId], references: [id])
   item        Item      @relation(fields: [itemId], references: [id])
   inbound     Inbound?  @relation(fields: [inboundId], references: [id])
+
+  @@index([palletCode])
 }
 
 // ---------- Operations ----------
@@ -277,6 +289,8 @@ model DockReceipt {
   damages        Json?
   /// Lines read from the delivery note: [{ sku, description, lot, pallets, units }]
   noteData       Json?
+  /// As received, pallet by pallet: [{ code, generated, lines: [{ itemId, sku, lot, expiresAt, units }] }]
+  pallets        Json?
   notePallets    Int?
   countedPallets Int?
   /// Boxes found in the load photo, for the overlay: [{ x, y, w, h, damaged }] in 0..1
