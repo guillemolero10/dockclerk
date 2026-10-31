@@ -17,7 +17,15 @@ export default async function PutAwayPage({ searchParams }: PageProps<"/operator
     include: { item: true, client: true },
     orderBy: [{ location: "asc" }, { id: "asc" }],
   });
-  const next = waiting[0];
+  // One entry per physical pallet: the rows that share an ID and a lane are one (mixed) pallet.
+  const groups = new Map<string, typeof waiting>();
+  for (const row of waiting) {
+    const key = row.palletCode ? `${row.location}|${row.palletCode}` : row.id;
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+  const palletsWaiting = [...groups.values()];
+  const rows = palletsWaiting[0] ?? [];
+  const next = rows[0];
   const plan = next ? await planPutAway(next.id) : null;
 
   return (
@@ -30,8 +38,14 @@ export default async function PutAwayPage({ searchParams }: PageProps<"/operator
         <PutAwayStep
           key={next.id}
           warehouse={warehouse.code}
-          left={waiting.length}
-          pallet={{ id: next.id, from: next.location, sku: next.item.sku, description: next.item.description, lot: next.lot, client: next.client.name, units: next.units }}
+          left={palletsWaiting.length}
+          pallet={{
+            id: next.id,
+            from: next.location,
+            code: next.palletCode,
+            client: next.client.name,
+            contents: rows.map((r) => ({ sku: r.item.sku, lot: r.lot, units: r.units })),
+          }}
           suggestion={plan?.slot ?? null}
           why={plan?.why ?? ""}
         />

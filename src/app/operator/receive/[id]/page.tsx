@@ -5,12 +5,14 @@ import { LoadPhoto } from "@/components/load-photo";
 import { LoadStep, NoteStepOperator, ReceiveForm, TruckHereButton } from "@/components/operator/receive-steps";
 import { aiStatus } from "@/lib/ai/client";
 import { db } from "@/lib/db";
+import { fromNote, type NoteLineLite, type PalletDraft } from "@/lib/pallets/breakdown";
 import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120; // load photo: SAM (cold start up to 60 s) + Muse Spark damage check
 
-type NoteLine = { sku: string | null; description: string; lot: string | null; pallets: number | null; units: number | null };
+type NoteLine = NoteLineLite & { description: string };
+type ReceivedPallet = { code: string; generated: boolean; lines: { sku: string; lot: string | null; units: number }[] };
 type Box = { x: number; y: number; w: number; h: number; damaged: boolean };
 
 export default async function ReceivePage({ params }: PageProps<"/operator/receive/[id]">) {
@@ -28,10 +30,15 @@ export default async function ReceivePage({ params }: PageProps<"/operator/recei
   const noteLines = ((r?.noteData as NoteLine[] | null) ?? []).filter((l) => l.sku);
   const boxes = (r?.boxes as Box[] | null) ?? null;
 
-  // Start the received lines from what the note (or the office) expected.
-  const start = inbound.lines.length
-    ? inbound.lines.map((l) => ({ itemId: l.itemId, lot: l.lot ?? "", pallets: l.pallets }))
-    : noteLines.map((l) => ({ itemId: inbound.client.items.find((i) => i.sku === l.sku)!.id, lot: l.lot ?? "", pallets: l.pallets ?? 0 }));
+  // Start from what the note (or the office) expected, one draft per pallet. IDs printed on the note come with it.
+  const itemLites = inbound.client.items.map((i) => ({ id: i.id, sku: i.sku, unitsPerPallet: i.unitsPerPallet }));
+  const fromLines = inbound.lines.flatMap((l) => {
+    const item = inbound.client.items.find((i) => i.id === l.itemId);
+    return item ? fromNote([{ sku: item.sku, lot: l.lot, pallets: l.pallets, units: l.units }], itemLites) : [];
+  });
+  const noteHasCodes = noteLines.some((l) => l.palletCodes?.length);
+  const start: PalletDraft[] = noteHasCodes || !inbound.lines.length ? fromNote(noteLines, itemLites) : fromLines;
+  const generated = ((r?.pallets as ReceivedPallet[] | null) ?? []).filter((p) => p.generated);
 
   return (
     <main className="space-y-4 px-4 py-4">
@@ -57,6 +64,16 @@ export default async function ReceivePage({ params }: PageProps<"/operator/recei
           <p className="flex items-center gap-2 bg-dock-ink px-4 py-3 text-sm text-white">
             <Check size={16} className="text-dock-yellow" /> {inbound.receivedPallets} pallets received. {r?.signedAt ? `Signed by ${r.signedBy}.` : "Waiting for the driver's signature on their phone."}
           </p>
+          {generated.length > 0 && (
+            <section className="dock-card bg-white p-3" aria-label="Pallets to label">
+              <h2 className="cond text-[11px] text-dock-ink/55">Label these {generated.length} pallets (they came without an ID)</h2>
+              <ul className="mono mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-sm font-semibold">
+                {generated.map((g) => (
+                  <li key={g.code}>{g.code}</li>
+                ))}
+              </ul>
+            </section>
+          )}
           <Link href={`/operator/putaway?w=${inbound.warehouse?.code ?? ""}`} className="cond block bg-dock-yellow px-4 py-3 text-center font-semibold ring-[1.5px] ring-dock-ink">
             Put them away now
           </Link>
@@ -107,7 +124,7 @@ export default async function ReceivePage({ params }: PageProps<"/operator/recei
               key={JSON.stringify([start, r?.notePallets, boxes?.length, boxes?.filter((b) => b.damaged).length])}
               inboundId={inbound.id}
               items={inbound.client.items.map((i) => ({ id: i.id, sku: i.sku, description: i.description, unitsPerPallet: i.unitsPerPallet, tracksLot: i.tracksLot }))}
-              start={start.length ? start : [{ itemId: inbound.client.items[0]?.id ?? "", lot: "", pallets: r?.notePallets ?? 1 }]}
+              start={start}
               expected={r?.notePallets ?? inbound.expectedPallets}
               damagedFound={boxes?.filter((b) => b.damaged).length ?? 0}
               warehouse={inbound.warehouse?.code ?? ""}

@@ -95,10 +95,16 @@ export async function suggestSlotFor(stockId: string) {
   return suggestPutAway(stockId);
 }
 
-export async function putAwayPallet(stockId: string, location: string) {
+/** `{ error }` for "A-07-3 is taken." and the like: in production Next hides the text of a thrown error. */
+export async function putAwayPallet(stockId: string, location: string): Promise<{ error?: string }> {
   await requireFloor();
-  await putAway(stockId, location.trim().toUpperCase());
+  try {
+    await putAway(stockId, location.trim().toUpperCase());
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not do it." };
+  }
   refresh();
+  return {};
 }
 
 /** Puts every waiting pallet of a lane where the clerk suggests, one after the other. Returns how many pallets (not rows) were waiting. */
@@ -123,11 +129,16 @@ export async function putAwayAll(warehouseCode: string) {
   return pallets;
 }
 
-export async function pick(outboundId: string, stockId: string, units?: number) {
+/** `{ done, lane, newCode }` (newCode = the ID of the new pallet to label, when boxes were taken) or `{ error }` for what the person can fix. */
+export async function pick(outboundId: string, stockId: string, units?: number): Promise<{ error?: string; done?: boolean; lane?: number; newCode?: string | null }> {
   await requireFloor();
-  const result = await pickPallet(outboundId, stockId, units);
-  refresh();
-  return result;
+  try {
+    const result = await pickPallet(outboundId, stockId, units);
+    refresh();
+    return result;
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not do it." };
+  }
 }
 
 /** A voice note from the floor goes to the AI inbox like any other message. */

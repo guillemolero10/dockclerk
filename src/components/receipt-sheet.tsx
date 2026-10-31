@@ -5,6 +5,7 @@ import { PrintButton } from "@/components/print-button";
 import { db } from "@/lib/db";
 import { fmtDate, madridHm } from "@/lib/format";
 
+type ReceivedPallet = { code: string; generated: boolean; lines: { sku: string; lot: string | null; expiresAt: string | null; units: number }[] };
 type Box = { x: number; y: number; w: number; h: number; damaged: boolean };
 
 const BY: Record<string, string> = { "muse-spark": "Muse Spark", "sam-3.1": "SAM 3.1", "sam-3": "SAM 3", driver: "the driver", operator: "the operator" };
@@ -19,6 +20,7 @@ export async function ReceiptSheet({ inboundId, driverToken }: { inboundId: stri
   });
   if (!inbound) return <p className="p-8 text-dock-ink/60">Receipt not found.</p>;
   const r = inbound.receipt;
+  const pallets = (r?.pallets as ReceivedPallet[] | null) ?? [];
   const damages = (r?.damages as { box: number; note: string }[] | null) ?? [];
 
   return (
@@ -80,6 +82,49 @@ export async function ReceiptSheet({ inboundId, driverToken }: { inboundId: stri
             ))}
           </tbody>
         </table>
+
+        {pallets.length > 0 && (
+          <section className="mx-8 mt-6 print:break-inside-avoid-page" aria-label="Pallets">
+            <h2 className="cond border-b-[1.5px] border-dock-ink pb-1 text-[11px] text-dock-ink/50">
+              Pallets · {pallets.length}
+              {pallets.some((p) => p.lines.length > 1) && ` · ${pallets.filter((p) => p.lines.length > 1).length} mixed`}
+            </h2>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[460px] text-sm">
+                <thead>
+                  <tr className="cond border-b border-dock-line text-left text-[11px] text-dock-ink/50">
+                    <th className="py-1.5">Pallet ID</th>
+                    <th>Item</th>
+                    <th>Lot</th>
+                    <th>Best before</th>
+                    <th className="text-right">Boxes</th>
+                  </tr>
+                </thead>
+                {pallets.map((p) => (
+                  <tbody key={p.code} className="border-b border-dock-line print:break-inside-avoid">
+                    {p.lines.map((l, i) => (
+                      <tr key={i}>
+                        <td className="mono py-1 align-top font-semibold">
+                          {i === 0 && (
+                            <>
+                              {p.code}
+                              {p.generated && <span className="block text-[10px] font-normal text-dock-ink/45">(warehouse label)</span>}
+                              {p.lines.length > 1 && <span className="cond mt-0.5 inline-block bg-dock-ink px-1.5 py-0.5 text-[10px] font-normal text-dock-yellow print:border print:border-dock-ink print:bg-white print:text-dock-ink">MIXED</span>}
+                            </>
+                          )}
+                        </td>
+                        <td className="mono py-1 align-top">{l.sku}</td>
+                        <td className="mono py-1 align-top">{l.lot ?? "—"}</td>
+                        <td className="mono py-1 align-top">{l.expiresAt ? fmtDate(new Date(`${l.expiresAt}T12:00:00Z`)) : "—"}</td>
+                        <td className="mono py-1 text-right align-top">{l.units.toLocaleString("es-ES")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                ))}
+              </table>
+            </div>
+          </section>
+        )}
 
         {(inbound.incident || damages.length > 0) && (
           <div className="mx-8 mt-4 border-[1.5px] border-dock-red bg-dock-red/5 px-4 py-3 text-sm">
