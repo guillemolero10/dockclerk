@@ -1,13 +1,13 @@
 // Sends one photo to the SAM service (modal/sam_service.py) and prints what it finds.
 // Usage: npx tsx --env-file=.env scripts/sam-check.ts path/to/photo.jpg
-// Needs META_SAM_URL and the key (SAM_API_KEY, else META_API_KEY) in the environment. Use an invented/permitted photo.
+// Needs META_SAM_URL and SAM_API_KEY (Modal proxy token "wk-...\.ws-...") in the environment. Use an invented/permitted photo.
 import { readFileSync } from "node:fs";
 
 const file = process.argv[2];
 const url = process.env.META_SAM_URL;
-const key = process.env.SAM_API_KEY ?? process.env.META_API_KEY;
+const key = process.env.SAM_API_KEY;
 if (!file || !url || !key) {
-  console.error("Usage: sam-check.ts <photo.jpg>   (needs META_SAM_URL and SAM_API_KEY or META_API_KEY)");
+  console.error("Usage: sam-check.ts <photo.jpg>   (needs META_SAM_URL and SAM_API_KEY)");
   process.exit(2);
 }
 

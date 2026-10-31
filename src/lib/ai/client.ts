@@ -38,15 +38,17 @@ export const providers = {
    * otherwise Muse Spark Open on Baseten, which also takes images (checked 29/10/2026: an invented
    * albarán read right, ≈ 9 s and 0.006 $).
    */
-  vision: () => provider("Muse Spark", "META_API_KEY", "META_API_BASE_URL", "https://api.llama.com/compat/v1", "META_VISION_MODEL", "muse-spark") ?? providers.agent(),
-  /** SAM 3.1 (Meta Model API, or our own Modal service in modal/ with SAM_API_KEY): finds every box in a photo of the load. */
-  // Our Modal token only ever goes to our own URL: SAM_API_KEY without META_SAM_URL means SAM is off.
-  segment: () =>
-    env("SAM_API_KEY")
-      ? env("META_SAM_URL") ? provider("SAM 3.1", "SAM_API_KEY", "META_SAM_URL", "", "META_SAM_MODEL", "sam-3.1") : null
-      : provider("SAM 3.1", "META_API_KEY", "META_SAM_URL", "https://api.llama.com/v1/sam", "META_SAM_MODEL", "sam-3.1"),
+  vision: () => provider("Muse Spark", "META_API_KEY", "META_API_BASE_URL", "https://api.meta.ai/v1", "META_VISION_MODEL", "muse-spark-1.3") ?? providers.agent(),
+  /**
+   * SAM 3.1 on our own Modal service (modal/, see README there). SAM_API_KEY is a Modal proxy token written as
+   * "<wk-id>.<ws-secret>" and sent as a Bearer token; Modal's edge rejects anything else before a GPU starts.
+   * Meta's own SAM endpoint (POST api.meta.ai/v1/responses, box+mask text records) has a different contract and is not
+   * wired: without SAM_API_KEY and META_SAM_URL, SAM is off and Muse Spark counts the boxes.
+   * Our token only ever goes to our own URL.
+   */
+  segment: () => (env("SAM_API_KEY") && env("META_SAM_URL") ? provider("SAM 3.1", "SAM_API_KEY", "META_SAM_URL", "", "META_SAM_MODEL", "sam-3.1") : null),
   /** Muse Voice Transcribe on the Meta Model API: voice notes from the floor. */
-  voice: () => provider("Muse Voice Transcribe", "META_API_KEY", "META_API_BASE_URL", "https://api.llama.com/compat/v1", "META_VOICE_MODEL", "muse-voice-transcribe"),
+  voice: () => provider("Muse Voice Transcribe", "META_API_KEY", "META_API_BASE_URL", "https://api.meta.ai/v1", "META_VOICE_MODEL", "muse-voice-transcribe-1.0"),
 };
 
 /** Which models are live, for the badges in the UI. */

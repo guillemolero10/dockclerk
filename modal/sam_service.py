@@ -5,15 +5,16 @@ Contract (same as the app expects):
   ->    {detections: [{label, box: [x, y, w, h], score}], ms, image: {width, height}, model}
   box = 0..1, x/y = top-left corner.
 
-Deploy (Guillermo, see modal/README.md):  modal deploy modal/sam_service.py
-Secrets: dockclerk-sam (SAM_TOKEN) and dockclerk-hf (HF_TOKEN). No values live in this repo.
+Deploy (see modal/README.md):  modal deploy modal/sam_service.py
+Access: Modal proxy auth (requires_proxy_auth=True). Modal's edge rejects any request without a valid workspace
+proxy token (401) BEFORE a container starts, so strangers cannot switch the GPU on. Callers send
+"Authorization: Bearer <wk-...>.<ws-...>" (or Modal-Key / Modal-Secret). No token check lives in this file.
+Secret: dockclerk-hf (HF_TOKEN). No values live in this repo.
 """
 
 import base64
 import binascii
-import hmac
 import io
-import os
 import time
 
 import modal
@@ -49,9 +50,9 @@ weights = modal.Volume.from_name("dockclerk-sam-weights", create_if_missing=True
 
 
 @app.cls(
-    gpu="L4",  # 24 GB is plenty for this ~0.85B model in bf16; cheaper than A10G/A100 and a still fast enough photo (~1 s)
+    gpu=["L4", "A10", "L40S"],  # first free of these (L4 had no capacity on 31/10); ~0.85B model in bf16 fits in 24 GB
     volumes={MODELS_DIR: weights},
-    secrets=[modal.Secret.from_name("dockclerk-sam"), modal.Secret.from_name("dockclerk-hf")],
+    secrets=[modal.Secret.from_name("dockclerk-hf")],
     scaledown_window=60,  # seconds idle before the GPU is released (credits!)
     timeout=120,
     max_containers=1,  # never more than one GPU running at once
@@ -91,33 +92,25 @@ class Sam:
         self.processor = Sam3Processor(model.cuda().eval(), device="cuda")
         print(f"loaded {self.model_name} ({self.missing} known-missing weights) in {time.time() - t0:.1f}s")
 
-    @modal.asgi_app()
+    @modal.asgi_app(requires_proxy_auth=True)  # 401 at Modal's edge, no GPU started
     def web(self):
-        from fastapi import FastAPI, Header, HTTPException
+        from fastapi import FastAPI, HTTPException
         from PIL import Image, ImageOps
         from pydantic import BaseModel
 
         api = FastAPI(title="DockClerk SAM")
-        token = os.environ.get("SAM_TOKEN", "")
 
         class Body(BaseModel):
             model: str | None = None
             image: str
             prompts: list[str]
 
-        def check(authorization: str | None):
-            sent = (authorization or "").removeprefix("Bearer ").strip()
-            if not token or not hmac.compare_digest(sent.encode(), token.encode()):
-                raise HTTPException(status_code=401, detail="Bad token")
-
         @api.get("/health")
-        def health(authorization: str | None = Header(default=None)):
-            check(authorization)
+        def health():
             return {"ok": True, "model": self.model_name, "missing_weights": self.missing}
 
         @api.post("/")
-        def segment(body: Body, authorization: str | None = Header(default=None)):
-            check(authorization)
+        def segment(body: Body):
             prompts = [p.strip() for p in body.prompts if p.strip()]
             if not 1 <= len(prompts) <= MAX_PROMPTS or any(len(p) > MAX_PROMPT_CHARS for p in prompts):
                 raise HTTPException(status_code=422, detail=f"1-{MAX_PROMPTS} prompts of at most {MAX_PROMPT_CHARS} characters")
