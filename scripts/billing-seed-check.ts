@@ -108,6 +108,24 @@ const CASES: Case[] = [
     },
   },
   {
+    name: `C008 ${thisMonth}: the mixed pallet OBR-JIJ-0042 (35 + 40 boxes) is 1 pallet in, and 1 pallet per day of storage, split over its two items`,
+    async run() {
+      const rows = await db.stock.findMany({ where: { palletCode: "OBR-JIJ-0042" }, select: { inbound: { select: { number: true } }, item: { select: { sku: true } } } });
+      if (rows.length !== 2) return `expected 2 rows for OBR-JIJ-0042, found ${rows.length}`;
+      const number = rows[0].inbound?.number;
+      const enteredIn = ymdOfDay(dayNumber((await db.inbound.findFirstOrThrow({ where: { number }, select: { receivedAt: true, date: true } })).receivedAt ?? new Date()));
+      const month = enteredIn.slice(0, 7);
+      const b = await bill("C008", month);
+      const mine = b.result.detail.filter((d) => d.inboundNumber === number);
+      const pallets = (c: string) => Math.round(mine.filter((d) => d.concept === c).reduce((a, d) => a + d.pallets, 0) * 1e6) / 1e6;
+      const perDay = mine.filter((d) => d.concept === "storage").reduce((a, d) => a + (d.palletDays ?? 0), 0);
+      const days = Math.max(...mine.filter((d) => d.concept === "storage").map((d) => d.days ?? 0));
+      return pallets("in") === 1 && pallets("out") === 0 && Math.abs(perDay - days) < 1e-6 && b.result.checks.detailMatches
+        ? null
+        : `in ${pallets("in")}, out ${pallets("out")}, pallet-days ${perDay} over ${days} days, detail ${b.result.checks.detailMatches}`;
+    },
+  },
+  {
     name: "every delivery: units of its stays (inside + shipped) = units received (nothing lost when splitting)",
     async run() {
       const clients = await db.client.findMany({

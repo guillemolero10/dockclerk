@@ -40,6 +40,23 @@ function byDays(stays: Stay[], ymd: string) {
   return total;
 }
 
+
+/** One row of a mixed pallet (or a piece taken off one): per = boxes in a full pallet of that item. */
+function mixRow(o: { sku: string; units: number; per: number; code: string; share?: number | null; splitFrom?: string; inYmd: string; outYmd?: string | null; inbound: number }): Stay {
+  return {
+    inboundId: `in${o.inbound}`, inboundNumber: o.inbound, docRef: null, itemId: o.sku, sku: o.sku, lot: "L1", palletType: "EURO",
+    units: o.units, perPallet: o.per, inDay: dayOfYmd(o.inYmd), inKnown: true, outDay: o.outYmd ? dayOfYmd(o.outYmd) : null, outboundNumber: o.outYmd ? 901 : null,
+    palletCode: o.code, share: o.share === undefined ? null : o.share, splitFrom: o.splitFrom ?? null,
+  };
+}
+/** The mixed pallet of the demo: 35 of A (70 a pallet) + 40 of B (80 a pallet), 0,5 + 0,5. */
+const mixed = (o: { inYmd: string; outYmd?: string | null; inbound?: number }): Stay[] => [
+  mixRow({ sku: "A", units: 35, per: 70, code: "OBR-1", share: 0.5, inbound: o.inbound ?? 20, ...o }),
+  mixRow({ sku: "B", units: 40, per: 80, code: "OBR-1", share: 0.5, inbound: o.inbound ?? 20, ...o }),
+];
+const both = (stays: Stay[], ymd: string) => (["FRACTION", "FULL"] as const).map((rule) => bill(stays, ymd, tariff({ partialPallets: rule })));
+const figures = (r: BillResult) => ({ in: r.inPallets, out: r.outPallets, pd: r.palletDays, ok: r.checks.detailMatches });
+
 type Case = { name: string; run: () => string | null | Promise<string | null> };
 const junePallets = () => [...rows(6, { sku: "A", inYmd: "2026-05-15", inbound: 1 }), ...rows(4, { sku: "A", inYmd: "2026-05-15", outYmd: "2026-06-21", inbound: 1 }), ...rows(5, { sku: "B", type: "AMERICAN", inYmd: "2026-06-11", inbound: 2 })];
 const day21: HandlingInput = { day: dayOfYmd("2026-06-21"), pallets: 2, unitPrice: 10, replacesExit: true };
@@ -450,6 +467,74 @@ const CASES: Case[] = [
       // And it does drop the old ones, or the filter would be worth nothing.
       const p = period("2026-06");
       return shippedInTime({ shippedAt: new Date("2026-05-15T10:00:00Z"), date: new Date("2026-05-15") }, p.start) ? "an old shipment was kept" : null;
+    },
+  },
+  {
+    name: "BM1 a mixed pallet inside all June is 1 pallet·day a day (30), in FRACTION and in FULL, not 2 (rows) and not 1,0 + 0,5",
+    run() {
+      const [a, b] = both(mixed({ inYmd: "2026-05-01" }), "2026-06");
+      return JSON.stringify([figures(a), figures(b)]) === JSON.stringify([{ in: 0, out: 0, pd: 30, ok: true }, { in: 0, out: 0, pd: 30, ok: true }]) ? null : JSON.stringify([figures(a), figures(b)]);
+    },
+  },
+  {
+    name: "BM2 a mixed pallet that comes in during June: entry 1 pallet in both rules, and the detail has no empty entry row",
+    run() {
+      const [a, b] = both(mixed({ inYmd: "2026-06-10" }), "2026-06");
+      const want = { in: 1, out: 0, pd: 21, ok: true };
+      const rows = b.detail.filter((d) => d.concept === "in");
+      return JSON.stringify([figures(a), figures(b)]) === JSON.stringify([want, want]) && rows.length === 1 && rows[0].pallets === 1 ? null : JSON.stringify([figures(a), figures(b), rows.length]);
+    },
+  },
+  {
+    name: "BM3 a whole mixed pallet leaves on a truck: exit 1 pallet (FRACTION and FULL), storage as for one pallet",
+    run() {
+      const stays = mixed({ inYmd: "2026-05-01", outYmd: "2026-06-20" });
+      const [a, b] = both(stays, "2026-06");
+      const one = bill(rows(1, { inYmd: "2026-05-01", outYmd: "2026-06-20", inbound: 77 }), "2026-06");
+      const want = { in: 0, out: 1, pd: one.palletDays, ok: true };
+      return JSON.stringify([figures(a), figures(b)]) === JSON.stringify([want, want]) && a.totalCents === one.totalCents ? null : JSON.stringify([figures(a), figures(b), one.palletDays]);
+    },
+  },
+  {
+    name: "BM4 one item leaves a mixed pallet (FULL): the exit is 1 pallet, the pallet is charged once (no double storage), the entry is not repeated",
+    run() {
+      // Came in 1 May. On 15 June the 40 boxes of B left on their own pallet (splitFrom); the 35 of A stay as a pallet of their own.
+      const stays = [
+        mixRow({ sku: "A", units: 35, per: 70, code: "OBR-1", inYmd: "2026-05-01", inbound: 20 }),
+        mixRow({ sku: "B", units: 40, per: 80, code: "N2-9", splitFrom: "OBR-1", inYmd: "2026-05-01", outYmd: "2026-06-15", inbound: 20 }),
+      ];
+      const full = bill(stays, "2026-06", tariff({ partialPallets: "FULL" }));
+      const camein = bill(stays.map((s) => ({ ...s, inDay: dayOfYmd("2026-06-02") })), "2026-06", tariff({ partialPallets: "FULL" }));
+      const got = { out: full.outPallets, pd: full.palletDays, ok: full.checks.detailMatches, inNew: camein.inPallets, pdNew: camein.palletDays };
+      return JSON.stringify(got) === JSON.stringify({ out: 1, pd: 30, ok: true, inNew: 1, pdNew: 29 }) ? null : JSON.stringify(got);
+    },
+  },
+  {
+    name: "BM5 if nothing is left to carry the origin pallet (both pieces left), the one that stays longest carries it once",
+    run() {
+      const stays = [
+        mixRow({ sku: "A", units: 35, per: 70, code: "N2-8", splitFrom: "OBR-1", inYmd: "2026-05-01", outYmd: "2026-06-10", inbound: 20 }),
+        mixRow({ sku: "B", units: 40, per: 80, code: "N2-9", splitFrom: "OBR-1", inYmd: "2026-05-01", outYmd: "2026-06-15", inbound: 20 }),
+      ];
+      const r = bill(stays, "2026-06", tariff({ partialPallets: "FULL" }));
+      const got = { out: r.outPallets, pd: r.palletDays, in: r.inPallets, ok: r.checks.detailMatches };
+      return JSON.stringify(got) === JSON.stringify({ out: 2, pd: 14, in: 0, ok: true }) ? null : JSON.stringify(got);
+    },
+  },
+  {
+    name: "BM6 mixed pallets with an uneven split and a mixed pallet next to normal ones: the detail adds up to the summary to the cent",
+    run() {
+      const uneven = [
+        mixRow({ sku: "A", units: 20, per: 70, code: "OBR-2", share: 20 / 70 / (20 / 70 + 0.5), inYmd: "2026-06-05", outYmd: "2026-06-25", inbound: 21 }),
+        mixRow({ sku: "B", units: 40, per: 80, code: "OBR-2", share: 0.5 / (20 / 70 + 0.5), inYmd: "2026-06-05", outYmd: "2026-06-25", inbound: 21 }),
+      ];
+      const stays = [...uneven, ...mixed({ inYmd: "2026-05-20" }), ...rows(3, { inYmd: "2026-06-02", outYmd: "2026-06-12", inbound: 30 })];
+      const [a, b] = both(stays, "2026-06");
+      const bad = [a, b].map((r) => (r.checks.detailMatches && r.checks.warnings.length === 0 ? "" : "detail")).join("");
+      const ins = [a.inPallets, b.inPallets];
+      const outs = [a.outPallets, b.outPallets];
+      const pd = [a.palletDays, b.palletDays];
+      return !bad && JSON.stringify([ins, outs, pd]) === JSON.stringify([[4, 4], [4, 4], [80, 80]]) ? null : JSON.stringify([bad, ins, outs, pd]);
     },
   },
 ];

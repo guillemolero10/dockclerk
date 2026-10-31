@@ -48,7 +48,7 @@ export async function loadBilling(clientId: string, p: Period): Promise<LoadedBi
         },
         select: { number: true, status: true, date: true, shippedAt: true, shipped: true },
       },
-      stock: { select: { itemId: true, lot: true, units: true, inboundId: true } },
+      stock: { select: { itemId: true, lot: true, units: true, inboundId: true, palletCode: true, palletShare: true, splitFrom: true } },
       handling: { where: { date: { gte: dateOfDay(p.start - 1), lt: dateOfDay(p.end + 1) } }, select: { date: true, pallets: true, unitPrice: true, replacesExit: true } },
     },
   });

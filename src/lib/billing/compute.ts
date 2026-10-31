@@ -1,7 +1,7 @@
 // The month-end arithmetic. Pure: no database, no clock, no AI. Same inputs, same cents, always.
 // Money is whole cents: every line is rounded once, the base is the sum of the rounded lines, VAT is rounded once.
 import { daysInside, ymdOfDay, type Period } from "./calendar";
-import { chargedPallets, type PalletKind, type PartialRule, type Stay } from "./stays";
+import { chargedPallets, mixedMovements, type PalletKind, type PartialRule, type Stay } from "./stays";
 
 export type TariffInput = {
   inPerPallet: number;
@@ -95,16 +95,23 @@ export function billPeriod(input: { stays: Stay[]; handling: HandlingInput[]; ta
   const warnings: string[] = [];
   const stays = input.stays;
   const weights = chargedPallets(stays, rule);
+  const mixedMove = mixedMovements(stays, rule);
   const enters = (s: Stay) => s.inKnown && s.inDay >= p.start && s.inDay < p.end;
   const leaves = (s: Stay) => s.outDay !== null && s.outDay >= p.start && s.outDay < p.end;
   // FULL: loose boxes always travel on a pallet of their own, so entries and exits count whole pallets.
   // Storage still uses `weights`: a pallet is never charged twice on the same day.
   const palletsOf = (units: number, perPallet: number) => (rule === "FULL" ? Math.ceil(units / perPallet) : units / perPallet);
   const groupKey = (s: Stay) => `${s.inboundNumber ?? 1e9}|${s.inboundId ?? ""}|${s.sku}|${s.lot ?? ""}|${s.inDay}`;
+  // Rows of a mixed pallet count their share (FRACTION) or the pallet once (FULL); every other row is counted by its boxes.
+  const plain = (indexes: number[], side: (number | null)[]) => indexes.filter((i) => side[i] === null);
   /** Pallets received, per delivery note, item and lot: a pallet split later is still one pallet in. */
-  const entered = (indexes: number[]) => (indexes.length ? palletsOf(indexes.reduce((a, i) => a + stays[i].units, 0), stays[indexes[0]].perPallet) : 0);
+  const entered = (indexes: number[]) => {
+    const rest = plain(indexes, mixedMove.enter);
+    const own = rest.length ? palletsOf(rest.reduce((a, i) => a + stays[i].units, 0), stays[rest[0]].perPallet) : 0;
+    return own + indexes.reduce((a, i) => a + (mixedMove.enter[i] ?? 0), 0);
+  };
   /** Pallets on the truck: each shipped piece is one row, a loose one included. */
-  const exited = (s: Stay) => palletsOf(s.units, s.perPallet);
+  const exitedAt = (i: number) => mixedMove.exit[i] ?? palletsOf(stays[i].units, stays[i].perPallet);
 
   // ---- Summary lines ----
   const enteringByGroup = new Map<string, number[]>();
@@ -112,7 +119,7 @@ export function billPeriod(input: { stays: Stay[]; handling: HandlingInput[]; ta
     if (enters(s)) enteringByGroup.set(groupKey(s), [...(enteringByGroup.get(groupKey(s)) ?? []), i]);
   });
   const inPallets = r6([...enteringByGroup.values()].reduce((a, indexes) => a + entered(indexes), 0));
-  const exitPallets = stays.filter(leaves).reduce((a, s) => a + exited(s), 0);
+  const exitPallets = stays.reduce((a, s, i) => a + (leaves(s) ? exitedAt(i) : 0), 0);
   const handlingIn = input.handling.filter((h) => h.day >= p.start && h.day < p.end && h.pallets > 0);
   const replaced = handlingIn.filter((h) => h.replacesExit).reduce((a, h) => a + h.pallets, 0);
   const outPallets = r6(Math.max(0, exitPallets - replaced));
@@ -164,14 +171,14 @@ export function billPeriod(input: { stays: Stay[]; handling: HandlingInput[]; ta
     const entering = g.indexes.filter((i) => enters(stays[i]));
     if (entering.length) {
       const pallets = r6(entered(entering));
-      drafts.push({ ...base, concept: "in", pallets, days: null, exitDate: null, outboundNumber: null, palletDays: null, price: tariff.inPerPallet, weight: pallets });
+      if (pallets > 0 || !entering.some((i) => mixedMove.enter[i] !== null)) drafts.push({ ...base, concept: "in", pallets, days: null, exitDate: null, outboundNumber: null, palletDays: null, price: tariff.inPerPallet, weight: pallets });
     }
 
     const leavingDays = [...new Set(g.indexes.filter((i) => leaves(stays[i])).map((i) => stays[i].outDay as number))].sort((a, b) => a - b);
     for (const day of leavingDays) {
       const here = g.indexes.filter((i) => stays[i].outDay === day && leaves(stays[i]));
-      const pallets = r6(here.reduce((a, i) => a + exited(stays[i]), 0));
-      drafts.push({ ...base, concept: "out", pallets, days: null, exitDate: ymdOfDay(day), outboundNumber: stays[here[0]].outboundNumber, palletDays: null, price: tariff.outPerPallet, weight: pallets });
+      const pallets = r6(here.reduce((a, i) => a + exitedAt(i), 0));
+      if (pallets > 0 || !here.some((i) => mixedMove.exit[i] !== null)) drafts.push({ ...base, concept: "out", pallets, days: null, exitDate: ymdOfDay(day), outboundNumber: stays[here[0]].outboundNumber, palletDays: null, price: tariff.outPerPallet, weight: pallets });
     }
 
     // One storage row per exit date (null = still inside, last). Goods that will leave after the period are split here.
