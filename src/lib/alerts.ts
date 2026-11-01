@@ -3,6 +3,7 @@
 
 import { db } from "@/lib/db";
 import { firstName, fmtDate, madridDayRange, madridHm } from "@/lib/format";
+import { getT } from "@/lib/i18n/server";
 import { describeUnits, unitWordFor } from "@/lib/pallets/quantity";
 import { allocatePicks, describeShortage } from "@/lib/warehouse/picking";
 import { makeLayout } from "@/lib/warehouse/layout";
@@ -27,7 +28,7 @@ export type Alert = {
 };
 
 const LEVEL_ORDER: Record<AlertLevel, number> = { red: 0, amber: 1, grey: 2 };
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`; // customer notices only (Spanish)
 
 /** Pallets whose lot expires within this many days. */
 export const EXPIRY_DAYS = 30;
@@ -41,6 +42,7 @@ const LATE_MINUTES = 15;
 const SLOW_DAYS = 21;
 
 export async function getAlerts(now = new Date()): Promise<Alert[]> {
+  const { t: tr } = await getT();
   const t = now.getTime();
   const today = madridDayRange(now);
   const tomorrow = madridDayRange(new Date(t + DAY));
@@ -73,17 +75,17 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
   // Trucks that should be at the gate by now.
   for (const a of late) {
     const who = a.inbound?.client.name ?? a.outbound?.client.name ?? "";
-    const what = a.inbound ? `delivery Nº ${a.inbound.number}` : `collection Nº ${a.outbound?.number}`;
+    const what = a.inbound ? tr("alx.delivery", { n: a.inbound.number }) : tr("alx.collection", { n: a.outbound?.number ?? "" });
     const minutes = Math.round((t - a.startsAt.getTime()) / 60000);
-    const lateBy = minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h${minutes % 60 ? ` ${minutes % 60} min` : ""}`;
+    const lateBy = minutes < 60 ? tr("alx.min", { n: minutes }) : minutes % 60 ? tr("alx.hmin", { h: Math.floor(minutes / 60), m: minutes % 60 }) : tr("alx.h", { h: Math.floor(minutes / 60) });
     alerts.push({
       id: `late-${a.id}`,
       level: "red",
       kind: "dock",
-      title: `Truck ${lateBy} late at ${a.warehouse.code} door ${a.dock}`,
-      detail: `${who} · ${what} · slot ${madridHm(a.startsAt)}${a.carrier ? ` · ${a.carrier.name}` : ""}${a.plate ? ` (${a.plate})` : ""}. Call the carrier or free the door.`,
+      title: tr("alx.lateTitle", { by: lateBy, wh: a.warehouse.code, dock: a.dock }),
+      detail: tr("alx.lateDetail", { who, what, time: madridHm(a.startsAt), carrier: a.carrier ? ` · ${a.carrier.name}` : "", plate: a.plate ? ` (${a.plate})` : "" }),
       href: `/office/dock?w=${a.warehouse.code}`,
-      action: "Open the dock",
+      action: tr("alx.openDock"),
     });
   }
 
@@ -93,10 +95,10 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
       id: `overdue-${i.id}`,
       level: "red",
       kind: "dock",
-      title: `Delivery Nº ${i.number} never arrived`,
-      detail: `${i.client.name} announced ${i.expectedPallets !== null ? `${i.expectedPallets} pallets` : "a delivery"} for ${fmtDate(i.date)}. Ask the customer whether it is still coming.`,
+      title: tr("alx.neverTitle", { n: i.number }),
+      detail: tr("alx.neverDetail", { client: i.client.name, what: i.expectedPallets !== null ? tr("alx.pallets_due_p", { n: i.expectedPallets }) : tr("alx.aDelivery"), date: fmtDate(i.date) }),
       href: `/office/legacy/inbounds`,
-      action: "See the delivery",
+      action: tr("alx.seeDelivery"),
       notice: `Hola${firstName(i.client.contact) ? ` ${firstName(i.client.contact)}` : ""}, la entrada Nº ${i.number}${i.expectedPallets !== null ? ` (${i.expectedPallets} palés)` : ""} estaba prevista para el ${fmtDate(i.date)} y no ha llegado. ¿Sigue en pie o la anulamos? Un saludo.`,
     });
   }
@@ -127,10 +129,10 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
         id: `short-${o.id}`,
         level: "red",
         kind: "stock",
-        title: `Outbound Nº ${o.number} is short: ${describeShortage(plan.shortLines, (id) => o.lines.find((l) => l.itemId === id)?.item)}`,
-        detail: `${o.client.name} → ${to}: ${lacking.map((l) => `${l.sku} ${l.ask} ordered, ${l.have} in stock`).join("; ")}. Ship part or wait for the next delivery.`,
+        title: tr("alx.shortTitle", { n: o.number, text: describeShortage(plan.shortLines, (id) => o.lines.find((l) => l.itemId === id)?.item, { of: tr("pk.of"), and: tr("pk.and") }) }),
+        detail: tr("alx.shortDetail", { client: o.client.name, to, lines: lacking.map((l) => tr("alx.shortLine", { sku: l.sku, ask: l.ask, have: l.have })).join("; ") }),
         href: `/office/warehouse?pick=${o.id}`,
-        action: "See it in 3D",
+        action: tr("alx.seeIn3d"),
         notice: `Hola${firstName(o.client.contact) ? ` ${firstName(o.client.contact)}` : ""}, para la salida Nº ${o.number} a ${to} nos pedís ${lacking.map((l) => `${l.ask} de ${l.sku}`).join(" y ")} y ahora mismo tenéis ${lacking.map((l) => `${l.have} de ${l.sku}`).join(" y ")} en stock. ¿Enviamos lo que hay o esperamos a la próxima entrada? Un saludo.`,
       });
       continue;
@@ -141,10 +143,10 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
         id: `deadline-${o.id}`,
         level: hoursLeft < 2 ? "red" : "amber",
         kind: "floor",
-        title: hoursLeft < 0 ? `Outbound Nº ${o.number} is past its deadline` : `Outbound Nº ${o.number} due at ${madridHm(deadline)}`,
-        detail: `${o.client.name} → ${to}: ${plan?.picked.length ?? 0} of ${total} pallets picked${plan?.warehouseId ? ` in ${whName.get(plan.warehouseId)}` : ""}.`,
+        title: hoursLeft < 0 ? tr("alx.pastDeadline", { n: o.number }) : tr("alx.dueAt", { n: o.number, time: madridHm(deadline) }),
+        detail: tr("alx.pickedOf", { client: o.client.name, to, a: plan?.picked.length ?? 0, b: total, where: plan?.warehouseId ? tr("alx.in", { wh: whName.get(plan.warehouseId) ?? "" }) : "" }),
         href: `/office/warehouse?pick=${o.id}`,
-        action: "Light up the pick",
+        action: tr("alx.lightUp"),
       });
     }
   }
@@ -155,10 +157,10 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
       id: `nobook-out-${o.id}`,
       level: "amber",
       kind: "dock",
-      title: `Outbound Nº ${o.number} is ready but has no truck`,
-      detail: `${o.client.name} → ${o.consignee?.name.split("–")[0].trim() ?? "—"}, waiting in the dispatch lane. Book a loading slot.`,
+      title: tr("alx.noTruckTitle", { n: o.number }),
+      detail: tr("alx.noTruckDetail", { client: o.client.name, to: o.consignee?.name.split("–")[0].trim() ?? "—" }),
       href: `/office/dock`,
-      action: "Book a slot",
+      action: tr("alx.bookSlot"),
     });
   }
   for (const i of unbooked) {
@@ -166,10 +168,10 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
       id: `nobook-in-${i.id}`,
       level: "amber",
       kind: "dock",
-      title: `Delivery Nº ${i.number} has no dock slot`,
-      detail: `${i.client.name}, ${i.expectedPallets !== null ? `${i.expectedPallets} pallets` : "a delivery"} due ${i.date < today.end ? "today" : "tomorrow"}. Book a door before the truck turns up.`,
+      title: tr("alx.noSlotTitle", { n: i.number }),
+      detail: tr("alx.noSlotDetail", { client: i.client.name, what: i.expectedPallets !== null ? tr("alx.pallets_due_p", { n: i.expectedPallets }) : tr("alx.aDelivery"), when: i.date < today.end ? tr("alx.today") : tr("alx.tomorrow") }),
       href: `/office/dock`,
-      action: "Book a slot",
+      action: tr("alx.bookSlot"),
     });
   }
 
@@ -185,10 +187,10 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
       id: `putaway-${w.id}`,
       level: hours > 6 ? "red" : "amber",
       kind: "floor",
-      title: `${plural(waiting.length, "pallet")} waiting to be put away in ${w.code}`,
-      detail: `On the dock floor for ${Math.floor(hours)} h. They block the door for the next truck.`,
+      title: tr("alx.putawayTitle", { n: tr("alx.pallet_p", { n: waiting.length }), wh: w.code }),
+      detail: tr("alx.putawayDetail", { h: Math.floor(hours) }),
       href: `/office/warehouse?w=${w.code}`,
-      action: "See them in 3D",
+      action: tr("alx.seeThem"),
     });
   }
 
@@ -202,10 +204,10 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
       id: `space-${w.id}`,
       level: pct >= 95 ? "red" : "amber",
       kind: "space",
-      title: `${w.code} is ${pct}% full`,
-      detail: `${used} of ${capacity} rack slots taken, ${capacity - used} free. Send the next deliveries of its customers to another building or move slow stock.`,
+      title: tr("alx.fullTitle", { wh: w.code, p: pct }),
+      detail: tr("alx.fullDetail", { used, cap: capacity, free: capacity - used }),
       href: `/office/warehouse?w=${w.code}&color=age`,
-      action: "See the oldest stock",
+      action: tr("alx.seeOldest"),
     });
   }
 
@@ -226,10 +228,10 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
       id: `expiry-${key}`,
       level: days <= EXPIRY_RED_DAYS ? "red" : "amber",
       kind: "expiry",
-      title: days <= 0 ? `Lot ${s.lot} of ${s.item.sku} has expired` : `Lot ${s.lot} of ${s.item.sku} expires in ${plural(days, "day")}`,
-      detail: `${s.client.name} · ${plural(pallets, "pallet")} in ${w} · best before ${fmtDate(s.expiresAt)}. It goes out first on the next order (FEFO).`,
+      title: days <= 0 ? tr("alx.expiredTitle", { lot: s.lot ?? "", sku: s.item.sku }) : tr("alx.expiresTitle", { lot: s.lot ?? "", sku: s.item.sku, days: tr("alx.day_p", { n: days }) }),
+      detail: tr("alx.expiryDetail", { client: s.client.name, pallets: tr("alx.pallet_p", { n: pallets }), wh: w ?? "", date: fmtDate(s.expiresAt) }),
       href: `/office/warehouse?w=${w}&color=expiry`,
-      action: "See it in 3D",
+      action: tr("alx.seeIn3d"),
       notice: `Hola${firstName(s.client.contact) ? ` ${firstName(s.client.contact)}` : ""}, os avisamos de que el lote ${s.lot} de ${s.item.sku} (${s.item.description}) caduca el ${fmtDate(s.expiresAt)}. Tenéis ${plural(pallets, "palé", "palés")} en almacén. Saldrá primero en el próximo pedido; si queréis darle salida antes, decidnos a dónde. Un saludo.`,
     });
   }
@@ -240,10 +242,10 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
       id: `incident-${i.id}`,
       level: "grey",
       kind: "incident",
-      title: `Incident on delivery Nº ${i.number}`,
+      title: tr("alx.incidentTitle", { n: i.number }),
       detail: `${i.client.name} · ${fmtDate(i.date)} · ${i.incident}`,
       href: i.receipt ? `/receipts/${i.id}` : `/office/legacy/inbounds`,
-      action: i.receipt ? "Open the receipt" : "See the delivery",
+      action: i.receipt ? tr("alx.openReceipt") : tr("alx.seeDelivery"),
     });
   }
 
@@ -266,10 +268,10 @@ export async function getAlerts(now = new Date()): Promise<Alert[]> {
       id: `slow-${itemId}`,
       level: "grey",
       kind: "slow",
-      title: `${s.item.sku} has not moved in ${Math.floor((t - oldest) / DAY)} days`,
-      detail: `${s.client.name} · ${plural(pallets, "pallet")} in ${whName.get(s.warehouseId)}, no outbound in the last three weeks.`,
+      title: tr("alx.slowTitle", { sku: s.item.sku, n: Math.floor((t - oldest) / DAY) }),
+      detail: tr("alx.slowDetail", { client: s.client.name, pallets: tr("alx.pallet_p", { n: pallets }), wh: whName.get(s.warehouseId) ?? "" }),
       href: `/office/warehouse?w=${whName.get(s.warehouseId)}&color=age`,
-      action: "See it in 3D",
+      action: tr("alx.seeIn3d"),
     });
   }
 
