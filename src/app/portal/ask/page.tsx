@@ -1,5 +1,6 @@
 import { AskClerk } from "@/components/portal/ask-clerk";
 import { db } from "@/lib/db";
+import { getT } from "@/lib/i18n/server";
 import { requireCustomer } from "@/lib/portal";
 
 export const dynamic = "force-dynamic";
@@ -8,6 +9,7 @@ export const maxDuration = 60;
 
 export default async function PortalAsk() {
   const client = await requireCustomer();
+  const { t } = await getT();
   const [items, lastOut] = await Promise.all([
     db.item.findMany({ where: { clientId: client.id, stock: { some: {} } }, orderBy: { sku: "asc" }, take: 2 }),
     db.outbound.findFirst({ where: { clientId: client.id, consigneeId: { not: null } }, orderBy: { date: "desc" }, include: { consignee: true } }),
@@ -22,9 +24,9 @@ export default async function PortalAsk() {
   return (
     <main className="mx-auto max-w-3xl space-y-4">
       <div>
-        <h1 className="text-3xl font-semibold tracking-tight">Ask & request</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">{t("pt.askTitle")}</h1>
         <p className="mt-1 text-sm text-dock-ink/60">
-          Write like you would to the office. Questions about your goods are answered right away from the live software; orders go to the office, who approves them.
+          {t("pt.askIntro")}
         </p>
       </div>
       <AskClerk examples={examples} />

@@ -1,10 +1,13 @@
 import { LogOut } from "lucide-react";
 import { logout } from "@/app/actions";
 import { PortalNav } from "@/components/portal/portal-nav";
+import { LangSwitch } from "@/lib/i18n/lang-switch";
+import { getT } from "@/lib/i18n/server";
 import { requireCustomer } from "@/lib/portal";
 
 export default async function PortalLayout({ children }: LayoutProps<"/portal">) {
   const client = await requireCustomer();
+  const { t } = await getT();
   return (
     <div className="dock-app min-h-screen">
       <div className="hazard h-2" />
@@ -14,15 +17,18 @@ export default async function PortalLayout({ children }: LayoutProps<"/portal">)
             <span className="cond grid h-8 w-8 place-items-center bg-dock-ink text-sm font-bold text-dock-yellow">AV</span>
             <span>
               <span className="block text-sm font-semibold leading-tight">Almacenes del Vinalopó</span>
-              <span className="cond block text-[11px] text-dock-ink/50">Customer portal · {client.name}</span>
+              <span className="cond block text-[11px] text-dock-ink/50">{t("pt.customerPortal", { name: client.name })}</span>
             </span>
           </div>
           <PortalNav />
-          <form action={logout} className="ml-auto">
-            <button className="cond flex items-center gap-1.5 text-xs text-dock-ink/50 hover:text-dock-ink">
-              <LogOut size={14} /> Sign out
-            </button>
-          </form>
+          <div className="ml-auto flex items-center gap-3">
+            <LangSwitch tone="light" />
+            <form action={logout}>
+              <button className="cond flex min-h-8 items-center gap-1.5 text-xs text-dock-ink/50 hover:text-dock-ink">
+                <LogOut size={14} /> {t("common.signOut")}
+              </button>
+            </form>
+          </div>
         </div>
       </header>
       <div className="mx-auto max-w-6xl px-6 py-8">{children}</div>
