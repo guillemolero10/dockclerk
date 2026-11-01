@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { processMessage } from "@/app/office/inbox/actions";
+import { useT } from "@/lib/i18n/client";
 import type { StepKind } from "@/lib/agent/types";
 
 type Pending = { id: string; from: string };
@@ -13,6 +14,7 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Runs the clerk message by message and prints its reasoning as it goes. */
 export function ClerkRunner({ pending }: { pending: Pending[] }) {
+  const { t } = useT();
   const router = useRouter();
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(0);
@@ -44,7 +46,7 @@ export function ClerkRunner({ pending }: { pending: Pending[] }) {
         setDone(i + 1);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong.");
+      setError(e instanceof Error ? e.message : t("ib.wentWrong"));
     } finally {
       setRunning(false);
       router.refresh();
@@ -59,12 +61,12 @@ export function ClerkRunner({ pending }: { pending: Pending[] }) {
         <div className="flex items-center gap-2 text-sm">
           <span className={`h-2 w-2 rounded-full ${running ? "dock-live bg-dock-yellow" : "bg-white/30"}`} />
           <span className="cond text-white/70">
-            {running ? `AI clerk working · ${done}/${pending.length}` : lines.length ? "AI clerk · finished" : `${pending.length} messages waiting`}
+            {running ? t("ib.working", { a: done, b: pending.length }) : lines.length ? t("ib.finished") : t("ib.waiting", { n: pending.length })}
           </span>
         </div>
         {!running && pending.length > 0 && (
           <button onClick={run} className="cond flex items-center gap-2 bg-dock-yellow px-4 py-2 text-sm font-semibold text-dock-ink transition hover:brightness-95">
-            <Sparkles size={15} /> Let the clerk handle {pending.length} messages
+            <Sparkles size={15} /> {t("ib.handle_p", { n: pending.length })}
           </button>
         )}
       </div>

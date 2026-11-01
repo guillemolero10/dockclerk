@@ -5,7 +5,7 @@ export const fmtDate = (d: Date | null | undefined) =>
 export const fmtTime = (d: Date | null | undefined) =>
   d ? d.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" }) : "";
 
-export const fmtNumber = (n: number | null | undefined) => (n == null ? "" : n.toLocaleString("es-ES"));
+export const fmtNumber = (n: number | null | undefined, lang: "en" | "es" = "es") => (n == null ? "" : n.toLocaleString(lang === "en" ? "en-GB" : "es-ES"));
 
 // The warehouse runs on Spanish time, but servers (Vercel) run on UTC.
 // Returns the UTC instants where today starts and ends in Madrid.

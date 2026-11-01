@@ -8,6 +8,7 @@ import { orderReply } from "@/lib/agent/rules";
 import type { Doubt, DraftSeed, OutboundPayload, Step } from "@/lib/agent/types";
 import { db, longTransaction } from "@/lib/db";
 import { madridDayRange } from "@/lib/format";
+import { getT } from "@/lib/i18n/server";
 import { PORTAL_LIVE_ADDRESS } from "@/lib/portal";
 import { makeLayout } from "@/lib/warehouse/layout";
 import { suggestSlot } from "@/lib/warehouse/lanes";
@@ -63,7 +64,7 @@ export async function approveDraft(formData: FormData) {
   for (const doubt of draft.doubts as unknown as Doubt[]) {
     const value = formData.get(doubt.field);
     if (typeof value !== "string" || !doubt.options.some((o) => o.value === value)) {
-      throw new Error(`Pick an option for: ${doubt.question}`);
+      throw new Error((await getT()).t("ib.pickOption", { q: doubt.question }));
     }
     if (doubt.field === "consigneeId") {
       const consignee = await db.consignee.findUniqueOrThrow({ where: { id: value } });
@@ -75,7 +76,7 @@ export async function approveDraft(formData: FormData) {
     }
   }
 
-  if (!payload.lines.every((l) => Number.isInteger(l.units) && l.units > 0)) throw new Error("This draft has no valid quantity. Discard it and replay the message.");
+  if (!payload.lines.every((l) => Number.isInteger(l.units) && l.units > 0)) throw new Error((await getT()).t("ib.noQty"));
 
   const deliverBy = payload.deliverBy ? new Date(payload.deliverBy) : null;
   // Claim the draft and create the outbound in one transaction: with two clicks (or two tabs) only one gets count === 1,

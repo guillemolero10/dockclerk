@@ -6,6 +6,7 @@ import { DraftCard, type DraftView } from "@/components/inbox/draft-card";
 import type { Doubt, Step } from "@/lib/agent/types";
 import { db } from "@/lib/db";
 import { resetInbox } from "./actions";
+import { getT } from "@/lib/i18n/server";
 import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +18,7 @@ const ORDER: Record<DraftKind, number> = { CREATE_OUTBOUND: 0, CREATE_INBOUND: 1
 
 export default async function InboxPage() {
   await requireRole("office");
+  const { t } = await getT();
   const [newMessages, drafts] = await Promise.all([
     db.message.findMany({ where: { status: "NEW" }, orderBy: { receivedAt: "asc" }, include: { client: true } }),
     db.draft.findMany({ orderBy: { createdAt: "desc" }, include: { message: { include: { client: true } } } }),
@@ -43,15 +45,15 @@ export default async function InboxPage() {
     <main className="mx-auto max-w-6xl px-8 py-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="cond text-sm text-dock-ink/50">Email · WhatsApp · customer portal</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">AI inbox</h1>
+          <p className="cond text-sm text-dock-ink/50">{t("ib.kicker")}</p>
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight">{t("ib.title")}</h1>
           <p className="mt-1 max-w-2xl text-sm text-dock-ink/60">
-            The clerk reads every message, checks the software and prepares the work. Nothing is written or sent until you approve it.
+            {t("ib.intro")}
           </p>
         </div>
         <form action={resetInbox}>
-          <button className="cond flex items-center gap-1.5 text-xs text-dock-ink/40 hover:text-dock-ink" title="Demo: put all messages back and undo what was approved">
-            <RotateCcw size={13} /> Replay the morning
+          <button className="cond flex items-center gap-1.5 text-xs text-dock-ink/40 hover:text-dock-ink" title={t("ib.replayTitle")}>
+            <RotateCcw size={13} /> {t("ib.replay")}
           </button>
         </form>
       </header>
@@ -62,11 +64,11 @@ export default async function InboxPage() {
 
       <section className="mt-8">
         <h2 className="cond flex items-center gap-2 text-sm">
-          To approve <span className="mono bg-dock-ink px-1.5 text-[11px] text-dock-yellow">{pending.length}</span>
+          {t("ib.toApprove")} <span className="mono bg-dock-ink px-1.5 text-[11px] text-dock-yellow">{pending.length}</span>
         </h2>
         {pending.length === 0 ? (
           <p className="mt-3 text-sm text-dock-ink/50">
-            {newMessages.length ? "Let the clerk handle the inbox to see its drafts here." : "All caught up."}
+            {newMessages.length ? t("ib.letToSee") : t("ib.caughtUp")}
           </p>
         ) : (
           <div className="mt-3 grid gap-4 lg:grid-cols-2">
@@ -79,14 +81,14 @@ export default async function InboxPage() {
 
       {done.length > 0 && (
         <section className="mt-10">
-          <h2 className="cond text-sm text-dock-ink/50">Done</h2>
+          <h2 className="cond text-sm text-dock-ink/50">{t("ib.done")}</h2>
           <ul className="dock-card mt-3 divide-y divide-dock-line bg-white">
             {done.map((d) => {
               const created = d.payload as { outboundId?: string; outboundNumber?: number };
               return (
                 <li key={d.id} className="flex flex-wrap items-center gap-3 px-4 py-2.5 text-sm">
                   <span className={`cond w-20 text-[11px] ${d.status === "APPROVED" ? "text-green-700" : "text-dock-ink/40 line-through"}`}>
-                    {d.status === "APPROVED" ? "Approved" : "Discarded"}
+                    {d.status === "APPROVED" ? t("ib.approved") : t("ib.discarded")}
                   </span>
                   <span className="min-w-0 flex-1 truncate">
                     {d.message?.client?.name ?? d.message?.fromName}
@@ -95,10 +97,10 @@ export default async function InboxPage() {
                   {created.outboundId && (
                     <>
                       <Link href={`/office/warehouse?pick=${created.outboundId}`} className="cond flex items-center gap-1 bg-dock-ink px-2 py-0.5 text-[11px] font-semibold text-dock-yellow">
-                        <Boxes size={12} /> Light up the pick
+                        <Boxes size={12} /> {t("ib.lightUp")}
                       </Link>
                       <Link href={`/office/legacy/outbounds/${created.outboundId}`} className="cond flex items-center gap-1 bg-dock-yellow px-2 py-0.5 text-[11px] font-semibold">
-                        Outbound Nº {created.outboundNumber} in your software <ArrowUpRight size={12} />
+                        {t("ib.outboundIn", { n: created.outboundNumber ?? "" })} <ArrowUpRight size={12} />
                       </Link>
                     </>
                   )}
