@@ -6,8 +6,12 @@
 // Exit code 1 if any case fails, so it can run before recording the video.
 
 import { describeUnits, heldPallets, readQuantity, splitUnits, toUnits } from "../src/lib/pallets/quantity";
-import { checkBreakdown, cleanDrafts, expandPallets, fromNote, leadIndex, sharesOf, summarize, type ItemLite, type PalletDraft } from "../src/lib/pallets/breakdown";
-import { freshCodes, generatedCode, parseCode } from "../src/lib/pallets/codes";
+import { checkBreakdown, cleanDrafts as cleanDraftsT, expandPallets, fromNote, leadIndex, sharesOf, summarize, type ItemLite, type PalletDraft } from "../src/lib/pallets/breakdown";
+import { freshCodes, generatedCode, parseCode as parseCodeT } from "../src/lib/pallets/codes";
+import { tEn } from "../src/lib/i18n/en";
+// The app passes its own translator; here, the English one.
+const cleanDrafts = (raw: unknown) => cleanDraftsT(raw, tEn);
+const parseCode = (raw: string) => parseCodeT(raw, tEn);
 import { planRestore, type LaneRow } from "../src/lib/warehouse/restore";
 import { allocatePicks, describeShortage, type OpenOrder, type PickableStock, type PickPlan } from "../src/lib/warehouse/picking";
 
@@ -217,7 +221,7 @@ const ITEMS: ItemLite[] = [
   { id: "POLV", sku: "POLVORON", unitsPerPallet: 80 },
 ];
 const one = (itemId: string, units: number, code: string | null = null, lot: string | null = "L1"): PalletDraft => ({ code, lines: [{ itemId, lot, expiresAt: null, units }] });
-const errorsOf = (d: PalletDraft[], live: Record<string, string> = {}) => checkBreakdown(d, ITEMS, new Map(Object.entries(live))).errors;
+const errorsOf = (d: PalletDraft[], live: Record<string, string> = {}) => checkBreakdown(d, ITEMS, new Map(Object.entries(live)), tEn).errors;
 
 const BREAKDOWN_CASES: Case[] = [
   { name: "P10 «38 × AGUA-15» + 2 de otra referencia: 40 palés válidos, resumen 38 y 2 palés", check: () => {

@@ -11,14 +11,21 @@ export type Vars = Record<string, string | number>;
 export type Dict = Record<string, string>;
 export type Translate = (key: Key, vars?: Vars) => string;
 
-/** "es", "es-ES" and "ES" are Spanish; anything else is English. */
+/** Only "en" or "es" (the cookie value); anything else is no choice. */
 export const toLang = (value: string | null | undefined): Lang | null =>
   value === "en" || value === "es" ? value : null;
 
-/** First language of an Accept-Language header: Spanish if it starts with "es", otherwise English. */
+/**
+ * Language from an Accept-Language header: the first of its languages that is English or Spanish, in the browser's order,
+ * so "ca-ES,ca;q=0.9,es;q=0.8" (Valencian/Catalan first) gets Spanish. Nothing of either → English.
+ */
 export function langFromHeader(header: string | null | undefined): Lang {
-  const first = (header ?? "").split(",")[0]?.trim().toLowerCase() ?? "";
-  return first.startsWith("es") ? "es" : "en";
+  for (const part of (header ?? "").split(",")) {
+    const tag = part.split(";")[0].trim().toLowerCase();
+    if (tag.startsWith("es")) return "es";
+    if (tag.startsWith("en")) return "en";
+  }
+  return "en";
 }
 
 /** The locale for Intl in each language. */

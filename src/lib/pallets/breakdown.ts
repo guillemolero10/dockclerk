@@ -3,7 +3,6 @@
 // Lines of one pallet are one customer's: the form only offers that customer's items and the server checks it.
 
 import type { Translate } from "@/lib/i18n/core";
-import { tEn } from "@/lib/i18n/en";
 import { parseCode } from "./codes";
 import { splitUnits } from "./quantity";
 
@@ -79,7 +78,7 @@ export function leadIndex(shares: (number | null)[]): number {
  * Everything wrong with a breakdown, in words the operator can act on (pallets are numbered from 1).
  * @param live pallet IDs already inside the buildings, with where they are
  */
-export function checkBreakdown(drafts: PalletDraft[], items: ItemLite[], live: Map<string, string>, t: Translate = tEn): { errors: string[] } {
+export function checkBreakdown(drafts: PalletDraft[], items: ItemLite[], live: Map<string, string>, t: Translate): { errors: string[] } {
   const errors: string[] = [];
   if (!drafts.length) errors.push(t("bd.addOne"));
   if (drafts.length > MAX_PALLETS) errors.push(t("bd.tooMany", { max: MAX_PALLETS, n: drafts.length }));
@@ -139,7 +138,7 @@ export function summarize(drafts: PalletDraft[]): { itemId: string; lot: string 
  * What the browser sent, made safe: the right shapes, IDs cleaned with `parseCode` ("" = no ID), lots trimmed.
  * Anything that is not a list of pallets of lines is an error; the numbers are judged later by `checkBreakdown`.
  */
-export function cleanDrafts(raw: unknown, t: Translate = tEn): { ok: true; drafts: PalletDraft[] } | { ok: false; error: string } {
+export function cleanDrafts(raw: unknown, t: Translate): { ok: true; drafts: PalletDraft[] } | { ok: false; error: string } {
   if (!Array.isArray(raw)) return { ok: false, error: t("bd.listUnreadable") };
   const drafts: PalletDraft[] = [];
   for (const [idx, p] of raw.entries()) {

@@ -11,7 +11,7 @@ import Module from "node:module";
 
 const token = randomBytes(32).toString("base64url");
 const fakes: Record<string, unknown> = {
-  "next/headers": { cookies: async () => ({ get: (name: string) => (name === "dockclerk_session" ? { value: token } : undefined), set() {}, delete() {} }) },
+  "next/headers": { headers: async () => new Headers(), cookies: async () => ({ get: (name: string) => (name === "dockclerk_session" ? { value: token } : undefined), set() {}, delete() {} }) },
   "next/cache": { revalidatePath() {} },
   "next/navigation": { redirect: (to: string) => { throw new Error(`redirect:${to}`); } },
 };
