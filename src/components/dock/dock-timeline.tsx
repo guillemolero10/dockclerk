@@ -3,6 +3,7 @@ import { Bot, Check } from "lucide-react";
 import type { DockSlot } from "@/lib/dock/day";
 import { DOCK_CLOSE_H, DOCK_OPEN_H } from "@/lib/dock/slots";
 import { madridHm } from "@/lib/format";
+import { getT } from "@/lib/i18n/server";
 import { TimelineScroller } from "./timeline-scroller";
 
 const HOUR = 60 * 60 * 1000;
@@ -12,7 +13,7 @@ const LABEL_W = 132;
 const HOUR_PX = 120;
 
 /** Gantt of the day: one lane per dock door, one block per truck. */
-export function DockTimeline({
+export async function DockTimeline({
   docks,
   slots,
   dayStart,
@@ -27,6 +28,7 @@ export function DockTimeline({
   selected: string | null;
   hrefFor: (id: string | null) => string;
 }) {
+  const { t: tr } = await getT();
   const x = (t: number) => ((t - dayStart.getTime()) / HOUR - DOCK_OPEN_H) * HOUR_PX;
   const width = HOURS.length * HOUR_PX;
   const nowX = now ? x(now.getTime()) : null;
@@ -41,7 +43,7 @@ export function DockTimeline({
           {/* Hour ruler */}
           <div className="flex border-b-[1.5px] border-dock-ink bg-dock-concrete-2">
             <div className="cond sticky left-0 z-20 shrink-0 bg-dock-concrete-2 px-4 py-2 text-[11px] text-dock-ink/50" style={{ width: LABEL_W }}>
-              Door
+              {tr("dk.door")}
             </div>
             <div className="relative h-8" style={{ width }}>
               {HOURS.map((h) => (
@@ -55,8 +57,8 @@ export function DockTimeline({
           {docks.map((dock) => (
             <div key={dock.n} className="flex border-b border-dock-line last:border-0">
               <div className="sticky left-0 z-20 flex shrink-0 flex-col justify-center gap-0.5 border-r border-dock-line bg-white px-4" style={{ width: LABEL_W }}>
-                <span className="cond w-fit bg-dock-ink px-2 py-0.5 text-sm font-bold text-dock-yellow">DOCK {dock.n}</span>
-                <span className="cond text-[10px] text-dock-ink/45">{dock.kind === "in" ? "Receiving" : "Dispatch"}</span>
+                <span className="cond w-fit bg-dock-ink px-2 py-0.5 text-sm font-bold text-dock-yellow">{tr("dk.doorUpper", { n: dock.n })}</span>
+                <span className="cond text-[10px] text-dock-ink/45">{dock.kind === "in" ? tr("dk.receiving") : tr("dk.dispatch")}</span>
               </div>
               <div className="relative h-[78px]" style={{ width }}>
                 {HOURS.map((h) => (
@@ -92,13 +94,13 @@ export function DockTimeline({
                           {s.status === "DONE" && <Check size={11} />}
                           {s.bookedBy === "clerk" && s.status === "BOOKED" && <Bot size={11} />}
                           {madridHm(s.start)}
-                          {late && <span className="cond ml-auto text-[9px]">Late</span>}
+                          {late && <span className="cond ml-auto text-[9px]">{tr("dk.late")}</span>}
                         </span>
                         <span className="block truncate">
                           Nº {s.number} · {s.client.replace(/,? S\.[AL]\.$/, "")}
                         </span>
                         <span className="block truncate opacity-70">
-                          {s.status === "ARRIVED" ? "At the dock" : s.pallets !== null ? `${s.pallets} plt` : "pallets tbc"}
+                          {s.status === "ARRIVED" ? tr("dk.atDock") : s.pallets !== null ? tr("dk.plt", { n: s.pallets }) : tr("dk.tbc")}
                         </span>
                       </Link>
                     );

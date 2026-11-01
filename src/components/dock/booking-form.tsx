@@ -3,6 +3,7 @@
 import { startTransition, useActionState, useState } from "react";
 import { AlertTriangle, CalendarPlus, Check } from "lucide-react";
 import { bookSlot, type BookState } from "@/app/office/dock/actions";
+import { useT } from "@/lib/i18n/client";
 
 export type BookingOption = { key: string; kind: "in" | "out"; label: string; preferred: string; minutes: number };
 
@@ -20,6 +21,7 @@ export function BookingForm({
   docks: { n: number; kind: "in" | "out" }[];
   initialKey: string | null;
 }) {
+  const { t } = useT();
   const [state, action, pending] = useActionState<BookState, FormData>(bookSlot, null);
   const [key, setKey] = useState(initialKey ?? options[0]?.key ?? "");
   const option = options.find((o) => o.key === key) ?? options[0];
@@ -30,7 +32,7 @@ export function BookingForm({
     return (
       <div className="dock-card bg-white p-5 text-sm text-dock-ink/60">
         {state?.ok && <OkLine text={state.ok} />}
-        Every truck of this day has a slot.
+        {t("bk.everyHas")}
       </div>
     );
   }
@@ -53,13 +55,13 @@ export function BookingForm({
       className="dock-card space-y-3 bg-white p-5"
     >
       <h2 className="cond flex items-center gap-2 text-sm">
-        <CalendarPlus size={15} /> Book a slot
+        <CalendarPlus size={15} /> {t("bk.title")}
       </h2>
       <input type="hidden" name="warehouse" value={warehouse} />
       <input type="hidden" name="day" value={day} />
 
       <label className="block">
-        <span className="cond text-[11px] text-dock-ink/50">Truck</span>
+        <span className="cond text-[11px] text-dock-ink/50">{t("bk.truck")}</span>
         <select name="order" value={option.key} onChange={(e) => pick(e.target.value)} className="dock-input mt-1">
           {options.map((o) => (
             <option key={o.key} value={o.key}>
@@ -71,25 +73,25 @@ export function BookingForm({
 
       <div className="grid grid-cols-2 gap-3">
         <label className="block">
-          <span className="cond text-[11px] text-dock-ink/50">From</span>
+          <span className="cond text-[11px] text-dock-ink/50">{t("bk.from")}</span>
           <input name="time" type="time" step={900} value={time} onChange={(e) => setTime(e.target.value)} className="dock-input mono mt-1" />
         </label>
         <label className="block">
-          <span className="cond text-[11px] text-dock-ink/50">Door</span>
+          <span className="cond text-[11px] text-dock-ink/50">{t("bk.door")}</span>
           <select name="dock" value={dock} onChange={(e) => setDock(e.target.value)} className="dock-input mt-1">
-            <option value="auto">First free</option>
+            <option value="auto">{t("bk.firstFree")}</option>
             {docks
               .filter((d) => d.kind === option.kind)
               .map((d) => (
                 <option key={d.n} value={d.n}>
-                  Dock {d.n}
+                  {t("dk.dockN", { n: d.n })}
                 </option>
               ))}
           </select>
         </label>
       </div>
       <p className="mono text-[11px] text-dock-ink/50">
-        {option.kind === "in" ? "Unloading" : "Loading"} takes about {option.minutes} min
+        {t("bk.takes", { kind: option.kind === "in" ? t("dk.unloading") : t("dk.loading"), n: option.minutes })}
       </p>
 
       {state?.error && (
@@ -106,7 +108,7 @@ export function BookingForm({
               }}
               className="cond bg-dock-ink px-2 py-1 text-xs text-dock-yellow"
             >
-              Use dock {state.suggestion.dock} at {state.suggestion.time}
+              {t("bk.useDock", { dock: state.suggestion.dock, time: state.suggestion.time })}
             </button>
           )}
         </div>
@@ -114,7 +116,7 @@ export function BookingForm({
       {state?.ok && <OkLine text={state.ok} />}
 
       <button disabled={pending} className="cond w-full bg-dock-ink px-4 py-2 text-sm font-semibold text-dock-yellow disabled:opacity-60">
-        {pending ? "Booking…" : "Book slot"}
+        {pending ? t("bk.booking") : t("bk.book")}
       </button>
     </form>
   );

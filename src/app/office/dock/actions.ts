@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { getDockDay } from "@/lib/dock/day";
 import { DOCK_CLOSE_H, DOCK_OPEN_H, firstFree, overlaps, slotMinutes, type Busy } from "@/lib/dock/slots";
 import { madridDay, madridHm } from "@/lib/format";
+import { getT } from "@/lib/i18n/server";
 import { shipOutbound } from "@/lib/ops/floor";
 import { assertRole } from "@/lib/session";
 import { makeLayout } from "@/lib/warehouse/layout";
@@ -19,6 +20,7 @@ export type BookState = { ok?: string; error?: string; suggestion?: { dock: numb
 
 /** Slots already taken that day in a warehouse (a no-show frees its door). */
 async function busyDocks(warehouseId: string, day: { start: Date; end: Date }): Promise<Busy[]> {
+  const { t } = await getT();
   const taken = await db.dockAppointment.findMany({
     where: { warehouseId, startsAt: { gte: day.start, lt: day.end }, status: { not: "NO_SHOW" } },
     include: { inbound: { select: { number: true } }, outbound: { select: { number: true } } },
@@ -27,12 +29,13 @@ async function busyDocks(warehouseId: string, day: { start: Date; end: Date }): 
     dock: a.dock,
     start: a.startsAt.getTime(),
     end: a.endsAt.getTime(),
-    label: `${a.inboundId ? "inbound" : "outbound"} Nº ${a.inbound?.number ?? a.outbound?.number}`,
+    label: t(a.inboundId ? "bkx.inbound" : "bkx.outbound", { n: a.inbound?.number ?? a.outbound?.number ?? "" }),
   }));
 }
 
 export async function bookSlot(_: BookState, formData: FormData): Promise<BookState> {
   await requireOffice();
+  const { t } = await getT();
   const code = String(formData.get("warehouse") ?? "");
   const key = String(formData.get("order") ?? "");
   const ymd = String(formData.get("day") ?? "");
@@ -41,14 +44,14 @@ export async function bookSlot(_: BookState, formData: FormData): Promise<BookSt
 
   const warehouse = await db.warehouse.findUnique({ where: { code } });
   const [kind, id] = key.split(":") as ["in" | "out", string];
-  if (!warehouse || !id || !/^\d{4}-\d{2}-\d{2}$/.test(ymd) || !/^\d{2}:\d{2}$/.test(time)) return { error: "Pick a truck, a day and a time." };
+  if (!warehouse || !id || !/^\d{4}-\d{2}-\d{2}$/.test(ymd) || !/^\d{2}:\d{2}$/.test(time)) return { error: t("bkx.pick") };
 
   const order =
     kind === "in"
       ? await db.inbound.findUnique({ where: { id }, include: { lines: true, appointment: true } })
       : await db.outbound.findUnique({ where: { id }, include: { lines: true, appointment: true } });
-  if (!order) return { error: "That order no longer exists." };
-  if (order.appointment) return { error: `Nº ${order.number} already has a slot.` };
+  if (!order) return { error: t("bkx.gone") };
+  if (order.appointment) return { error: t("bkx.has", { n: order.number }) };
 
   const pallets = (kind === "in" && "expectedPallets" in order ? order.expectedPallets : null) ?? (order.lines.length ? order.lines.reduce((s, l) => s + l.pallets, 0) : null);
   const minutes = slotMinutes(kind, pallets);
@@ -63,22 +66,22 @@ export async function bookSlot(_: BookState, formData: FormData): Promise<BookSt
   let slot: { dock: number; start: number; end: number } | null;
   if (dockChoice === "auto") {
     slot = firstFree(busy, doors, day.start.getTime(), start, minutes);
-    if (!slot) return { error: "No door is free for that long after that time today." };
+    if (!slot) return { error: t("bkx.noFree") };
   } else {
     const dock = Number(dockChoice);
-    if (!doors.includes(dock)) return { error: `Dock ${dock} is for ${kind === "in" ? "dispatch" : "receiving"}.` };
+    if (!doors.includes(dock)) return { error: t(kind === "in" ? "bkx.forDispatch" : "bkx.forReceiving", { n: dock }) };
     slot = { dock, start, end: start + minutes * MIN };
     const clash = busy.find((b) => b.dock === dock && overlaps(b, slot!));
     if (clash) {
       const next = firstFree(busy, doors, day.start.getTime(), start, minutes);
       return {
-        error: `Dock ${dock} is taken ${madridHm(new Date(clash.start))}–${madridHm(new Date(clash.end))} by ${clash.label}.`,
+        error: t("bkx.taken", { dock, a: madridHm(new Date(clash.start)), b: madridHm(new Date(clash.end)), label: clash.label ?? "" }),
         suggestion: next ? { dock: next.dock, time: madridHm(new Date(next.start)) } : undefined,
       };
     }
     const open = day.start.getTime() + DOCK_OPEN_H * 60 * MIN;
     const close = day.start.getTime() + DOCK_CLOSE_H * 60 * MIN;
-    if (slot.start < open || slot.end > close) return { error: `Docks open from 0${DOCK_OPEN_H}:00 to ${DOCK_CLOSE_H}:00.` };
+    if (slot.start < open || slot.end > close) return { error: t("bkx.hours", { a: `0${DOCK_OPEN_H}:00`, b: `${DOCK_CLOSE_H}:00` }) };
   }
 
   await db.dockAppointment.create({
@@ -94,7 +97,7 @@ export async function bookSlot(_: BookState, formData: FormData): Promise<BookSt
     },
   });
   revalidatePath("/office", "layout");
-  return { ok: `Nº ${order.number}: dock ${slot.dock}, ${madridHm(new Date(slot.start))}–${madridHm(new Date(slot.end))}.` };
+  return { ok: t("bkx.ok", { n: order.number, dock: slot.dock, a: madridHm(new Date(slot.start)), b: madridHm(new Date(slot.end)) }) };
 }
 
 /** Truck arrived, done, no-show or cancel. Done needs the goods received or picked first. */
