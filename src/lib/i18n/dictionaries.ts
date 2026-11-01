@@ -11,10 +11,11 @@ import * as inbox from "./dict/inbox";
 import * as dock from "./dict/dock";
 import * as warehouse from "./dict/warehouse";
 import * as alerts from "./dict/alerts";
+import * as trace from "./dict/trace";
 
 // One file per area in ./dict, each with its English and Spanish side by side. The Spanish side is typed
 // `Record<keyof en, string>`, so a missing translation fails `tsc`.
-const zones = [common, operator, breakdown, driver, receipt, login, portal, office, inbox, dock, warehouse, alerts];
+const zones = [common, operator, breakdown, driver, receipt, login, portal, office, inbox, dock, warehouse, alerts, trace];
 
 const build = (lang: Lang): Dict => Object.assign({}, ...zones.map((zone) => zone[lang]));
 
@@ -31,4 +32,5 @@ export type Key = keyof typeof common.en | keyof typeof operator.en | keyof type
   | keyof typeof inbox.en
   | keyof typeof dock.en
   | keyof typeof warehouse.en
-  | keyof typeof alerts.en;
+  | keyof typeof alerts.en
+  | keyof typeof trace.en;
