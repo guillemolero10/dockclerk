@@ -133,7 +133,7 @@ export async function countLoad(image: Image): Promise<LoadCount | null> {
         },
         { role: "user", content: [{ type: "image_url", image_url: { url: dataUrl(image) } }] },
       ],
-      { json: true, maxTokens: 3000, timeoutMs: 30_000, valid: has("boxes") },
+      { json: true, maxTokens: 3000, timeoutMs: 45_000, valid: has("boxes") },
     );
     if (!message) return null;
     const result = parseJson<{ pallets: number | null; boxes: LoadCount["boxes"] }>(message.content);
@@ -153,7 +153,7 @@ async function spotDamage(image: Image, boxes: number) {
         { role: "system", content: 'Look at this photo of boxes on pallets. Answer only with JSON {"damaged": number[]}: positions (0-based, reading left to right, top to bottom) of boxes that are crushed, torn or wet.' },
         { role: "user", content: [{ type: "text", text: `There are ${boxes} boxes.` }, { type: "image_url", image_url: { url: dataUrl(image) } }] },
       ],
-      { json: true, timeoutMs: 20_000, valid: has("damaged") },
+      { json: true, timeoutMs: 30_000, valid: has("damaged") },
     );
     return message ? (parseJson<{ damaged: number[] }>(message.content).damaged ?? []) : [];
   } catch {
