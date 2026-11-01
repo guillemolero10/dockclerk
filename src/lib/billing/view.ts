@@ -3,11 +3,17 @@
 import type { BillLine, DetailRow } from "./compute";
 import type { PartialRule } from "./stays";
 
+// Money and numbers keep the Spanish format unless a page asks for English ("€675.66").
+type Lang = "en" | "es";
+
 /** 67566 -> "675,66 €". */
-export const eur = (cents: number) => `${(cents / 100).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+export const eur = (cents: number, lang: Lang = "es") => {
+  const text = (cents / 100).toLocaleString(lang === "es" ? "es-ES" : "en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return lang === "es" ? `${text} €` : `€${text}`;
+};
 
 /** 252 -> "252"; 0.5 -> "0,5"; never more than 2 decimals. */
-export const num = (n: number) => n.toLocaleString("es-ES", { maximumFractionDigits: 2 });
+export const num = (n: number, lang: Lang = "es") => n.toLocaleString(lang === "es" ? "es-ES" : "en-GB", { maximumFractionDigits: 2 });
 
 /** "2026-10-02" -> "02/10". */
 export const ddmm = (ymd: string) => `${ymd.slice(8, 10)}/${ymd.slice(5, 7)}`;
@@ -16,20 +22,23 @@ export const ddmm = (ymd: string) => `${ymd.slice(8, 10)}/${ymd.slice(5, 7)}`;
 export const dmy = (ymd: string) => `${ymd.slice(8, 10)}/${ymd.slice(5, 7)}/${ymd.slice(0, 4)}`;
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MONTHS_ES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sept", "oct", "nov", "dic"];
+const MONTHS_LONG_ES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 const MONTHS_LONG = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 /** "2026-09" -> "September 2026". */
-export const monthLabel = (month: string) => `${MONTHS_LONG[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
+export const monthLabel = (month: string, lang: Lang = "en") => `${monthName(month, lang)} ${month.slice(0, 4)}`;
 
 /** "2026-09" -> "September". */
-export const monthName = (month: string) => MONTHS_LONG[Number(month.slice(5, 7)) - 1];
+export const monthName = (month: string, lang: Lang = "en") => (lang === "es" ? MONTHS_LONG_ES : MONTHS_LONG)[Number(month.slice(5, 7)) - 1];
 
 /** ("2026-09-01", "2026-09-30") -> "1–30 Sep 2026". */
-export function periodText(first: string, last: string) {
+export function periodText(first: string, last: string, lang: Lang = "en") {
+  const MONTHS_ = lang === "es" ? MONTHS_ES : MONTHS;
   const [fd, fm, fy] = [Number(first.slice(8, 10)), Number(first.slice(5, 7)), first.slice(0, 4)];
   const [ld, lm, ly] = [Number(last.slice(8, 10)), Number(last.slice(5, 7)), last.slice(0, 4)];
-  if (fm === lm && fy === ly) return `${fd}–${ld} ${MONTHS[lm - 1]} ${ly}`;
-  return `${fd} ${MONTHS[fm - 1]} ${fy} – ${ld} ${MONTHS[lm - 1]} ${ly}`;
+  if (fm === lm && fy === ly) return `${fd}–${ld} ${MONTHS_[lm - 1]} ${ly}`;
+  return `${fd} ${MONTHS_[fm - 1]} ${fy} – ${ld} ${MONTHS_[lm - 1]} ${ly}`;
 }
 
 /** Month before / after a "YYYY-MM". */

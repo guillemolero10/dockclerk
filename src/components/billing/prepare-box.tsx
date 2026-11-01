@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { FilePlus2 } from "lucide-react";
 import { prepareMonth } from "@/app/office/billing/actions";
+import { useT } from "@/lib/i18n/client";
 
 type Line = { kind: "tool" | "ok" | "ask" | "plain"; text: string };
 
@@ -10,6 +11,7 @@ const kindOf = (text: string): Line["kind"] => (text.startsWith("bill_period") ?
 
 /** The "Prepare pre-invoices" button and the console that shows what the clerk did, step by step. */
 export function PrepareBox({ month, label, steps, hasApproved }: { month: string; label: string; steps: string[]; hasApproved: boolean }) {
+  const { t } = useT();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<{ prepared: number; skipped: { client: string; reason: string }[] } | null>(null);
@@ -44,27 +46,27 @@ export function PrepareBox({ month, label, steps, hasApproved }: { month: string
                 setOutcome(result);
                 setShown(0);
               } catch (err) {
-                setError(err instanceof Error ? err.message : "Could not prepare the pre-invoices.");
+                setError(err instanceof Error ? err.message : t("bp.error"));
               }
             })
           }
           className="cond flex items-center gap-2 bg-dock-yellow px-5 py-3 text-sm font-semibold text-dock-ink ring-[1.5px] ring-dock-ink disabled:opacity-60"
         >
-          <FilePlus2 size={16} /> {pending ? "Preparing…" : "Prepare pre-invoices"}
+          <FilePlus2 size={16} /> {pending ? t("bp.preparing") : t("bp.prepare")}
         </button>
         <p className="min-w-0 flex-1 text-xs text-dock-ink/60">
-          Reads the warehouse records of {label} and drafts one pre-invoice per customer.
-          {hasApproved && " Approved ones are never touched."}
+          {t("bp.reads", { label })}
+          {hasApproved && t("bp.untouched")}
         </p>
       </div>
       {error && <p role="alert" className="bg-dock-red/10 px-3 py-2 text-sm text-dock-red">{error}</p>}
 
       {empty ? (
-        <p className="dock-card bg-white p-6 text-center text-sm font-semibold">No movements in {label.split(" ")[0]}.</p>
+        <p className="dock-card bg-white p-6 text-center text-sm font-semibold">{t("bp.none", { month: label.split(" ")[0] })}</p>
       ) : (
         hasSomething && (
           <div className="dock-console p-4" aria-live="polite">
-            <p className="cond text-[11px] text-white/50">Clerk · how the month was priced</p>
+            <p className="cond text-[11px] text-white/50">{t("bp.console")}</p>
             <ul className="mono mt-2 space-y-1 text-[12.5px] leading-relaxed">
               {visible.map((l, i) => (
                 <li key={i} className={`break-words ${l.kind === "plain" ? "text-white/60" : l.kind}`}>

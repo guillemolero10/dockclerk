@@ -3,19 +3,21 @@ import { ArrowRight } from "lucide-react";
 import { customerOverview, ROTATION_DAYS } from "@/lib/clients";
 import { fmtDate } from "@/lib/format";
 import { clientColor } from "@/lib/warehouse/palette";
+import { getT } from "@/lib/i18n/server";
 import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function ClientsPage() {
   await requireRole("office");
+  const { t } = await getT();
   const clients = await customerOverview();
 
   return (
     <main className="mx-auto max-w-6xl px-8 py-8">
       <header>
-        <p className="cond text-sm text-dock-ink/50">Who stores what, and how fast it moves</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">Customers</h1>
+        <p className="cond text-sm text-dock-ink/50">{t("cl.kicker")}</p>
+        <h1 className="mt-1 text-3xl font-semibold tracking-tight">{t("cl.title")}</h1>
       </header>
 
       <ul className="mt-6 grid gap-4 md:grid-cols-2">
@@ -30,19 +32,19 @@ export default async function ClientsPage() {
                   <ArrowRight size={15} className="ml-auto shrink-0 text-dock-ink/30 transition group-hover:translate-x-0.5 group-hover:text-dock-ink" />
                 </div>
                 <p className="text-xs text-dock-ink/55">
-                  {c.contact ?? "—"} · {c.type === "RAW_MATERIAL" ? "Raw material" : "Finished goods"} · {c.items} items · {c.warehouses.join(", ") || "no stock"}
+                  {c.contact ?? "—"} · {c.type === "RAW_MATERIAL" ? t("cl.raw") : t("cl.finished")} · {t("cl.items_p", { n: c.items })} · {c.warehouses.join(", ") || t("cl.noStock")}
                 </p>
                 <div className="mt-3 flex items-end gap-5">
-                  <Figure value={c.fullPallets} label={c.picos > 0 ? `pallets + ${c.picos} pico${c.picos === 1 ? "" : "s"}` : "pallets"} />
-                  <Figure value={`${Math.round(c.share * 100)}%`} label="of stock" />
-                  <Figure value={`+${c.in30}`} label={`in · ${ROTATION_DAYS} d`} />
-                  <Figure value={`−${c.out30}`} label={`out · ${ROTATION_DAYS} d`} />
-                  <Figure value={c.open} label="open orders" />
+                  <Figure value={c.fullPallets} label={c.picos > 0 ? t("cl.palletsPico_p", { n: c.picos }) : t("cl.pallets")} />
+                  <Figure value={`${Math.round(c.share * 100)}%`} label={t("cl.ofStock")} />
+                  <Figure value={`+${c.in30}`} label={t("cl.inD", { d: ROTATION_DAYS })} />
+                  <Figure value={`−${c.out30}`} label={t("cl.outD", { d: ROTATION_DAYS })} />
+                  <Figure value={c.open} label={t("cl.open")} />
                 </div>
                 <div className="mt-3 h-1.5 bg-dock-concrete">
                   <div className="h-full" style={{ width: `${Math.max(2, c.share * 100)}%`, background: clientColor(i) }} />
                 </div>
-                {c.nextExpiry && <p className="mt-2 text-xs text-dock-ink/55">First lot to expire: {fmtDate(c.nextExpiry)}</p>}
+                {c.nextExpiry && <p className="mt-2 text-xs text-dock-ink/55">{t("cl.firstExpire", { date: fmtDate(c.nextExpiry) })}</p>}
               </div>
             </Link>
           </li>
