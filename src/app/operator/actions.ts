@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { Fixable, orFixable } from "@/lib/fixable";
 import { checkIn, confirmReceipt, pickPallet, putAway, recordLoad, recordNote, suggestPutAway, typeNote } from "@/lib/ops/floor";
 import { checkBreakdown, cleanDrafts, type PalletDraft } from "@/lib/pallets/breakdown";
+import { consume } from "@/lib/rate-limit";
 import { assertRole } from "@/lib/session";
 import { parseDataUrl, saveUpload } from "@/lib/uploads";
 
@@ -159,7 +160,9 @@ const MAX_VOICE_BYTES = 3 * 1024 * 1024;
 
 /** A voice note from the floor goes to the AI inbox like any other message. The recording comes as a file in `form` ("audio"). */
 export async function voiceNote(warehouseCode: string, form: FormData) {
-  await requireFloor();
+  const user = await requireFloor();
+  // Each note is up to 3 MB in the database and a call to Meta that the daily budget does not count: 30 an hour per account is plenty.
+  if (!(await consume(`voice:${user.userId}`, 30, 60 * 60 * 1000))) return { error: "Too many voice notes this hour: type it in the office instead." };
   const file = form.get("audio");
   const mime = file instanceof Blob ? file.type.split(";")[0] : "";
   if (!(file instanceof Blob) || !/^audio\/[\w.+-]+$/.test(mime) || !file.size) return { error: "That recording could not be read." };

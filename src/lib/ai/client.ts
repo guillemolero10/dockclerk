@@ -86,7 +86,7 @@ type Reply = { content: string | null; tool_calls?: { id: string; function: { na
  */
 export async function chat(p: Provider, messages: ChatMessage[], options: { json?: boolean; maxTokens?: number; tools?: unknown[]; timeoutMs?: number } = {}) {
   const timeoutMs = options.timeoutMs ?? 60_000;
-  // Before anything leaves the server. Only models with a price are counted: for the others (Meta Model API) the cost is not known.
+  // Before anything leaves the server. Only models with a price are counted (Baseten, Meta vision); Meta voice has no known price.
   if (p.price) await assertBudget();
   const started = Date.now();
   const body = JSON.stringify({

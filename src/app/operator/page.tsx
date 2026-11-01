@@ -8,6 +8,7 @@ import { openPickPlans } from "@/lib/ops/floor";
 import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // the floor voice note waits for Meta to transcribe it (about 2 s, 25 s at most)
 
 export default async function OperatorHome({ searchParams }: PageProps<"/operator">) {
   await requireRole("operator");

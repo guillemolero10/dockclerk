@@ -23,7 +23,7 @@ export async function transcribe(audio: { mime: string; base64: string }, hints:
       method: "POST",
       headers: { Authorization: `Bearer ${p.apiKey}`, Accept: "application/json" },
       body: form,
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(25_000), // Meta takes about 2 s; leaves room in the page's 60 s
     });
     if (!res.ok) throw new Error(`${p.name} answered ${res.status}: ${(await res.text()).slice(0, 200)}`);
     const data = (await res.json()) as { transcript?: string };

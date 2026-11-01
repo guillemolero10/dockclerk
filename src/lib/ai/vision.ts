@@ -17,25 +17,39 @@ export type NoteReading = {
 
 /**
  * One question to the vision model. With a Meta key Muse Spark (Meta) answers; if it errors or times out, Muse Spark Open on
- * Baseten takes the same question (also when the answer is not JSON), so a bad minute at Meta does not stop the dock. null = no model configured at all.
+ * Baseten takes the same question (also when the answer is not JSON or not the expected shape), so a bad minute at Meta does not stop the dock.
+ * `timeoutMs` is the budget for the whole chain, not per model: the first model gets 60 % of it and the next one what is left,
+ * so a hung Meta never pushes the page past its maxDuration. null = no model configured at all.
  */
-async function ask(messages: ChatMessage[], options: { json?: boolean; maxTokens?: number; timeoutMs: number }) {
+async function ask(
+  messages: ChatMessage[],
+  options: { json?: boolean; maxTokens?: number; timeoutMs: number; valid?: (answer: unknown) => boolean },
+) {
   const chain = providers.visionChain();
   if (!chain.length) return null;
+  const deadline = Date.now() + options.timeoutMs;
   let last: unknown;
-  for (const p of chain) {
+  for (const [i, p] of chain.entries()) {
+    const left = deadline - Date.now();
+    if (left < 5_000) break;
+    const isLast = i === chain.length - 1;
     try {
-      const message = await chat(p, messages, options);
-      // An answer that is not JSON counts as a failure too, so the next model gets the question.
-      if (options.json) parseJson(message.content);
+      const message = await chat(p, messages, { ...options, timeoutMs: isLast ? left : Math.min(left, options.timeoutMs * 0.6) });
+      // An answer that is not JSON, or not the JSON we asked for, counts as a failure too, so the next model gets the question.
+      if (options.json) {
+        const answer = parseJson(message.content);
+        if (options.valid && !options.valid(answer)) throw new Error(`${p.name} answered JSON of another shape`);
+      }
       return message;
     } catch (error) {
       last = error;
-      if (p !== chain[chain.length - 1]) console.warn(`${p.name} failed, trying ${chain[chain.indexOf(p) + 1].name}:`, error instanceof Error ? error.message : error);
+      if (!isLast) console.warn(`${p.name} failed, trying ${chain[i + 1].name}:`, error instanceof Error ? error.message : error);
     }
   }
-  throw last;
+  throw last ?? new Error("No time left for the vision model");
 }
+
+const has = (key: string) => (answer: unknown) => !!answer && typeof answer === "object" && Array.isArray((answer as Record<string, unknown>)[key]);
 
 export async function readDeliveryNote(image: Image, context: { customer: string; items: { sku: string; description: string }[] }) {
   try {
@@ -60,7 +74,7 @@ export async function readDeliveryNote(image: Image, context: { customer: string
           ],
         },
       ],
-      { json: true, timeoutMs: 45_000 },
+      { json: true, timeoutMs: 45_000, valid: has("lines") },
     );
     if (!message) return null;
     const reading = parseJson<NoteReading>(message.content);
@@ -119,7 +133,7 @@ export async function countLoad(image: Image): Promise<LoadCount | null> {
         },
         { role: "user", content: [{ type: "image_url", image_url: { url: dataUrl(image) } }] },
       ],
-      { json: true, maxTokens: 3000, timeoutMs: 30_000 },
+      { json: true, maxTokens: 3000, timeoutMs: 30_000, valid: has("boxes") },
     );
     if (!message) return null;
     const result = parseJson<{ pallets: number | null; boxes: LoadCount["boxes"] }>(message.content);
@@ -139,7 +153,7 @@ async function spotDamage(image: Image, boxes: number) {
         { role: "system", content: 'Look at this photo of boxes on pallets. Answer only with JSON {"damaged": number[]}: positions (0-based, reading left to right, top to bottom) of boxes that are crushed, torn or wet.' },
         { role: "user", content: [{ type: "text", text: `There are ${boxes} boxes.` }, { type: "image_url", image_url: { url: dataUrl(image) } }] },
       ],
-      { json: true, timeoutMs: 20_000 },
+      { json: true, timeoutMs: 20_000, valid: has("damaged") },
     );
     return message ? (parseJson<{ damaged: number[] }>(message.content).damaged ?? []) : [];
   } catch {
