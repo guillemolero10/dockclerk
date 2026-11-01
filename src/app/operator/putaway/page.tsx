@@ -3,15 +3,17 @@ import { ArrowLeft } from "lucide-react";
 import { PutAwayStep } from "@/components/operator/putaway-step";
 import { db } from "@/lib/db";
 import { planPutAway } from "@/lib/ops/floor";
+import { getT } from "@/lib/i18n/server";
 import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function PutAwayPage({ searchParams }: PageProps<"/operator/putaway">) {
   await requireRole("operator");
+  const { t } = await getT();
   const { w } = await searchParams;
   const warehouse = await db.warehouse.findFirst({ where: typeof w === "string" ? { code: w } : {}, orderBy: { code: "asc" } });
-  if (!warehouse) return <p className="p-6">No warehouse.</p>;
+  if (!warehouse) return <p className="p-6">{t("op.noWarehouseShort")}</p>;
   const waiting = await db.stock.findMany({
     where: { warehouseId: warehouse.id, location: { startsWith: "REC-" } },
     include: { item: true, client: true },
@@ -31,9 +33,9 @@ export default async function PutAwayPage({ searchParams }: PageProps<"/operator
   return (
     <main className="space-y-4 px-4 py-4">
       <Link href={`/operator?w=${warehouse.code}`} className="cond flex items-center gap-1 text-xs text-dock-ink/50">
-        <ArrowLeft size={13} /> Tasks
+        <ArrowLeft size={13} /> {t("op.tasks")}
       </Link>
-      <h1 className="text-xl font-semibold">Put away · {warehouse.code}</h1>
+      <h1 className="text-xl font-semibold">{t("pa.title", { wh: warehouse.code })}</h1>
       {next ? (
         <PutAwayStep
           key={next.id}
@@ -50,7 +52,7 @@ export default async function PutAwayPage({ searchParams }: PageProps<"/operator
           why={plan?.why ?? ""}
         />
       ) : (
-        <p className="dock-card bg-white p-5 text-sm text-dock-ink/60">Nothing waiting in the receiving lanes.</p>
+        <p className="dock-card bg-white p-5 text-sm text-dock-ink/60">{t("pa.nothing")}</p>
       )}
     </main>
   );

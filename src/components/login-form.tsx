@@ -3,15 +3,17 @@
 import { useActionState } from "react";
 import { ArrowRight, Loader2 } from "lucide-react";
 import { login, type LoginState } from "@/app/actions";
+import { useT } from "@/lib/i18n/client";
 
 /** The sign-in form. The server action answers with one generic error, whatever was wrong. */
 export function LoginForm() {
+  const { t } = useT();
   const [state, action, pending] = useActionState<LoginState, FormData>(login, null);
 
   return (
     <form action={action} className="space-y-4">
       <label className="block">
-        <span className="cond text-xs text-white/50">Username</span>
+        <span className="cond text-xs text-white/50">{t("lg.username")}</span>
         <input
           name="username"
           defaultValue={state?.username ?? ""}
@@ -25,7 +27,7 @@ export function LoginForm() {
         />
       </label>
       <label className="block">
-        <span className="cond text-xs text-white/50">Password</span>
+        <span className="cond text-xs text-white/50">{t("lg.password")}</span>
         <input
           name="password"
           type="password"
@@ -48,11 +50,11 @@ export function LoginForm() {
       >
         {pending ? (
           <>
-            <Loader2 size={15} className="animate-spin" /> Signing in…
+            <Loader2 size={15} className="animate-spin" /> {t("lg.signingIn")}
           </>
         ) : (
           <>
-            Sign in <ArrowRight size={15} className="transition group-hover:translate-x-0.5" />
+            {t("lg.signIn")} <ArrowRight size={15} className="transition group-hover:translate-x-0.5" />
           </>
         )}
       </button>

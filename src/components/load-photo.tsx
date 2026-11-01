@@ -1,10 +1,10 @@
 /* eslint-disable @next/next/no-img-element -- photos come from our own upload route */
 
 /** Photo of the load with every box found numbered on top; damaged ones in red. */
-export function LoadPhoto({ src, boxes }: { src: string; boxes: { x: number; y: number; w: number; h: number; damaged: boolean }[] | null }) {
+export function LoadPhoto({ src, boxes, alt }: { src: string; alt: string; boxes: { x: number; y: number; w: number; h: number; damaged: boolean }[] | null }) {
   return (
     <div className="relative overflow-hidden border-[1.5px] border-dock-ink bg-dock-ink">
-      <img src={src} alt="Load at the dock" className="block w-full" />
+      <img src={src} alt={alt} className="block w-full" />
       {boxes && boxes.length > 0 && (
         <svg viewBox="0 0 1 1" preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
           {boxes.map((b, i) => (

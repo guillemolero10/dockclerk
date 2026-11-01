@@ -7,6 +7,7 @@ import { describeShortage } from "@/lib/warehouse/picking";
 import { dispatchLane } from "@/lib/warehouse/lanes";
 import { makeLayout, parseLocation } from "@/lib/warehouse/layout";
 import { pickRoute } from "@/lib/warehouse/route";
+import { getT } from "@/lib/i18n/server";
 import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -15,9 +16,10 @@ export const maxDuration = 60;
 
 export default async function PickPage({ params }: PageProps<"/operator/pick/[id]">) {
   await requireRole("operator");
+  const { t } = await getT();
   const { id } = await params;
   const outbound = await db.outbound.findUnique({ where: { id }, include: { client: true, consignee: true, warehouse: true, appointment: true } });
-  if (!outbound) return <p className="p-6">Not found.</p>;
+  if (!outbound) return <p className="p-6">{t("op.notFound")}</p>;
 
   if (outbound.status !== "REQUESTED") {
     const picked = (await db.stock.aggregate({ where: { outboundId: id }, _sum: { pallets: true } }))._sum.pallets ?? 0;
@@ -25,21 +27,21 @@ export default async function PickPage({ params }: PageProps<"/operator/pick/[id
     const made = await db.stock.findMany({ where: { outboundId: id, splitFrom: { not: null } }, select: { palletCode: true }, distinct: ["palletCode"], orderBy: { palletCode: "asc" } });
     return (
       <main className="space-y-4 px-4 py-6">
-        <Back code={outbound.warehouse?.code} />
+        <Back code={outbound.warehouse?.code} label={t("op.tasks")} />
         <div className="hazard p-1">
           <div className="bg-dock-ink px-5 py-6 text-center text-white">
             <Check className="mx-auto text-dock-yellow" size={28} />
-            <p className="mt-2 text-lg font-semibold">Nº {outbound.number} is prepared</p>
-            <p className="text-sm text-white/60">{picked} {picked === 1 ? "pallet" : "pallets"} waiting in the dispatch lane for the truck.</p>
+            <p className="mt-2 text-lg font-semibold">{t("pk.prepared", { n: outbound.number })}</p>
+            <p className="text-sm text-white/60">{t("pk.inLane_p", { n: picked })}</p>
           </div>
         </div>
         {made.length > 0 && (
-          <section className="dock-card bg-dock-yellow px-4 py-4 text-center" aria-label="Pallets to label">
-            <p className="cond text-xs font-semibold">Label the new {made.length === 1 ? "pallet" : "pallets"}</p>
+          <section className="dock-card bg-dock-yellow px-4 py-4 text-center" aria-label={t("rc.toLabel")}>
+            <p className="cond text-xs font-semibold">{t("pk.label_p", { n: made.length })}</p>
             {made.map((m) => (
               <p key={m.palletCode} className="mono text-3xl font-bold tracking-wide">{m.palletCode}</p>
             ))}
-            <p className="mt-1 text-sm">Made from loose boxes. Check each one carries its label before the truck.</p>
+            <p className="mt-1 text-sm">{t("pk.madeFrom")}</p>
           </section>
         )}
       </main>
@@ -49,7 +51,7 @@ export default async function PickPage({ params }: PageProps<"/operator/pick/[id
   const { plans, stock, open } = await openPickPlans();
   const plan = plans.get(id);
   const warehouse = plan?.warehouseId ? await db.warehouse.findUnique({ where: { id: plan.warehouseId } }) : null;
-  if (!plan || !warehouse) return <p className="p-6">There is no stock to pick this outbound.</p>;
+  if (!plan || !warehouse) return <p className="p-6">{t("pk.noStock")}</p>;
 
   const layout = makeLayout(warehouse);
   const lane = dispatchLane(layout, stock.filter((s) => s.warehouseId === warehouse.id), id);
@@ -58,7 +60,7 @@ export default async function PickPage({ params }: PageProps<"/operator/pick/[id
   const route = pickRoute(layout, plan.steps.map((st) => ({ id: keyOf(st), loc: st.location })), lane);
   const stepByKey = new Map(plan.steps.map((st) => [keyOf(st), st]));
   const items = await db.item.findMany({ where: { id: { in: stock.filter((s) => plan.stockIds.includes(s.id) || plan.steps.some((st) => st.kind === "pallet" && st.stockIds.includes(s.id))).map((s) => s.itemId) } } });
-  const wordOf = (itemId: string) => ({ BOX: "boxes", BAG: "bags", PALLET: "units" } as const)[items.find((i) => i.id === itemId)?.unit ?? "BOX"];
+  const wordOf = (itemId: string) => t(`pk.word.${items.find((i) => i.id === itemId)?.unit ?? "BOX"}` as "pk.word.BOX");
   const skuOf = (itemId: string) => items.find((i) => i.id === itemId)?.sku ?? "?";
   const describe = (key: string) => {
     const st = stepByKey.get(key)!;
@@ -76,10 +78,10 @@ export default async function PickPage({ params }: PageProps<"/operator/pick/[id
 
   return (
     <main className="space-y-4 px-4 py-4">
-      <Back code={warehouse.code} />
+      <Back code={warehouse.code} label={t("op.tasks")} />
       <header>
         <p className="cond text-[11px] text-dock-ink/50">
-          Pick · Nº {outbound.number} · {warehouse.code}
+          {t("pk.head", { n: outbound.number, wh: warehouse.code })}
         </p>
         <h1 className="text-xl font-semibold leading-tight">{outbound.client.name}</h1>
         <p className="text-xs text-dock-ink/55">→ {outbound.consignee?.name ?? "—"}</p>
@@ -89,7 +91,7 @@ export default async function PickPage({ params }: PageProps<"/operator/pick/[id
         lane={lane}
         done={doneSteps}
         total={doneSteps + plan.steps.length}
-        shortText={plan.shortLines.length ? describeShortage(plan.shortLines, (itemId) => open.find((o) => o.id === id)?.lines.find((l) => l.itemId === itemId)?.item) : null}
+        shortText={plan.shortLines.length ? describeShortage(plan.shortLines, (itemId) => open.find((o) => o.id === id)?.lines.find((l) => l.itemId === itemId)?.item, { of: t("pk.of"), and: t("pk.and") }) : null}
         metres={route.metres}
         steps={route.order.map(describe)}
       />
@@ -97,10 +99,10 @@ export default async function PickPage({ params }: PageProps<"/operator/pick/[id
   );
 }
 
-function Back({ code }: { code?: string }) {
+function Back({ code, label }: { code?: string; label: string }) {
   return (
     <Link href={`/operator${code ? `?w=${code}` : ""}`} className="cond flex items-center gap-1 text-xs text-dock-ink/50">
-      <ArrowLeft size={13} /> Tasks
+      <ArrowLeft size={13} /> {label}
     </Link>
   );
 }

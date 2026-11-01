@@ -5,15 +5,12 @@ import { redirect } from "next/navigation";
 import { decoyHash, verifyPassword } from "@/lib/auth/password";
 import { bump, isLimited, reset, sweep } from "@/lib/rate-limit";
 import { db } from "@/lib/db";
+import { getT } from "@/lib/i18n/server";
 import { endSession, HOME, startSession } from "@/lib/session";
 
 /** On failure: the one generic message, plus the user name typed so the form does not come back empty. */
 export type LoginState = { error: string; username?: string } | null;
 
-// Spanish first (what the brief asks for), English underneath for the judges.
-const WRONG = "Usuario o contraseña incorrectos. · Wrong username or password.";
-const LOCKED = "Demasiados intentos fallidos. Espera 15 minutos. · Too many failed attempts. Wait 15 minutes.";
-const DOWN = "El servicio no responde, prueba en un minuto. · The service is not answering, try again in a minute.";
 
 // Brute-force brake: 10 failures lock one user from one address for 15 minutes.
 // Per address too, not per user alone: otherwise anybody who knows a user name could lock the judges out of the demo
@@ -29,6 +26,11 @@ async function callerAddress() {
 }
 
 export async function login(_: LoginState, formData: FormData): Promise<LoginState> {
+  // One generic message per kind of failure, in the language of the page.
+  const { t } = await getT();
+  const WRONG = t("lg.wrong");
+  const LOCKED = t("lg.locked");
+  const DOWN = t("lg.down");
   const username = String(formData.get("username") ?? "").trim().toLowerCase().slice(0, 64);
   const password = String(formData.get("password") ?? "").slice(0, 256);
   if (!username || !password) return { error: WRONG, username };

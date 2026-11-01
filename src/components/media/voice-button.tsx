@@ -3,12 +3,14 @@
 import { useRef, useState } from "react";
 import { Loader2, Mic, Square } from "lucide-react";
 import { recordingToWav } from "@/lib/audio/to-wav";
+import { useT } from "@/lib/i18n/client";
 
 /** A note longer than this stops by itself (16 kHz WAV = 32 KB per second, about 1.9 MB a minute; uploads take up to 3 MB). */
 const MAX_SECONDS = 60;
 
 /** Hold-free voice note: tap to record, tap to send. */
-export function VoiceButton({ onAudio, label = "Voice note to the office" }: { onAudio: (audio: Blob) => Promise<void>; label?: string }) {
+export function VoiceButton({ onAudio, label }: { onAudio: (audio: Blob) => Promise<void>; label?: string }) {
+  const { t } = useT();
   const recorder = useRef<MediaRecorder | null>(null);
   const [state, setState] = useState<"idle" | "recording" | "sending">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +38,7 @@ export function VoiceButton({ onAudio, label = "Voice note to the office" }: { o
         try {
           await onAudio(blob);
         } catch (err) {
-          setError(err instanceof Error ? err.message : "Could not send it.");
+          setError(err instanceof Error ? err.message : t("voice.couldNotSend"));
         }
         setState("idle");
       };
@@ -44,7 +46,7 @@ export function VoiceButton({ onAudio, label = "Voice note to the office" }: { o
       rec.start();
       setState("recording");
     } catch {
-      setError("The microphone is not available.");
+      setError(t("voice.mic"));
     }
   }
 
@@ -59,7 +61,7 @@ export function VoiceButton({ onAudio, label = "Voice note to the office" }: { o
         }`}
       >
         {state === "sending" ? <Loader2 size={16} className="animate-spin" /> : state === "recording" ? <Square size={14} /> : <Mic size={16} />}
-        {state === "recording" ? "Recording… tap to send" : state === "sending" ? "Sending…" : label}
+        {state === "recording" ? t("voice.recording") : state === "sending" ? t("voice.sending") : (label ?? t("voice.label"))}
       </button>
       {error && <p className="mt-1 text-xs text-dock-red">{error}</p>}
     </div>

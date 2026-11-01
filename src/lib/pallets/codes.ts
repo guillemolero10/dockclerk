@@ -1,4 +1,6 @@
 // Pallet IDs (licence plates). Pure.
+import type { Translate } from "@/lib/i18n/core";
+import { tEn } from "@/lib/i18n/en";
 // Only what the seed needs for now; the rest of the contract (parseCode, ...) is added with the receiving form.
 
 /** The code the warehouse gives a pallet that came without one: building code + 6 digits, "N1-000123". */
@@ -13,10 +15,10 @@ const VALID = /^[A-Z0-9][A-Z0-9-]{3,23}$/;
  * A pallet ID typed or scanned (the scanner on the handheld types it like a keyboard).
  * Upper case, no spaces, the "(00)" application identifier of a barcode dropped. Blank = no ID (the warehouse labels it).
  */
-export function parseCode(raw: string): { ok: true; code: string | null } | { ok: false; error: string } {
+export function parseCode(raw: string, t: Translate = tEn): { ok: true; code: string | null } | { ok: false; error: string } {
   const code = String(raw ?? "").toUpperCase().replace(/\s+/g, "").replace(/^\(00\)/, "");
   if (!code) return { ok: true, code: null };
-  if (!VALID.test(code)) return { ok: false, error: `Pallet ID "${code.slice(0, 30)}" is not valid: 4 to 24 letters, digits or dashes.` };
+  if (!VALID.test(code)) return { ok: false, error: t("bd.idInvalid", { code: code.slice(0, 30) }) };
   return { ok: true, code };
 }
 

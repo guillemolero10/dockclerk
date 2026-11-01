@@ -6,9 +6,11 @@ import { Check, MapPin, PenLine } from "lucide-react";
 import { arrive, sendNotePhoto, sendPallets, sign } from "@/app/driver/[token]/actions";
 import { PhotoButton } from "@/components/media/photo-button";
 import { SignaturePad } from "@/components/media/signature-pad";
+import { useT } from "@/lib/i18n/client";
 
 /** Step 1: photo of the delivery note before arriving; typed pallets if it cannot be read. */
 export function NoteStep({ token, askTyped }: { token: string; askTyped: boolean }) {
+  const { t } = useT();
   const router = useRouter();
   const [typing, setTyping] = useState(askTyped);
   const [pallets, setPallets] = useState("");
@@ -18,8 +20,8 @@ export function NoteStep({ token, askTyped }: { token: string; askTyped: boolean
   return (
     <div className="space-y-3">
       <PhotoButton
-        label="Photo of the delivery note"
-        busyLabel="Reading the note…"
+        label={t("dr.notePhoto")}
+        busyLabel={t("dr.readingNote")}
         onPhoto={async (photo) => {
           const result = await sendNotePhoto(token, photo);
           if (!result.read) setTyping(true);
@@ -37,7 +39,7 @@ export function NoteStep({ token, askTyped }: { token: string; askTyped: boolean
                 setError(result.error ?? null);
                 if (!result.error) router.refresh();
               } catch (err) {
-                setError(err instanceof Error ? err.message : "Could not send it.");
+                setError(err instanceof Error ? err.message : t("dr.couldNotSend"));
               }
             });
           }}
@@ -46,16 +48,17 @@ export function NoteStep({ token, askTyped }: { token: string; askTyped: boolean
             inputMode="numeric"
             value={pallets}
             onChange={(e) => setPallets(e.target.value.replace(/\D/g, ""))}
-            placeholder="How many pallets?"
+            placeholder={t("dr.howMany")}
+            aria-label={t("dr.howMany")}
             className="dock-input mono flex-1 text-base"
           />
           <button disabled={pending || !pallets} className="cond bg-dock-ink px-4 text-sm font-semibold text-dock-yellow disabled:opacity-50">
-            Send
+            {t("dr.send")}
           </button>
         </form>
       ) : (
         <button type="button" onClick={() => setTyping(true)} className="w-full text-center text-xs text-dock-ink/50 underline">
-          No photo? Just type the pallets
+          {t("dr.justType")}
         </button>
       )}
       {error && <p className="text-sm text-dock-red">{error}</p>}
@@ -64,6 +67,7 @@ export function NoteStep({ token, askTyped }: { token: string; askTyped: boolean
 }
 
 export function ArriveButton({ token }: { token: string }) {
+  const { t } = useT();
   const router = useRouter();
   const [pending, start] = useTransition();
   return (
@@ -77,12 +81,13 @@ export function ArriveButton({ token }: { token: string }) {
       }
       className="cond flex w-full items-center justify-center gap-2 border-[1.5px] border-dock-ink bg-dock-yellow px-4 py-3.5 text-base font-semibold disabled:opacity-60"
     >
-      <MapPin size={18} /> {pending ? "Telling the dock…" : "I'm at the gate"}
+      <MapPin size={18} /> {pending ? t("dr.telling") : t("dr.atGate")}
     </button>
   );
 }
 
 export function SignStep({ token }: { token: string }) {
+  const { t } = useT();
   const router = useRouter();
   const [signature, setSignature] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -91,7 +96,7 @@ export function SignStep({ token }: { token: string }) {
 
   return (
     <div className="space-y-3">
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" className="dock-input text-base" />
+      <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("dr.yourName")} aria-label={t("dr.yourName")} className="dock-input text-base" />
       <SignaturePad onChange={setSignature} />
       <button
         disabled={pending || !signature || !name.trim()}
@@ -101,13 +106,13 @@ export function SignStep({ token }: { token: string }) {
               await sign(token, signature!, name);
               router.refresh();
             } catch (err) {
-              setError(err instanceof Error ? err.message : "Could not sign.");
+              setError(err instanceof Error ? err.message : t("dr.couldNotSign"));
             }
           })
         }
         className="cond flex w-full items-center justify-center gap-2 bg-dock-ink px-4 py-3.5 text-base font-semibold text-dock-yellow disabled:opacity-50"
       >
-        <PenLine size={18} /> {pending ? "Signing…" : "Sign the receipt"}
+        <PenLine size={18} /> {pending ? t("dr.signing") : t("dr.signReceipt")}
       </button>
       {error && <p className="text-sm text-dock-red">{error}</p>}
     </div>

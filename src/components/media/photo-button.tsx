@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { Camera, Loader2 } from "lucide-react";
+import { useT } from "@/lib/i18n/client";
 
 /** A server action refuses one argument longer than 1,000,000 characters (React's limit): keep the photo well under it. */
 const MAX_CHARS = 900_000;
@@ -25,7 +26,7 @@ async function shrink(file: File) {
 /** Opens the camera on a phone (or a file picker on a computer) and hands back the photo. */
 export function PhotoButton({
   label,
-  busyLabel = "Sending…",
+  busyLabel,
   onPhoto,
   className = "",
 }: {
@@ -34,6 +35,7 @@ export function PhotoButton({
   onPhoto: (dataUrl: string) => Promise<void>;
   className?: string;
 }) {
+  const { t } = useT();
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +49,7 @@ export function PhotoButton({
         className={`cond flex w-full items-center justify-center gap-2 px-4 py-3.5 text-base font-semibold disabled:opacity-70 ${className || "bg-dock-ink text-dock-yellow"}`}
       >
         {busy ? <Loader2 size={18} className="animate-spin" /> : <Camera size={18} />}
-        {busy ? busyLabel : label}
+        {busy ? (busyLabel ?? t("voice.sending")) : label}
       </button>
       <input
         ref={input}
@@ -64,7 +66,7 @@ export function PhotoButton({
           try {
             await onPhoto(await shrink(file));
           } catch (err) {
-            setError(err instanceof Error ? err.message : "Could not send the photo.");
+            setError(err instanceof Error ? err.message : t("photo.couldNotSend"));
           } finally {
             setBusy(false);
           }

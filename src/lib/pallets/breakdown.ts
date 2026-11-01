@@ -2,6 +2,8 @@
 // A pallet has an ID (or none yet: the warehouse labels it) and one to four lines (item, lot, expiry, boxes).
 // Lines of one pallet are one customer's: the form only offers that customer's items and the server checks it.
 
+import type { Translate } from "@/lib/i18n/core";
+import { tEn } from "@/lib/i18n/en";
 import { parseCode } from "./codes";
 import { splitUnits } from "./quantity";
 
@@ -77,41 +79,41 @@ export function leadIndex(shares: (number | null)[]): number {
  * Everything wrong with a breakdown, in words the operator can act on (pallets are numbered from 1).
  * @param live pallet IDs already inside the buildings, with where they are
  */
-export function checkBreakdown(drafts: PalletDraft[], items: ItemLite[], live: Map<string, string>): { errors: string[] } {
+export function checkBreakdown(drafts: PalletDraft[], items: ItemLite[], live: Map<string, string>, t: Translate = tEn): { errors: string[] } {
   const errors: string[] = [];
-  if (!drafts.length) errors.push("Add at least one pallet.");
-  if (drafts.length > MAX_PALLETS) errors.push(`A delivery has at most ${MAX_PALLETS} pallets here (this one has ${drafts.length}).`);
+  if (!drafts.length) errors.push(t("bd.addOne"));
+  if (drafts.length > MAX_PALLETS) errors.push(t("bd.tooMany", { max: MAX_PALLETS, n: drafts.length }));
   const seen = new Set<string>();
   drafts.forEach((d, idx) => {
     const n = idx + 1;
     if (d.code !== null) {
-      const parsed = parseCode(d.code);
-      if (!parsed.ok) errors.push(`Pallet ${n}: ${parsed.error}`);
-      else if (parsed.code !== d.code) errors.push(`Pallet ${n}: ID ${d.code} is not in its clean form (${parsed.code ?? "blank"}).`);
+      const parsed = parseCode(d.code, t);
+      if (!parsed.ok) errors.push(t("bd.pallet", { n, text: parsed.error }));
+      else if (parsed.code !== d.code) errors.push(t("bd.notClean", { n, code: d.code, clean: parsed.code ?? t("bd.blank") }));
       else if (parsed.code) {
-        if (live.has(parsed.code)) errors.push(`Pallet ID ${parsed.code} is already in the building (${live.get(parsed.code)}).`);
-        else if (seen.has(parsed.code)) errors.push(`Pallet ID ${parsed.code} is twice on this list.`);
+        if (live.has(parsed.code)) errors.push(t("bd.live", { code: parsed.code, where: live.get(parsed.code)! }));
+        else if (seen.has(parsed.code)) errors.push(t("bd.twice", { code: parsed.code }));
         seen.add(parsed.code);
       }
     }
-    if (!d.lines.length) { errors.push(`Pallet ${n} has nothing on it.`); return; }
-    if (d.lines.length > MAX_LINES) errors.push(`Pallet ${n}: at most ${MAX_LINES} items on one pallet.`);
+    if (!d.lines.length) { errors.push(t("bd.empty", { n })); return; }
+    if (d.lines.length > MAX_LINES) errors.push(t("bd.maxLines", { n, max: MAX_LINES }));
     let full = 0;
     const keys = new Set<string>();
     const parts: string[] = [];
     for (const l of d.lines) {
       const item = items.find((i) => i.id === l.itemId);
-      if (!item) { errors.push(`Pallet ${n}: that item is not one of this customer's.`); continue; }
-      if (!Number.isInteger(l.units) || l.units < 1) { errors.push(`Pallet ${n}: type the boxes of ${item.sku} (a whole number, 1 or more).`); continue; }
-      if (l.units > item.unitsPerPallet) { errors.push(`Pallet ${n}: ${l.units} boxes of ${item.sku} do not fit on one pallet (${item.unitsPerPallet} max).`); continue; }
-      if (l.expiresAt !== null && !isDay(l.expiresAt)) errors.push(`Pallet ${n}: the best-before date of ${item.sku} is not a date.`);
+      if (!item) { errors.push(t("bd.notTheirs", { n })); continue; }
+      if (!Number.isInteger(l.units) || l.units < 1) { errors.push(t("bd.typeBoxes", { n, sku: item.sku })); continue; }
+      if (l.units > item.unitsPerPallet) { errors.push(t("bd.noFit", { n, units: l.units, sku: item.sku, max: item.unitsPerPallet })); continue; }
+      if (l.expiresAt !== null && !isDay(l.expiresAt)) errors.push(t("bd.badDate", { n, sku: item.sku }));
       const key = `${l.itemId}|${l.lot ?? ""}|${l.expiresAt ?? ""}`;
-      if (keys.has(key)) errors.push(`Pallet ${n}: ${item.sku} is listed twice with the same lot and date.`);
+      if (keys.has(key)) errors.push(t("bd.dupLine", { n, sku: item.sku }));
       keys.add(key);
       full += splitUnits(l.units, item.unitsPerPallet).equivalent;
       parts.push(pct(l.units / item.unitsPerPallet));
     }
-    if (d.lines.length > 1 && full > 1 + 1e-9) errors.push(`Pallet ${n} is more than full (${parts.join(" + ")}).`);
+    if (d.lines.length > 1 && full > 1 + 1e-9) errors.push(t("bd.over", { n, parts: parts.join(" + ") }));
   });
   return { errors };
 }
@@ -137,22 +139,22 @@ export function summarize(drafts: PalletDraft[]): { itemId: string; lot: string 
  * What the browser sent, made safe: the right shapes, IDs cleaned with `parseCode` ("" = no ID), lots trimmed.
  * Anything that is not a list of pallets of lines is an error; the numbers are judged later by `checkBreakdown`.
  */
-export function cleanDrafts(raw: unknown): { ok: true; drafts: PalletDraft[] } | { ok: false; error: string } {
-  if (!Array.isArray(raw)) return { ok: false, error: "The pallet list could not be read. Reload and try again." };
+export function cleanDrafts(raw: unknown, t: Translate = tEn): { ok: true; drafts: PalletDraft[] } | { ok: false; error: string } {
+  if (!Array.isArray(raw)) return { ok: false, error: t("bd.listUnreadable") };
   const drafts: PalletDraft[] = [];
   for (const [idx, p] of raw.entries()) {
     const n = idx + 1;
-    if (typeof p !== "object" || p === null || !Array.isArray((p as PalletDraft).lines)) return { ok: false, error: `Pallet ${n} could not be read. Reload and try again.` };
+    if (typeof p !== "object" || p === null || !Array.isArray((p as PalletDraft).lines)) return { ok: false, error: t("bd.palletUnreadable", { n }) };
     const rawCode = (p as PalletDraft).code;
-    if (rawCode !== null && rawCode !== undefined && typeof rawCode !== "string") return { ok: false, error: `Pallet ${n}: the ID could not be read.` };
-    const code = parseCode(rawCode ?? "");
-    if (!code.ok) return { ok: false, error: `Pallet ${n}: ${code.error}` };
+    if (rawCode !== null && rawCode !== undefined && typeof rawCode !== "string") return { ok: false, error: t("bd.idUnreadable", { n }) };
+    const code = parseCode(rawCode ?? "", t);
+    if (!code.ok) return { ok: false, error: t("bd.pallet", { n, text: code.error }) };
     const lines: DraftLine[] = [];
     for (const l of (p as PalletDraft).lines as unknown[]) {
       const o = l as Partial<DraftLine> | null;
-      if (!o || typeof o.itemId !== "string" || typeof o.units !== "number") return { ok: false, error: `Pallet ${n}: a line could not be read.` };
-      if (o.lot != null && typeof o.lot !== "string") return { ok: false, error: `Pallet ${n}: the lot could not be read.` };
-      if (o.expiresAt != null && typeof o.expiresAt !== "string") return { ok: false, error: `Pallet ${n}: the date could not be read.` };
+      if (!o || typeof o.itemId !== "string" || typeof o.units !== "number") return { ok: false, error: t("bd.lineUnreadable", { n }) };
+      if (o.lot != null && typeof o.lot !== "string") return { ok: false, error: t("bd.lotUnreadable", { n }) };
+      if (o.expiresAt != null && typeof o.expiresAt !== "string") return { ok: false, error: t("bd.dateUnreadable", { n }) };
       lines.push({ itemId: o.itemId, lot: o.lot?.trim().slice(0, 40) || null, expiresAt: o.expiresAt?.trim() || null, units: o.units });
     }
     drafts.push({ code: code.code, lines });

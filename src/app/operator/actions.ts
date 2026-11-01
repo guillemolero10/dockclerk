@@ -5,6 +5,7 @@ import { providers } from "@/lib/ai/client";
 import { transcribe } from "@/lib/ai/voice";
 import { db } from "@/lib/db";
 import { Fixable, orFixable } from "@/lib/fixable";
+import { getT } from "@/lib/i18n/server";
 import { checkIn, confirmReceipt, pickPallet, putAway, recordLoad, recordNote, suggestPutAway, typeNote } from "@/lib/ops/floor";
 import { checkBreakdown, cleanDrafts, type PalletDraft } from "@/lib/pallets/breakdown";
 import { consume } from "@/lib/rate-limit";
@@ -15,8 +16,11 @@ import { parseDataUrl, saveUpload } from "@/lib/uploads";
 const requireFloor = () => assertRole("operator");
 
 /** A count typed on the PDA, checked here whatever the browser sends: a whole number, never negative or 2,5 pallets. */
-function wholeCount(n: unknown, min: number, max: number, what: string) {
-  if (typeof n !== "number" || !Number.isInteger(n) || n < min || n > max) throw new Fixable(`Type the number of ${what} (${min} to ${max}).`);
+async function wholeCount(n: unknown, min: number, max: number, what: "pallets" | "damaged") {
+  if (typeof n !== "number" || !Number.isInteger(n) || n < min || n > max) {
+    const { t } = await getT();
+    throw new Fixable(t("opa.typeNumber", { what: t(what === "pallets" ? "opa.whatPallets" : "opa.whatDamaged"), min, max }));
+  }
   return n;
 }
 
@@ -34,7 +38,7 @@ export async function truckHere(inboundId: string) {
 export async function notePhoto(inboundId: string, photo: string) {
   await requireFloor();
   const media = parseDataUrl(photo);
-  if (!media) throw new Error("That photo could not be read.");
+  if (!media) throw new Error((await getT()).t("opa.photoUnreadable"));
   const result = await recordNote(inboundId, media);
   refresh();
   return { read: result.read };
@@ -43,7 +47,7 @@ export async function notePhoto(inboundId: string, photo: string) {
 export async function notePallets(inboundId: string, pallets: number, sku: string | null) {
   await requireFloor();
   return orFixable(async () => {
-    await typeNote(inboundId, wholeCount(pallets, 1, 66, "pallets"), sku, "operator");
+    await typeNote(inboundId, await wholeCount(pallets, 1, 66, "pallets"), sku, "operator");
     refresh();
   });
 }
@@ -51,7 +55,7 @@ export async function notePallets(inboundId: string, pallets: number, sku: strin
 export async function loadPhoto(inboundId: string, photo: string) {
   await requireFloor();
   const media = parseDataUrl(photo);
-  if (!media) throw new Error("That photo could not be read.");
+  if (!media) throw new Error((await getT()).t("opa.photoUnreadable"));
   const count = await recordLoad(inboundId, media);
   refresh();
   return count ? { boxes: count.boxes.length, damaged: count.boxes.filter((b) => b.damaged).length, pallets: count.pallets, by: count.by } : null;
@@ -73,20 +77,21 @@ export async function receive(inboundId: string, pallets: PalletDraft[], damaged
 }
 
 async function receiveChecked(inboundId: string, input: PalletDraft[], damaged: number, incident: string) {
-  const cleaned = cleanDrafts(input);
+  const { t } = await getT();
+  const cleaned = cleanDrafts(input, t);
   if (!cleaned.ok) throw new Fixable(cleaned.error);
-  wholeCount(damaged, 0, 500, "damaged boxes");
+  await wholeCount(damaged, 0, 500, "damaged");
   // Only this customer's items: the stock is booked to the customer of the delivery.
   const inbound = await db.inbound.findUniqueOrThrow({ where: { id: inboundId }, select: { clientId: true } });
   const items = await db.item.findMany({ where: { clientId: inbound.clientId }, select: { id: true, sku: true, unitsPerPallet: true } });
   const used = new Set(cleaned.drafts.flatMap((p) => p.lines.map((l) => l.itemId)));
-  if ([...used].some((id) => !items.some((i) => i.id === id))) throw new Fixable("That item is not one of this customer's. Reload and pick it again.");
+  if ([...used].some((id) => !items.some((i) => i.id === id))) throw new Fixable(t("opa.itemNotTheirs"));
   // The same rules the transaction applies (it repeats them against the pallets inside at that moment).
-  const { errors } = checkBreakdown(cleaned.drafts, items, new Map());
+  const { errors } = checkBreakdown(cleaned.drafts, items, new Map(), t);
   if (errors.length) throw new Fixable(errors.slice(0, 3).join(" "));
   const receipt = await db.dockReceipt.findUnique({ where: { inboundId } });
   const found = (receipt?.damages as { box: number; note: string }[] | null) ?? [];
-  const damages = found.length >= damaged ? found.slice(0, damaged) : [...found, ...Array.from({ length: damaged - found.length }, (_, i) => ({ box: found.length + i + 1, note: "Damaged (operator)" }))];
+  const damages = found.length >= damaged ? found.slice(0, damaged) : [...found, ...Array.from({ length: damaged - found.length }, (_, i) => ({ box: found.length + i + 1, note: t("opa.damagedOperator") }))];
   const { codes } = await confirmReceipt(inboundId, cleaned.drafts, damages, incident.trim() || null);
   refresh();
   return codes;
@@ -103,7 +108,7 @@ export async function putAwayPallet(stockId: string, location: string): Promise<
   try {
     await putAway(stockId, location.trim().toUpperCase());
   } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not do it." };
+    return { error: err instanceof Error ? err.message : (await getT()).t("opa.couldNot") };
   }
   refresh();
   return {};
@@ -139,7 +144,7 @@ export async function pick(outboundId: string, stockId: string, units?: number):
     refresh();
     return result;
   } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not do it." };
+    return { error: err instanceof Error ? err.message : (await getT()).t("opa.couldNot") };
   }
 }
 
@@ -161,12 +166,13 @@ const MAX_VOICE_BYTES = 3 * 1024 * 1024;
 /** A voice note from the floor goes to the AI inbox like any other message. The recording comes as a file in `form` ("audio"). */
 export async function voiceNote(warehouseCode: string, form: FormData) {
   const user = await requireFloor();
+  const { t } = await getT();
   // Each note is up to 3 MB in the database and a call to Meta that the daily budget does not count: 30 an hour per account is plenty.
-  if (!(await consume(`voice:${user.userId}`, 30, 60 * 60 * 1000))) return { error: "Too many voice notes this hour: type it in the office instead." };
+  if (!(await consume(`voice:${user.userId}`, 30, 60 * 60 * 1000))) return { error: t("voice.tooMany") };
   const file = form.get("audio");
   const mime = file instanceof Blob ? file.type.split(";")[0] : "";
-  if (!(file instanceof Blob) || !/^audio\/[\w.+-]+$/.test(mime) || !file.size) return { error: "That recording could not be read." };
-  if (file.size > MAX_VOICE_BYTES) return { error: "That note is too long: keep it under a minute." };
+  if (!(file instanceof Blob) || !/^audio\/[\w.+-]+$/.test(mime) || !file.size) return { error: t("voice.unreadable") };
+  if (file.size > MAX_VOICE_BYTES) return { error: t("voice.tooLong") };
   const media = { mime, base64: Buffer.from(await file.arrayBuffer()).toString("base64") };
   const url = await saveUpload("voice", media);
   const text = await transcribe(media, await voiceHints());

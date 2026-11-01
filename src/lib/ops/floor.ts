@@ -10,6 +10,7 @@ import { abcClasses, velocitySlot } from "@/lib/warehouse/velocity";
 import { makeLayout } from "@/lib/warehouse/layout";
 import { allocatePicks } from "@/lib/warehouse/picking";
 import { Fixable } from "@/lib/fixable";
+import { getT } from "@/lib/i18n/server";
 import { checkBreakdown, leadIndex, sharesOf, summarize, type PalletDraft } from "@/lib/pallets/breakdown";
 import { freshCodes } from "@/lib/pallets/codes";
 
@@ -181,7 +182,7 @@ export async function confirmReceipt(inboundId: string, pallets: PalletDraft[], 
     if (claim.count !== 1) return { codes: [] as string[] };
 
     const live = await liveCodes(tx);
-    const { errors } = checkBreakdown(pallets, items, live);
+    const { errors } = checkBreakdown(pallets, items, live, (await getT()).t);
     if (errors.length) throw new Fixable(errors.slice(0, 3).join(" "));
 
     const taken = new Set([...live.keys(), ...pallets.flatMap((p) => (p.code ? [p.code] : []))]);
@@ -239,6 +240,7 @@ export async function suggestPutAway(stockId: string, taken: string[] = []) {
  * class A low and near the dock, class C at the back and on top.
  */
 export async function planPutAway(stockId: string, taken: string[] = []) {
+  const { t } = await getT();
   const pallet = await db.stock.findUniqueOrThrow({ where: { id: stockId }, include: { warehouse: true } });
   const layout = layoutOf(pallet.warehouse);
   const here = await db.stock.findMany({ where: { warehouseId: pallet.warehouseId }, select: { location: true, clientId: true } });
@@ -250,24 +252,25 @@ export async function planPutAway(stockId: string, taken: string[] = []) {
       _sum: { pallets: true },
     });
     const speed = abcClasses(new Map(lines.map((l) => [l.itemId, l._sum.pallets ?? 0]))).classes.get(pallet.itemId) ?? "C";
-    const why = { A: "Fast mover (class A): low and near the dock", B: "Steady mover (class B): middle of the racks", C: "Slow mover (class C): back and top, to keep the quick slots free" }[speed];
+    const why = t(`pa.why.${speed}` as "pa.why.A");
     return { slot: velocitySlot(layout, occupied, speed), why };
   }
-  return { slot: suggestSlot(layout, occupied, here.filter((s) => s.clientId === pallet.clientId).map((s) => s.location)), why: "Next to the customer's goods" };
+  return { slot: suggestSlot(layout, occupied, here.filter((s) => s.clientId === pallet.clientId).map((s) => s.location)), why: t("pa.why.near") };
 }
 
 /** Puts a pallet in a rack slot. Every row of the same pallet ID that waits in the same place goes with it (a mixed pallet moves as one). */
 export async function putAway(stockId: string, location: string) {
+  const { t } = await getT();
   const pallet = await db.stock.findUniqueOrThrow({ where: { id: stockId }, include: { warehouse: true } });
-  if (!layoutOf(pallet.warehouse).contains(location) || location.startsWith("REC-") || location.startsWith("EXP-")) throw new Error(`${location} is not a rack slot here.`);
+  if (!layoutOf(pallet.warehouse).contains(location) || location.startsWith("REC-") || location.startsWith("EXP-")) throw new Error(t("pa.notRack", { loc: location }));
   const together = pallet.palletCode
     ? { warehouseId: pallet.warehouseId, palletCode: pallet.palletCode, location: pallet.location, outboundId: null }
     : { id: stockId };
   await db.$transaction(async (tx) => {
     const busy = await tx.stock.findFirst({ where: { warehouseId: pallet.warehouseId, location, NOT: pallet.palletCode ? { palletCode: pallet.palletCode } : { id: stockId } } });
-    if (busy) throw new Error(`${location} is taken.`);
+    if (busy) throw new Error(t("pa.taken", { loc: location }));
     const moved = await tx.stock.updateMany({ where: together, data: { location } });
-    if (moved.count < 1) throw new Error("That pallet is not waiting there any more. Reload the list.");
+    if (moved.count < 1) throw new Error(t("pa.notThere"));
   }, longTransaction);
 }
 
@@ -295,26 +298,27 @@ export async function openPickPlans() {
  * Returns the new pallet's ID when boxes were taken, so the operator can label it.
  */
 export async function pickPallet(outboundId: string, stockId: string, units?: number) {
+  const { t } = await getT();
   const { plans, stock, open } = await openPickPlans();
   const plan = plans.get(outboundId);
   const order = open.find((o) => o.id === outboundId);
-  if (!plan || !order || !plan.warehouseId) throw new Error("Nothing to pick for this outbound.");
-  if (!plan.stockIds.includes(stockId) || plan.picked.includes(stockId)) throw new Error("That pallet is not on this pick list.");
+  if (!plan || !order || !plan.warehouseId) throw new Error(t("pk.nothingToPick"));
+  if (!plan.stockIds.includes(stockId) || plan.picked.includes(stockId)) throw new Error(t("pk.notOnList"));
   const step = plan.steps.find((p) => (p.kind === "pallet" ? p.stockIds.includes(stockId) : p.stockId === stockId));
-  if (!step) throw new Error("That pallet is not on this pick list.");
+  if (!step) throw new Error(t("pk.notOnList"));
 
   const row = stock.find((s) => s.id === stockId)!;
   const rowsOf = step.kind === "pallet" ? step.stockIds.map((id) => stock.find((s) => s.id === id)!) : [row];
   const expected = step.kind === "boxes" ? step.units : rowsOf.reduce((sum, r) => sum + r.units, 0);
   const partial = step.kind === "boxes" && step.units < row.units;
-  if (units !== undefined && (!Number.isInteger(units) || units !== expected) && (partial || rowsOf.length === 1)) throw new Error(`Take ${expected} boxes from ${row.location}.`);
-  if (partial && units === undefined) throw new Error(`Take ${expected} boxes from ${row.location}.`);
+  if (units !== undefined && (!Number.isInteger(units) || units !== expected) && (partial || rowsOf.length === 1)) throw new Error(t("pk.takeBoxes", { n: expected, loc: row.location }));
+  if (partial && units === undefined) throw new Error(t("pk.takeBoxes", { n: expected, loc: row.location }));
 
   const warehouse = await db.warehouse.findUniqueOrThrow({ where: { id: plan.warehouseId } });
   const lane = dispatchLane(layoutOf(warehouse), stock.filter((s) => s.warehouseId === warehouse.id), outboundId);
   // The plan was made before this transaction: check again, inside it, that the rows are still as the plan saw them.
   // If another operator took them in between, nothing is written and the person reloads the list.
-  const stale = new Error("Somebody else just picked from this pallet. Reload the list and try again.");
+  const stale = new Error(t("pk.stale"));
   let newCode: string | null = null;
   await db.$transaction(async (tx) => {
     if (step.kind === "pallet") {

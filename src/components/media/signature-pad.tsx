@@ -2,9 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Eraser } from "lucide-react";
+import { useT } from "@/lib/i18n/client";
 
 /** Sign with a finger. Hands back a PNG data URL, or null while empty. */
 export function SignaturePad({ onChange }: { onChange: (dataUrl: string | null) => void }) {
+  const { t } = useT();
   const canvas = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
   const stroked = useRef(false);
@@ -59,7 +61,7 @@ export function SignaturePad({ onChange }: { onChange: (dataUrl: string | null) 
             onChange(canvas.current!.toDataURL("image/png"));
           }}
         />
-        {empty && <span className="pointer-events-none absolute inset-0 grid place-items-center text-sm text-dock-ink/30">Sign here</span>}
+        {empty && <span className="pointer-events-none absolute inset-0 grid place-items-center text-sm text-dock-ink/30">{t("dr.signHere")}</span>}
         <span className="pointer-events-none absolute inset-x-6 bottom-8 border-b border-dashed border-dock-ink/30" />
       </div>
       <button
@@ -73,7 +75,7 @@ export function SignaturePad({ onChange }: { onChange: (dataUrl: string | null) 
         }}
         className="cond mt-1.5 flex items-center gap-1 text-xs text-dock-ink/50"
       >
-        <Eraser size={12} /> Clear
+        <Eraser size={12} /> {t("dr.clear")}
       </button>
     </div>
   );

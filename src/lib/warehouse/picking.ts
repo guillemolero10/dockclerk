@@ -68,13 +68,14 @@ export type PickPlan = {
 export function describeShortage(
   lines: PickPlan["shortLines"],
   itemOf: (itemId: string) => { sku: string; unit: "PALLET" | "BOX" | "BAG" } | undefined,
+  words: { of: string; and: string } = { of: "of", and: "and" },
 ) {
   return lines
     .map((l) => {
       const item = itemOf(l.itemId);
-      return `${describeUnits(l.units, l.unitsPerPallet, item ? unitWordFor(item.unit) : "cajas")}${item ? ` of ${item.sku}` : ""}`;
+      return `${describeUnits(l.units, l.unitsPerPallet, item ? unitWordFor(item.unit) : "cajas")}${item ? ` ${words.of} ${item.sku}` : ""}`;
     })
-    .join(" and ");
+    .join(` ${words.and} `);
 }
 
 const time = (d: Date | null, fallback: number) => (d ? d.getTime() : fallback);

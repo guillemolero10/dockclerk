@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Check, Printer, Route } from "lucide-react";
 import { pick } from "@/app/operator/actions";
+import { useT } from "@/lib/i18n/client";
 
 type Content = { sku: string; lot: string | null; units: number; word: string };
 type Step = {
@@ -24,6 +25,7 @@ type Step = {
 
 /** Walk the route: one big location at a time, the same order the office sees lit up in 3D. A step is one physical pallet. */
 export function PickStep({ outboundId, lane, done, total, shortText, metres, steps }: { outboundId: string; lane: number; done: number; total: number; shortText: string | null; metres: number; steps: Step[] }) {
+  const { t } = useT();
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -36,22 +38,22 @@ export function PickStep({ outboundId, lane, done, total, shortText, metres, ste
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
-        <div className="h-2.5 flex-1 border-[1.5px] border-dock-ink bg-white" role="progressbar" aria-valuenow={done} aria-valuemin={0} aria-valuemax={total} aria-label="Pick progress">
+        <div className="h-2.5 flex-1 border-[1.5px] border-dock-ink bg-white" role="progressbar" aria-valuenow={done} aria-valuemin={0} aria-valuemax={total} aria-label={t("pk.progress")}>
           <div className="h-full bg-dock-ink" style={{ width: `${(done / Math.max(1, total)) * 100}%` }} />
         </div>
-        <span className="mono text-sm font-semibold">{label ? `${Math.max(done, label.base + 1)}/${total}` : !current ? `${done}/${total}` : `Step ${done + 1} of ${total}`}</span>
+        <span className="mono text-sm font-semibold">{label ? `${Math.max(done, label.base + 1)}/${total}` : !current ? `${done}/${total}` : t("pk.step", { a: done + 1, b: total })}</span>
       </div>
-      {shortText && <p className="bg-dock-red/10 px-3 py-2 text-sm text-dock-red">Missing in stock: {shortText}. The office knows.</p>}
+      {shortText && <p className="bg-dock-red/10 px-3 py-2 text-sm text-dock-red">{t("pk.missing", { text: shortText })}</p>}
 
       {label ? (
         <>
           <div className="dock-card overflow-hidden bg-white">
             <div className="bg-dock-yellow px-4 py-5 text-center">
               <p className="cond flex items-center justify-center gap-1.5 text-xs font-semibold">
-                <Printer size={13} aria-hidden /> Label the new pallet
+                <Printer size={13} aria-hidden /> {t("pk.labelNew")}
               </p>
               <p className="mono text-3xl font-bold tracking-wide">{label.code}</p>
-              <p className="mt-1 text-sm">It goes to EXP {lane} with the order.</p>
+              <p className="mt-1 text-sm">{t("pk.goesTo", { n: lane })}</p>
             </div>
           </div>
           <button
@@ -61,7 +63,7 @@ export function PickStep({ outboundId, lane, done, total, shortText, metres, ste
             }}
             className="cond flex min-h-16 w-full items-center justify-center gap-3 bg-dock-ink px-4 py-4 text-xl font-bold text-dock-yellow"
           >
-            {label.finished ? "Finish" : "Labelled, next step"}
+            {label.finished ? t("pk.finish") : t("pk.labelledNext")}
           </button>
         </>
       ) : (
@@ -69,39 +71,39 @@ export function PickStep({ outboundId, lane, done, total, shortText, metres, ste
           <>
             <div className="dock-card overflow-hidden bg-white">
               <div className="bg-dock-ink px-4 py-5 text-center">
-                <p className="cond text-[11px] text-white/50">Go to</p>
+                <p className="cond text-[11px] text-white/50">{t("pk.goTo")}</p>
                 <p className="cond text-6xl font-bold tracking-wide text-dock-yellow">{current.location}</p>
-                {current.level && <p className="cond text-sm text-white/60">level {current.level}</p>}
+                {current.level && <p className="cond text-sm text-white/60">{t("pk.level", { n: current.level })}</p>}
               </div>
               {current.kind === "pallet" ? (
                 <div className="border-t-[1.5px] border-dock-ink px-4 py-3 text-center">
-                  <p className="text-sm font-medium">{current.code ? <>Take pallet <span className="mono font-bold">{current.code}</span></> : "Take the whole pallet"} {current.mixed && <span className="cond bg-dock-ink px-1.5 py-0.5 text-[10px] text-dock-yellow">MIXED</span>}</p>
+                  <p className="text-sm font-medium">{current.code ? <>{t("pk.takePallet")} <span className="mono font-bold">{current.code}</span></> : t("pk.takeWhole")} {current.mixed && <span className="cond bg-dock-ink px-1.5 py-0.5 text-[10px] text-dock-yellow">{t("rcs.mixed")}</span>}</p>
                   <ul className="mono mt-1 space-y-0.5 text-sm">
                     {current.contents.map((c, i) => (
                       <li key={i} className="font-semibold">
-                        {c.sku} {c.lot && <span className="font-normal text-dock-ink/50">· lot {c.lot}</span>} <span className="font-normal text-dock-ink/60">· {c.units} {c.word}</span>
+                        {c.sku} {c.lot && <span className="font-normal text-dock-ink/50">{t("pk.lot", { lot: c.lot })}</span>} <span className="font-normal text-dock-ink/60">· {c.units} {c.word}</span>
                       </li>
                     ))}
                   </ul>
                 </div>
               ) : (
                 <div className="border-t-[1.5px] border-dock-ink bg-dock-yellow px-4 py-3 text-center">
-                  <p className="cond text-xs font-semibold">Take only</p>
+                  <p className="cond text-xs font-semibold">{t("pk.takeOnly")}</p>
                   <p className="cond text-5xl font-bold leading-none">
                     {what?.units} <span className="text-3xl">{what?.word}</span>
                   </p>
                   <p className="mono mt-1 text-base font-bold">
-                    of {what?.sku} {what?.lot && <span className="font-normal">· lot {what.lot}</span>}
+                    {t("pk.of")} {what?.sku} {what?.lot && <span className="font-normal">{t("pk.lot", { lot: what.lot })}</span>}
                   </p>
                   <p className="mt-1 text-sm font-medium">
-                    {current.code ? <>from {current.mixed ? "mixed " : ""}pallet <span className="mono font-bold">{current.code}</span></> : "from this pallet"}
+                    {current.code ? <span>{t(current.mixed ? "pk.fromMixed" : "pk.fromPallet", { code: "" }).trimEnd()} <span className="mono font-bold">{current.code}</span></span> : t("pk.fromThis")}
                     {" · "}
-                    {leaves > 0 ? `leaves ${leaves} here` : "the rest of the pallet stays"}
+                    {leaves > 0 ? t("pk.leaves", { n: leaves }) : t("pk.restStays")}
                   </p>
-                  <p className="mt-1 text-sm font-semibold">They go onto a new pallet: you label it next.</p>
+                  <p className="mt-1 text-sm font-semibold">{t("pk.newPallet")}</p>
                 </div>
               )}
-              <p className="mono px-4 py-2 text-center text-xs text-dock-ink/55">then to EXP {lane}</p>
+              <p className="mono px-4 py-2 text-center text-xs text-dock-ink/55">{t("pk.thenExp", { n: lane })}</p>
             </div>
             <button
               disabled={pending}
@@ -114,13 +116,13 @@ export function PickStep({ outboundId, lane, done, total, shortText, metres, ste
                     if (result.newCode) setLabel({ code: result.newCode, finished: !!result.done, base: done });
                     else router.refresh();
                   } catch {
-                    setError("Could not do it. Reload and try again.");
+                    setError(t("pk.couldNot"));
                   }
                 })
               }
               className="cond flex min-h-16 w-full items-center justify-center gap-3 bg-dock-yellow px-4 py-4 text-xl font-bold ring-[1.5px] ring-dock-ink active:brightness-90 disabled:opacity-60"
             >
-              <Check size={24} aria-hidden /> {pending ? "…" : current.kind === "boxes" ? `Picked ${current.take} ${what?.word}` : current.code ? `Picked ${current.code}` : "Picked the pallet"}
+              <Check size={24} aria-hidden /> {pending ? "…" : current.kind === "boxes" ? t("pk.pickedBoxes", { n: current.take ?? 0, word: what?.word ?? "" }) : current.code ? t("pk.pickedCode", { code: current.code }) : t("pk.pickedPallet")}
             </button>
             {error && <p role="alert" className="text-sm text-dock-red">{error}</p>}
           </>
@@ -130,7 +132,7 @@ export function PickStep({ outboundId, lane, done, total, shortText, metres, ste
       {!label && steps.length > 1 && (
         <div className="dock-console px-4 py-3 text-[12.5px]">
           <p className="cond mb-1.5 flex items-center gap-1.5 text-[11px] text-white/50">
-            <Route size={12} /> Route · ≈{metres} m
+            <Route size={12} /> {t("pk.route", { m: metres })}
           </p>
           <ol className="mono space-y-0.5">
             {steps.map((s, i) => (
