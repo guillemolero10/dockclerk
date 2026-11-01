@@ -7,28 +7,29 @@ import { RuleButton } from "@/components/analyst/rule-button";
 import { getReport } from "@/lib/analyst";
 import type { Finding, FindingKind } from "@/lib/analyst/types";
 import { db } from "@/lib/db";
+import { LOCALE, type Lang, type Translate } from "@/lib/i18n/core";
+import { getT } from "@/lib/i18n/server";
 import { requireRole } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const KIND: Record<FindingKind, { label: string; icon: LucideIcon }> = {
-  stockout: { label: "Stock-out", icon: PackageX },
-  space: { label: "Space", icon: Boxes },
-  slotting: { label: "Slotting", icon: Gauge },
-  carrier: { label: "Carriers", icon: Truck },
-  dock: { label: "Dock", icon: CalendarClock },
-  quality: { label: "Quality", icon: ShieldAlert },
-  customer: { label: "Customers", icon: Users },
+const ICON: Record<FindingKind, LucideIcon> = {
+  stockout: PackageX,
+  space: Boxes,
+  slotting: Gauge,
+  carrier: Truck,
+  dock: CalendarClock,
+  quality: ShieldAlert,
+  customer: Users,
 };
 
-const CONFIDENCE = { high: "High confidence", medium: "Medium confidence", low: "Low confidence" };
-
-const when = (d: Date) =>
-  d.toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" });
+const when = (d: Date, lang: Lang) =>
+  d.toLocaleString(LOCALE[lang], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" });
 
 export default async function AnalystPage({ searchParams }: PageProps<"/office/analyst">) {
   await requireRole("office");
+  const { t, lang } = await getT();
   const { r } = await searchParams;
   const [report, history, warehouses] = await Promise.all([
     getReport(typeof r === "string" ? r : undefined),
@@ -41,27 +42,27 @@ export default async function AnalystPage({ searchParams }: PageProps<"/office/a
     <main className="mx-auto max-w-6xl px-8 py-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="cond text-sm text-dock-ink/50">Studies your warehouse&apos;s history every Monday at 07:00</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Analyst</h1>
+          <p className="cond text-sm text-dock-ink/50">{t("an.kicker")}</p>
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight">{t("an.title")}</h1>
         </div>
         <AnalyzeForm initial={report?.days ?? 182} />
       </header>
 
       {!report ? (
         <div className="dock-card mt-8 bg-white p-10 text-center">
-          <p className="text-lg font-semibold">No report yet.</p>
-          <p className="mt-1 text-sm text-dock-ink/60">Press Analyze now: it reads six months of movements and takes a few seconds.</p>
+          <p className="text-lg font-semibold">{t("an.none")}</p>
+          <p className="mt-1 text-sm text-dock-ink/60">{t("an.noneText")}</p>
         </div>
       ) : (
         <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_260px]">
           <div className="min-w-0 space-y-5">
             <section className="dock-card bg-dock-ink p-6 text-white">
               <p className="cond flex flex-wrap items-center gap-x-3 text-[11px] text-white/50">
-                <span>{when(report.createdAt)}</span>
-                <span>· {report.days} days studied</span>
-                <span>· {report.trigger === "cron" ? "Monday report" : "run by the office"}</span>
+                <span>{when(report.createdAt, lang)}</span>
+                <span>· {t("an.daysStudied", { n: report.days })}</span>
+                <span>· {report.trigger === "cron" ? t("an.cron") : t("an.office")}</span>
                 <span className="flex items-center gap-1 text-dock-yellow">
-                  <Bot size={12} /> {report.brain === "rules" ? "written from a template (no model key)" : `priorities by ${report.brain}`}
+                  <Bot size={12} /> {report.brain === "rules" ? t("an.template") : t("an.priorities", { brain: report.brain })}
                 </span>
               </p>
               <h2 className="mt-3 text-2xl font-semibold leading-snug tracking-tight">{report.headline}</h2>
@@ -69,21 +70,21 @@ export default async function AnalystPage({ searchParams }: PageProps<"/office/a
             </section>
 
             {report.findings.length === 0 && (
-              <p className="dock-card bg-white p-6 text-sm text-dock-ink/60">Nothing in the data needs action. That is a good report.</p>
+              <p className="dock-card bg-white p-6 text-sm text-dock-ink/60">{t("an.nothing")}</p>
             )}
 
             <ol className="space-y-5">
               {report.findings.map((f, i) => (
-                <FindingCard key={f.id} finding={f} rank={i + 1} ruleOn={ruleOn} />
+                <FindingCard key={f.id} finding={f} rank={i + 1} ruleOn={ruleOn} t={t} />
               ))}
             </ol>
 
             {report.gaps.length > 0 && (
               <section className="dock-card bg-white p-5">
                 <h2 className="cond flex items-center gap-2 text-sm">
-                  <HelpCircle size={16} /> What I can&apos;t tell you yet
+                  <HelpCircle size={16} /> {t("an.gaps")}
                 </h2>
-                <p className="mt-1 text-sm text-dock-ink/60">An analyst who guesses is worse than none. These need more history before they can be answered honestly:</p>
+                <p className="mt-1 text-sm text-dock-ink/60">{t("an.gapsText")}</p>
                 <ul className="mt-3 space-y-2">
                   {report.gaps.map((g) => (
                     <li key={g.topic} className="border-l-4 border-dock-line pl-3 text-sm">
@@ -95,7 +96,7 @@ export default async function AnalystPage({ searchParams }: PageProps<"/office/a
             )}
 
             <section className="dock-console p-5">
-              <h2 className="cond text-xs text-white/50">Analyst · how this report was made</h2>
+              <h2 className="cond text-xs text-white/50">{t("an.how")}</h2>
               <ul className="mono mt-3 space-y-1.5 text-[12.5px] leading-relaxed">
                 {report.steps.map((s, i) => (
                   <li key={i} className={s.kind === "ok" ? "ok" : s.kind === "ask" ? "ask" : s.kind === "tool" ? "tool" : "text-white/60"}>
@@ -108,16 +109,16 @@ export default async function AnalystPage({ searchParams }: PageProps<"/office/a
 
           <aside className="space-y-5">
             <section className="dock-card bg-white p-4">
-              <h2 className="cond text-xs text-dock-ink/55">How it works</h2>
+              <h2 className="cond text-xs text-dock-ink/55">{t("an.works")}</h2>
               <ol className="mt-2 space-y-2 text-sm text-dock-ink/75">
-                <li><b>Code does the maths.</b> Forecasts, trends and tests run on the warehouse&apos;s own movements, with the method written under each finding.</li>
-                <li><b>The model decides what matters.</b> Muse Spark Open reads the findings, sets the priorities and writes the summary.</li>
-                <li><b>A guard checks every figure.</b> A number the data does not contain never reaches the report.</li>
-                <li><b>It says when it doesn&apos;t know.</b> Thin data gives a gap, not a guess.</li>
+                <li><b>{t("an.w1")}</b> {t("an.w1t")}</li>
+                <li><b>{t("an.w2")}</b> {t("an.w2t")}</li>
+                <li><b>{t("an.w3")}</b> {t("an.w3t")}</li>
+                <li><b>{t("an.w4")}</b> {t("an.w4t")}</li>
               </ol>
             </section>
             <section className="dock-card bg-white p-4">
-              <h2 className="cond text-xs text-dock-ink/55">Earlier reports</h2>
+              <h2 className="cond text-xs text-dock-ink/55">{t("an.earlier")}</h2>
               <ul className="mt-2 space-y-1">
                 {history.map((h) => (
                   <li key={h.id}>
@@ -126,7 +127,7 @@ export default async function AnalystPage({ searchParams }: PageProps<"/office/a
                       className={`block px-2 py-1.5 text-sm hover:bg-dock-concrete-2 ${h.id === report.id ? "bg-dock-yellow" : ""}`}
                     >
                       <span className="cond block text-[10px] text-dock-ink/50">
-                        {when(h.createdAt)} · {h.days} d · {h.trigger === "cron" ? "Monday" : "office"}
+                        {when(h.createdAt, lang)} · {h.days} d · {h.trigger === "cron" ? t("an.monday") : t("an.officeShort")}
                       </span>
                       <span className="line-clamp-2">{h.headline}</span>
                     </Link>
@@ -141,8 +142,8 @@ export default async function AnalystPage({ searchParams }: PageProps<"/office/a
   );
 }
 
-function FindingCard({ finding: f, rank, ruleOn }: { finding: Finding; rank: number; ruleOn: Map<string, boolean> }) {
-  const { label, icon: Icon } = KIND[f.kind];
+function FindingCard({ finding: f, rank, ruleOn, t }: { finding: Finding; rank: number; ruleOn: Map<string, boolean>; t: Translate }) {
+  const Icon = ICON[f.kind];
   return (
     <li className="dock-card overflow-hidden bg-white">
       <div className="flex items-start gap-4 p-5 pb-3">
@@ -150,9 +151,9 @@ function FindingCard({ finding: f, rank, ruleOn }: { finding: Finding; rank: num
         <div className="min-w-0 flex-1">
           <p className="cond flex flex-wrap items-center gap-x-3 text-[11px] text-dock-ink/55">
             <span className="flex items-center gap-1">
-              <Icon size={13} /> {label}
+              <Icon size={13} /> {t(`an.kind.${f.kind}` as "an.kind.dock")}
             </span>
-            <span className={f.confidence === "high" ? "text-dock-ink" : f.confidence === "low" ? "text-dock-red" : ""}>{CONFIDENCE[f.confidence]}</span>
+            <span className={f.confidence === "high" ? "text-dock-ink" : f.confidence === "low" ? "text-dock-red" : ""}>{t(`an.conf.${f.confidence}` as "an.conf.high")}</span>
           </p>
           <h3 className="mt-0.5 text-lg font-semibold leading-snug">{f.title}</h3>
         </div>
@@ -174,7 +175,7 @@ function FindingCard({ finding: f, rank, ruleOn }: { finding: Finding; rank: num
           ))}
         </dl>
         <details className="text-xs text-dock-ink/65">
-          <summary className="cond cursor-pointer text-[11px] text-dock-ink/55">How I worked it out</summary>
+          <summary className="cond cursor-pointer text-[11px] text-dock-ink/55">{t("an.method")}</summary>
           <p className="mono mt-1.5 leading-relaxed">{f.method}</p>
         </details>
         {f.actions.length > 0 && (

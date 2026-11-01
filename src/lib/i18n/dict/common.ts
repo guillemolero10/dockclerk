@@ -11,6 +11,7 @@ export const en = {
   "common.no": "No",
   "common.notAllowed": "Not allowed.",
   "photo.couldNotSend": "Could not send the photo.",
+  "lgc.note": "Simulated legacy warehouse software (built for the demo, invented data). This is where approved work lands. It stays in Spanish on purpose: it is the old program.",
 } as const;
 
 export const es: Record<keyof typeof en, string> = {
@@ -26,4 +27,5 @@ export const es: Record<keyof typeof en, string> = {
   "common.no": "No",
   "common.notAllowed": "No permitido.",
   "photo.couldNotSend": "No se ha podido enviar la foto.",
+  "lgc.note": "Programa de almacén antiguo simulado (hecho para la demo, datos inventados). Aquí aterriza lo aprobado. Está en español a propósito: es el programa de siempre.",
 };

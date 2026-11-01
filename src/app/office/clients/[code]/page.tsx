@@ -2,7 +2,6 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowDownToLine, ArrowLeft, ArrowUpFromLine, FileText } from "lucide-react";
 import { PartialRule } from "@/components/billing/partial-rule";
-import { RULE_HELP } from "@/lib/billing/view";
 import { customerDetail, ROTATION_DAYS } from "@/lib/clients";
 import { db } from "@/lib/db";
 import { fmtDate, fmtNumber } from "@/lib/format";

@@ -3,15 +3,13 @@
 import { useState, useTransition } from "react";
 import { FlaskConical } from "lucide-react";
 import { analyzeNow } from "@/app/office/analyst/actions";
+import { useT } from "@/lib/i18n/client";
 
-const WINDOWS = [
-  { days: 30, label: "30 days" },
-  { days: 90, label: "3 months" },
-  { days: 182, label: "6 months" },
-];
+const WINDOWS = [30, 90, 182] as const;
 
 /** Run the analyst now on a chosen stretch of history. */
 export function AnalyzeForm({ initial }: { initial: number }) {
+  const { t } = useT();
   const [days, setDays] = useState(initial);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -21,13 +19,13 @@ export function AnalyzeForm({ initial }: { initial: number }) {
         <div className="dock-card flex bg-white p-0.5">
           {WINDOWS.map((w) => (
             <button
-              key={w.days}
+              key={w}
               type="button"
-              onClick={() => setDays(w.days)}
-              aria-pressed={days === w.days}
-              className={`cond px-3 py-1.5 text-xs ${days === w.days ? "bg-dock-ink text-dock-yellow" : "text-dock-ink/60 hover:text-dock-ink"}`}
+              onClick={() => setDays(w)}
+              aria-pressed={days === w}
+              className={`cond px-3 py-1.5 text-xs ${days === w ? "bg-dock-ink text-dock-yellow" : "text-dock-ink/60 hover:text-dock-ink"}`}
             >
-              {w.label}
+              {t(`an.win.${w}` as "an.win.30")}
             </button>
           ))}
         </div>
@@ -46,7 +44,7 @@ export function AnalyzeForm({ initial }: { initial: number }) {
           }
           className="cond flex items-center gap-2 bg-dock-yellow px-4 text-sm font-semibold text-dock-ink ring-[1.5px] ring-dock-ink disabled:opacity-60"
         >
-          <FlaskConical size={15} /> {pending ? `Studying ${days} days…` : "Analyze now"}
+          <FlaskConical size={15} /> {pending ? t("an.studying", { n: days }) : t("an.analyze")}
         </button>
       </div>
       {error && <p className="text-xs text-dock-red">{error}</p>}
