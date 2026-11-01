@@ -113,7 +113,8 @@ async function login(page: Page, user: string, pass: string) {
 }
 
 const text = (page: Page) => page.locator("body").innerText();
-const eurosOf = (s: string) => (s.match(/\d[\d.]*,\d\d\s?€/) ?? [""])[0].replace(/\s/g, " ");
+// English pages print €1,234.56 (Intl en-US); Spanish pages print 1.234,56 €. Both are read.
+const eurosOf = (s: string) => (s.match(/€\s?\d[\d,]*\.\d\d|\d[\d.]*,\d\d\s?€/) ?? [""])[0].replace(/\s/g, " ");
 
 async function main() {
   mkdirSync(SHOTS, { recursive: true });
