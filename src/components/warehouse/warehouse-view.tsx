@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Bot, Crosshair, Plus, Route, Ruler, X } from "lucide-react";
+import { useT } from "@/lib/i18n/client";
+import { LOCALE, type Lang } from "@/lib/i18n/core";
 import { FORKLIFTS, makeLayout, parseLocation } from "@/lib/warehouse/layout";
 import { AGE_BUCKETS, EXPIRY_BUCKETS, GHOST, NO_EXPIRY, PICK, ageColor, clientColor, expiryColor } from "@/lib/warehouse/palette";
 import { pickRoute } from "@/lib/warehouse/route";
@@ -11,21 +13,17 @@ import type { SnapshotOrder, WarehouseSnapshot } from "@/lib/warehouse/snapshot"
 import type { ScenePallet, WarehouseScene } from "./scene";
 
 export type Mode = "customer" | "age" | "expiry";
-const MODES: { id: Mode; label: string }[] = [
-  { id: "customer", label: "Customer" },
-  { id: "age", label: "Days in storage" },
-  { id: "expiry", label: "Expiry" },
-];
-const UNIT: Record<string, string> = { BOX: "boxes", BAG: "bags", PALLET: "units" };
+const MODES: Mode[] = ["customer", "age", "expiry"];
 const OCCUPANCY_ALERT = 0.85;
 const PANEL_INSET = 360; // left panels: 330 px wide + margin
 
-function when(iso: string | null) {
+function when(iso: string | null, lang: Lang) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" });
+  return new Date(iso).toLocaleString(LOCALE[lang], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" });
 }
 
 export function WarehouseView({ snapshot, initialPick, initialMode = "customer" }: { snapshot: WarehouseSnapshot; initialPick: string | null; initialMode?: Mode }) {
+  const { t, lang } = useT();
   const router = useRouter();
   const mount = useRef<HTMLDivElement>(null);
   const scene = useRef<WarehouseScene | null>(null);
@@ -85,7 +83,7 @@ export function WarehouseView({ snapshot, initialPick, initialMode = "customer" 
     import("./scene")
       .then(({ WarehouseScene }) => {
         if (disposed || !mount.current) return;
-        instance = new WarehouseScene(mount.current, layout);
+        instance = new WarehouseScene(mount.current, layout, { dock: t("w.sign.dock"), aisle: t("w.sign.aisle"), clear: t("w.sign.clear") });
         instance.onHover = (id, x, y) => setHover(id ? { id, x, y } : null);
         instance.onPick = (id) => setSelectedId(id);
         instance.setLeftInset(PANEL_INSET);
@@ -98,7 +96,8 @@ export function WarehouseView({ snapshot, initialPick, initialMode = "customer" 
       instance?.dispose();
       scene.current = null;
     };
-  }, [layout]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- rebuilt when the building or the language changes (the signs are painted words)
+  }, [layout, lang]);
 
   useEffect(() => {
     if (sceneVersion) scene.current?.setPallets(scenePallets);
@@ -151,7 +150,7 @@ export function WarehouseView({ snapshot, initialPick, initialMode = "customer" 
 
   const occupancy = here.inRacks / here.capacity;
   const hot = occupancy >= OCCUPANCY_ALERT;
-  const forklift = FORKLIFTS.find((f) => f.aisle === here.dims.aisleWidth)?.label ?? `${here.dims.aisleWidth} m aisles`;
+  const forklift = FORKLIFTS.find((f) => f.aisle === here.dims.aisleWidth)? t(`w.forklift.${here.dims.aisleWidth}` as "w.forklift.3") : t("w.aislesN", { n: here.dims.aisleWidth });
 
   const hovered = hover ? describe(hover.id) : null;
   const selected = selectedId ? describe(selectedId) : null;
@@ -172,7 +171,7 @@ export function WarehouseView({ snapshot, initialPick, initialMode = "customer" 
       <div ref={mount} className="absolute inset-0" />
 
       {failed && (
-        <div className="absolute inset-0 grid place-items-center text-sm text-dock-ink/60">The 3D view needs WebGL, which this browser does not offer.</div>
+        <div className="absolute inset-0 grid place-items-center text-sm text-dock-ink/60">{t("w.noWebgl")}</div>
       )}
 
       <div className="pointer-events-none absolute left-5 top-5 flex w-[330px] flex-col gap-3">
@@ -194,7 +193,7 @@ export function WarehouseView({ snapshot, initialPick, initialMode = "customer" 
               </Link>
             );
           })}
-          <Link href="/office/warehouse/setup" className="grid w-9 place-items-center border-[1.5px] border-dashed border-dock-ink bg-white hover:bg-dock-yellow" title="Add a warehouse">
+          <Link href="/office/warehouse/setup" className="grid w-9 place-items-center border-[1.5px] border-dashed border-dock-ink bg-white hover:bg-dock-yellow" title={t("w.addWarehouse")} aria-label={t("w.addWarehouse")}>
             <Plus size={15} />
           </Link>
         </nav>
@@ -203,33 +202,33 @@ export function WarehouseView({ snapshot, initialPick, initialMode = "customer" 
         <section className="dock-card pointer-events-auto overflow-hidden bg-white">
           <div className="flex items-center gap-2 border-b-[1.5px] border-dock-ink px-4 py-2.5">
             <span className="dock-live h-2 w-2 rounded-full bg-dock-red" />
-            <span className="cond text-[11px] text-dock-ink/60">Live · {here.city}</span>
+            <span className="cond text-[11px] text-dock-ink/60">{t("w.live", { city: here.city })}</span>
             <Link href={`/office/warehouse/setup?code=${here.code}`} className="cond ml-auto flex items-center gap-1 text-[11px] text-dock-ink/50 hover:text-dock-ink">
-              <Ruler size={12} /> Measurements
+              <Ruler size={12} /> {t("w.measurements")}
             </Link>
           </div>
           <div className="px-4 pb-3 pt-2.5">
             <h1 className="text-xl font-semibold leading-tight tracking-tight">{here.name}</h1>
             <p className="mono mt-1 text-[11px] text-dock-ink/50">
-              {here.dims.length} × {here.dims.width} m · {here.dims.height} m clear · {here.dims.docks} docks · {forklift}
+              {t("w.dims", { l: here.dims.length, w: here.dims.width, h: here.dims.height, d: here.dims.docks, forklift })}
             </p>
             <div className="mt-2.5 flex items-baseline justify-between">
-              <span className="cond text-[11px] text-dock-ink/50">Occupancy · {here.capacity} slots</span>
+              <span className="cond text-[11px] text-dock-ink/50">{t("w.occupancy", { n: here.capacity })}</span>
               <span className={`mono text-lg font-semibold ${hot ? "text-dock-red" : ""}`}>{Math.round(occupancy * 100)}%</span>
             </div>
             <div className="relative mt-1 h-2.5 border-[1.5px] border-dock-ink bg-dock-concrete-2">
               <div className={`h-full ${hot ? "bg-dock-red" : "bg-dock-ink"}`} style={{ width: `${Math.min(1, occupancy) * 100}%` }} />
-              <div className="absolute -top-1 h-4 w-0.5 bg-dock-ink" style={{ left: `${OCCUPANCY_ALERT * 100}%` }} title="Alert threshold" />
+              <div className="absolute -top-1 h-4 w-0.5 bg-dock-ink" style={{ left: `${OCCUPANCY_ALERT * 100}%` }} title={t("w.threshold")} />
             </div>
             {hot && (
               <p className="mt-2 flex items-center gap-1.5 text-xs text-dock-red">
-                <AlertTriangle size={13} /> Above {OCCUPANCY_ALERT * 100}%: {here.capacity - here.inRacks} free slots left
+                <AlertTriangle size={13} /> {t("w.above", { p: OCCUPANCY_ALERT * 100, n: here.capacity - here.inRacks })}
               </p>
             )}
             <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-              <Stat label="In racks" value={here.inRacks} />
-              <Stat label="Receiving" value={here.receiving} />
-              <Stat label="To ship" value={here.toShip} />
+              <Stat label={t("w.inRacks")} value={here.inRacks} />
+              <Stat label={t("w.receiving")} value={here.receiving} />
+              <Stat label={t("w.toShip")} value={here.toShip} />
             </div>
           </div>
         </section>
@@ -237,8 +236,8 @@ export function WarehouseView({ snapshot, initialPick, initialMode = "customer" 
         {/* Outbounds waiting to be picked, in every building */}
         <section className="dock-card pointer-events-auto flex max-h-[calc(100vh-390px)] flex-col overflow-hidden bg-white">
           <h2 className="cond flex items-center gap-2 border-b-[1.5px] border-dock-ink px-4 py-2 text-xs">
-            To pick <span className="mono bg-dock-ink px-1.5 text-[11px] text-dock-yellow">{orders.length}</span>
-            <span className="ml-auto normal-case tracking-normal text-dock-ink/40">tap one to light it up</span>
+            {t("w.toPick")} <span className="mono bg-dock-ink px-1.5 text-[11px] text-dock-yellow">{orders.length}</span>
+            <span className="ml-auto normal-case tracking-normal text-dock-ink/40">{t("w.tapOne")}</span>
           </h2>
           <ul ref={pickList} className="overflow-y-auto">
             {orders.map((o) => {
@@ -255,23 +254,23 @@ export function WarehouseView({ snapshot, initialPick, initialMode = "customer" 
                       <span className="mono text-xs font-semibold">Nº {o.number}</span>
                       {o.byClerk && (
                         <span className="cond flex items-center gap-1 bg-dock-ink px-1.5 text-[10px] text-dock-yellow">
-                          <Bot size={11} /> AI
+                          <Bot size={11} /> {t("w.ai")}
                         </span>
                       )}
                       <span className="mono border border-dock-ink/30 px-1 text-[10px]">{o.warehouse ?? "—"}</span>
-                      <span className="mono ml-auto text-xs">{o.pallets} plt</span>
+                      <span className="mono ml-auto text-xs">{t("w.plt", { n: o.pallets })}</span>
                     </span>
                     <span className="mt-0.5 block truncate font-medium">{clients[o.client].name}</span>
                     <span className="block truncate text-xs text-dock-ink/55">
-                      → {o.consignee ?? "—"} · {when(o.deadline)}
+                      → {o.consignee ?? "—"} · {when(o.deadline, lang)}
                     </span>
-                    {o.shortText && <span className="mt-0.5 block text-xs font-semibold text-dock-red">Short: {o.shortText}</span>}
+                    {o.shortText && <span className="mt-0.5 block text-xs font-semibold text-dock-red">{t("w.short", { text: o.shortText })}</span>}
                   </button>
                   {active && route && (
                     <div className="dock-console m-2 px-3 py-2 text-[12px]">
                       <p className="cond mb-1 flex items-center gap-1.5 text-[11px] text-white/50">
-                        <Route size={12} /> Pick route · ≈{route.metres} m · ends at EXP {dispatchLane}
-                        {order.picked.length > 0 && ` · ${order.picked.length}/${order.picks.length} picked`}
+                        <Route size={12} /> {t("w.route", { m: route.metres, lane: dispatchLane })}
+                        {order.picked.length > 0 && t("w.pickedOf", { a: order.picked.length, b: order.picks.length })}
                       </p>
                       <ol className="mono space-y-0.5">
                         {route.order.map((id, i) => {
@@ -303,18 +302,18 @@ export function WarehouseView({ snapshot, initialPick, initialMode = "customer" 
         <div className="dock-card flex overflow-hidden bg-white p-0.5">
           {MODES.map((m) => (
             <button
-              key={m.id}
+              key={m}
               onClick={() => {
-                setMode(m.id);
+                setMode(m);
                 choose(null);
               }}
-              className={`cond rounded-md px-3 py-1.5 text-xs transition-colors ${mode === m.id && !order ? "bg-dock-ink text-dock-yellow" : "text-dock-ink/60 hover:text-dock-ink"}`}
+              className={`cond rounded-md px-3 py-1.5 text-xs transition-colors ${mode === m && !order ? "bg-dock-ink text-dock-yellow" : "text-dock-ink/60 hover:text-dock-ink"}`}
             >
-              {m.label}
+              {t(`w.mode.${m}` as "w.mode.age")}
             </button>
           ))}
         </div>
-        <button onClick={() => scene.current?.resetView()} className="dock-card grid h-9 w-9 place-items-center bg-white" title="Reset view">
+        <button onClick={() => scene.current?.resetView()} className="dock-card grid h-9 w-9 place-items-center bg-white" title={t("w.resetView")} aria-label={t("w.resetView")}>
           <Crosshair size={16} />
         </button>
       </div>
@@ -324,8 +323,8 @@ export function WarehouseView({ snapshot, initialPick, initialMode = "customer" 
         <div className="flex flex-wrap gap-x-4 gap-y-1.5">
           {order ? (
             <>
-              <Swatch color={PICK} label={`To pick for Nº ${order.number}`} />
-              <Swatch color={GHOST} label="Everything else" />
+              <Swatch color={PICK} label={t("w.toPickFor", { n: order.number })} />
+              <Swatch color={GHOST} label={t("w.everythingElse")} />
             </>
           ) : mode === "customer" ? (
             clients
@@ -333,11 +332,11 @@ export function WarehouseView({ snapshot, initialPick, initialMode = "customer" 
               .filter(({ i }) => pallets.some((p) => items[p.item].client === i))
               .map(({ c, i }) => <Swatch key={c.code} color={clientColor(i)} label={c.name.replace(/,? S\.[AL]\.$/, "")} />)
           ) : mode === "age" ? (
-            AGE_BUCKETS.map((b) => <Swatch key={b.label} color={b.color} label={b.label} />)
+            AGE_BUCKETS.map((b, i) => <Swatch key={b.label} color={b.color} label={t(`w.age.${i + 1}` as "w.age.1")} />)
           ) : (
             <>
-              {EXPIRY_BUCKETS.map((b) => <Swatch key={b.label} color={b.color} label={b.label} />)}
-              <Swatch color={NO_EXPIRY} label="No expiry" />
+              {EXPIRY_BUCKETS.map((b, i) => <Swatch key={b.label} color={b.color} label={t(`w.exp.${i + 1}` as "w.exp.1")} />)}
+              <Swatch color={NO_EXPIRY} label={t("w.noExpiry")} />
             </>
           )}
         </div>
@@ -348,7 +347,7 @@ export function WarehouseView({ snapshot, initialPick, initialMode = "customer" 
         <section className="dock-card absolute bottom-20 right-5 w-[300px] overflow-hidden bg-white">
           <header className="flex items-center justify-between bg-dock-yellow px-4 py-2">
             <span className="cond text-2xl font-bold leading-none">{selected.loc}</span>
-            <button onClick={() => setSelectedId(null)} aria-label="Close">
+            <button onClick={() => setSelectedId(null)} aria-label={t("w.close")}>
               <X size={16} />
             </button>
           </header>
@@ -358,9 +357,9 @@ export function WarehouseView({ snapshot, initialPick, initialMode = "customer" 
               <>
                 {selected.pallet.code && (
                   <p className="flex items-center gap-2">
-                    <span className="cond text-[11px] text-dock-ink/50">Pallet ID</span>
+                    <span className="cond text-[11px] text-dock-ink/50">{t("w.palletId")}</span>
                     <span className="mono font-semibold">{selected.pallet.code}</span>
-                    {selected.pallet.contents.length > 1 && <span className="cond bg-dock-ink px-1.5 py-0.5 text-[10px] text-dock-yellow">MIXED</span>}
+                    {selected.pallet.contents.length > 1 && <span className="cond bg-dock-ink px-1.5 py-0.5 text-[10px] text-dock-yellow">{t("w.mixed")}</span>}
                   </p>
                 )}
                 {selected.pallet.contents.map((c, i) => (
@@ -370,37 +369,37 @@ export function WarehouseView({ snapshot, initialPick, initialMode = "customer" 
                       <span className="text-dock-ink/60"> · {items[c.item].description}</span>
                     </p>
                     <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-                      <dt className="cond text-dock-ink/50">Lot</dt>
+                      <dt className="cond text-dock-ink/50">{t("w.lot")}</dt>
                       <dd className="mono">
                         {c.lot ? (
-                          <Link href={`/office/trace?lot=${encodeURIComponent(c.lot)}`} className="underline" title="Trace this lot">
+                          <Link href={`/office/trace?lot=${encodeURIComponent(c.lot)}`} className="underline" title={t("w.traceLot")}>
                             {c.lot}
                           </Link>
                         ) : (
                           "—"
                         )}
                       </dd>
-                      <dt className="cond text-dock-ink/50">Quantity</dt>
+                      <dt className="cond text-dock-ink/50">{t("w.quantity")}</dt>
                       <dd className="mono">
-                        {c.units} {UNIT[items[c.item].unit]}
+                        {c.units} {t(`w.unit.${items[c.item].unit}` as "w.unit.BOX")}
                       </dd>
-                      <dt className="cond text-dock-ink/50">In storage</dt>
-                      <dd className="mono">{c.days} days</dd>
-                      <dt className="cond text-dock-ink/50">Expires</dt>
-                      <dd className={`mono ${c.expiresIn !== null && c.expiresIn < 30 ? "font-semibold text-dock-red" : ""}`}>{c.expiresIn === null ? "—" : `in ${c.expiresIn} days`}</dd>
+                      <dt className="cond text-dock-ink/50">{t("w.inStorage")}</dt>
+                      <dd className="mono">{t("w.days", { n: c.days })}</dd>
+                      <dt className="cond text-dock-ink/50">{t("w.expires")}</dt>
+                      <dd className={`mono ${c.expiresIn !== null && c.expiresIn < 30 ? "font-semibold text-dock-red" : ""}`}>{c.expiresIn === null ? "—" : t("w.expiresIn", { n: c.expiresIn })}</dd>
                     </dl>
                   </div>
                 ))}
-                {parseLocation(selected.loc)?.kind === "floor" && <p className="text-xs text-dock-ink/60">On the receiving floor, waiting for a rack slot.</p>}
+                {parseLocation(selected.loc)?.kind === "floor" && <p className="text-xs text-dock-ink/60">{t("w.onFloor")}</p>}
                 {selected.reserved && (
                   <button onClick={() => choose(selected.reserved)} className="cond w-full bg-dock-ink px-3 py-1.5 text-left text-xs text-dock-yellow">
-                    Reserved for outbound Nº {selected.reserved.number} → {selected.reserved.consignee}
+                    {t("w.reserved", { n: selected.reserved.number, to: selected.reserved.consignee ?? "—" })}
                   </button>
                 )}
               </>
             ) : (
               <p className="text-xs text-dock-ink/70">
-                Picked for outbound <span className="mono font-semibold">Nº {selected.order.number}</span> → {selected.order.consignee}. Truck due {when(selected.order.deadline)}.
+                {t("w.pickedFor", { n: selected.order.number, to: selected.order.consignee ?? "—", when: when(selected.order.deadline, lang) })}
               </p>
             )}
           </div>
@@ -411,7 +410,7 @@ export function WarehouseView({ snapshot, initialPick, initialMode = "customer" 
       {hover && hovered && (
         <div className="pointer-events-none absolute z-10 bg-dock-ink px-2 py-1 text-xs text-white" style={{ left: hover.x + 14, top: hover.y + 14 }}>
           <span className="mono font-semibold text-dock-yellow">{hovered.loc}</span>{" "}
-          {hovered.kind === "stock" ? `${hovered.item.sku} · ${hovered.client.name}` : `Nº ${hovered.order.number} · ready to ship`}
+          {hovered.kind === "stock" ? `${hovered.item.sku} · ${hovered.client.name}` : t("w.readyToShip", { n: hovered.order.number })}
         </div>
       )}
     </div>

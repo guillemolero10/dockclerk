@@ -84,6 +84,7 @@ export class WarehouseScene {
   constructor(
     private container: HTMLElement,
     private layout: Layout,
+    private words: { dock: string; aisle: string; clear: string } = { dock: "DOCK", aisle: "AISLE", clear: "clear" },
   ) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -464,7 +465,7 @@ export class WarehouseScene {
     this.sign("RECEIVING", zoneSignW, 0.75, middle("REC"), Math.min(5.6, ceiling), LANE_Z0 + 1.2, { bg: INK, fg: YELLOW });
     this.sign("DISPATCH", zoneSignW, 0.75, middle("EXP"), Math.min(5.6, ceiling), LANE_Z0 + 1.2, { bg: INK, fg: YELLOW });
     const doorH = Math.min(4.4, dims.height + 0.2);
-    for (const dk of this.layout.docks) this.sign(`DOCK ${dk.n}`, 2.9, 0.62, dk.x, doorH, DOCK_Z + 0.34, { bg: INK, fg: YELLOW, border: false });
+    for (const dk of this.layout.docks) this.sign(`${this.words.dock} ${dk.n}`, 2.9, 0.62, dk.x, doorH, DOCK_Z + 0.34, { bg: INK, fg: YELLOW, border: false });
 
     // Lane numbers painted on the floor at the head of each lane.
     for (const zone of ["REC", "EXP"] as const) {
@@ -473,7 +474,7 @@ export class WarehouseScene {
       }
     }
     // Aisle numbers at the mouth of each aisle.
-    this.layout.aisleXs.forEach((x, i) => this.floorText(`AISLE ${i + 1}`, 1.8, 0.42, x, 0.75));
+    this.layout.aisleXs.forEach((x, i) => this.floorText(`${this.words.aisle} ${i + 1}`, 1.8, 0.42, x, 0.75));
 
     this.addDimensions();
   }
@@ -516,7 +517,7 @@ export class WarehouseScene {
       t.position.set(corner.x, y, corner.z);
       this.scene.add(t);
     }
-    const tex = this.textTexture(`${metres(dims.height)} clear`, 5.2, 1.1, { bg: null, fg: INK });
+    const tex = this.textTexture(`${metres(dims.height)} ${this.words.clear}`, 5.2, 1.1, { bg: null, fg: INK });
     const label = new THREE.Sprite(this.track(new THREE.SpriteMaterial({ map: tex })));
     label.scale.set(5.2, 1.1, 1);
     label.position.set(corner.x - 2.9, dims.height / 2, corner.z);
