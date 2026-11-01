@@ -143,7 +143,7 @@ async function stepA() {
   // ---- 2b. PDA receive pallet by pallet ----
   await pda.goto(`${BASE}/operator/receive/${inbound.id}`, { waitUntil: "networkidle" });
   const truck = pda.getByRole("button", { name: /truck is at the dock/i });
-  if (await truck.count()) { await truck.click(); await pda.getByText("Delivery note").first().waitFor({ timeout: 30_000 }); }
+  if (await truck.count()) { await truck.click(); await pda.getByText("Scan the pallets").first().waitFor({ timeout: 30_000 }); await pda.getByText("Optional: photos").click(); }
   await pda.getByText(/Pallet by pallet/).first().waitFor({ timeout: 30_000 });
   await shot(pda, "receive-prefilled");
   const rb = flat(await body(pda));
@@ -243,6 +243,7 @@ async function stepA() {
       out(/MIXED/.test(tx) && /PELUCHE-30/.test(tx) && /PUZZLE-500/.test(tx), `3. put away shows the mixed pallet with both items: ${tx.match(/Pallet · from.{0,200}/)?.[0]}`);
     }
     const before = tx.match(/(\d+) pallets? waiting/)?.[1];
+    await pda.getByRole("button", { name: /do it by hand/i }).click(); // no reader in this run
     await pda.getByRole("button", { name: /^Pallet placed in/ }).click();
     await pda.waitForFunction((b) => (document.body.innerText.match(/(\d+) pallets? waiting/)?.[1] ?? "0") !== b || /Nothing waiting/.test(document.body.innerText), before, { timeout: 40_000 }).catch(() => undefined);
     await pda.waitForTimeout(500);

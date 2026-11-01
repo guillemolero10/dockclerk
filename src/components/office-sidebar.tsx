@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { logout } from "@/app/actions";
 import { useT } from "@/lib/i18n/client";
 import { LangSwitch } from "@/lib/i18n/lang-switch";
-import { BellRing, Boxes, Building2, FlaskConical, Inbox, Receipt, LayoutDashboard, LogOut, MonitorCog, Route, Truck } from "lucide-react";
+import { BellRing, Boxes, Building2, FlaskConical, Inbox, Receipt, LayoutDashboard, LogOut, MonitorCog, Route, Tag, Truck } from "lucide-react";
 
 const NAV = [
   { href: "/office", key: "of.nav.today", icon: LayoutDashboard, exact: true },
@@ -17,6 +17,7 @@ const NAV = [
   { href: "/office/trace", key: "of.nav.trace", icon: Route },
   { href: "/office/clients", key: "of.nav.clients", icon: Building2 },
   { href: "/office/billing", key: "of.nav.billing", icon: Receipt },
+  { href: "/labels", key: "of.nav.labels", icon: Tag },
 ] as const;
 
 export function OfficeSidebar({ userName, inboxCount, alertCount }: { userName: string; inboxCount: number; alertCount: number }) {

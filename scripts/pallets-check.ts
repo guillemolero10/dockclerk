@@ -12,6 +12,8 @@ import { tEn } from "../src/lib/i18n/en";
 // The app passes its own translator; here, the English one.
 const cleanDrafts = (raw: unknown) => cleanDraftsT(raw, tEn);
 const parseCode = (raw: string) => parseCodeT(raw, tEn);
+import { code128Modules } from "../src/lib/barcode";
+import { parseSlotScan, sameCode } from "../src/lib/pallets/scan";
 import { planRestore, type LaneRow } from "../src/lib/warehouse/restore";
 import { allocatePicks, describeShortage, type OpenOrder, type PickableStock, type PickPlan } from "../src/lib/warehouse/picking";
 
@@ -384,6 +386,22 @@ const PICK_CASES: Case[] = [
   } },
 ];
 CASES.push(...BREAKDOWN_CASES, ...PICK_CASES);
+const SCAN_CASES: Case[] = [
+  { name: "S1 etiqueta de hueco con y sin nave: A-07-3 y N1-A-07-3 son el mismo hueco; otra nave se distingue", check: () => same(
+    [parseSlotScan("a-07-3", "N1"), parseSlotScan(" N1-A-07-3 ", "N1"), parseSlotScan("N2-A-07-3", "N1"), parseSlotScan("REC-2", "N1"), parseSlotScan("N1-EXP-1", "N1"), parseSlotScan("OBR-JIJ-0042", "N1"), parseSlotScan("", "N1")],
+    [{ slot: "A-07-3", warehouse: null }, { slot: "A-07-3", warehouse: "N1" }, { slot: "A-07-3", warehouse: "N2" }, { slot: "REC-2", warehouse: null }, { slot: "EXP-1", warehouse: "N1" }, null, null],
+  ) },
+  { name: "S2 matrícula escaneada: mayúsculas, espacios y (00) delante no cambian el palé; otra matrícula o vacío no coinciden", check: () => same(
+    [sameCode("n1-000123", "N1-000123"), sameCode("(00) N1-000123", "N1-000123"), sameCode("N1-000124", "N1-000123"), sameCode("", ""), sameCode(null, "N1-000123"), sameCode("??", "??")],
+    [true, true, false, false, false, false],
+  ) },
+  { name: "S3 Code 128: empieza con Start B, termina con Stop y mide 11 módulos por carácter + 13 (N1-A-07-3 = 9 caracteres)", check: () => {
+    const m = code128Modules("N1-A-07-3");
+    return same({ len: m.length, start: m.slice(0, 11), stop: m.slice(-13), none: code128Modules("ñ") }, { len: 11 * (1 + 9 + 1) + 13, start: "11010010000", stop: "1100011101011", none: "" });
+  } },
+];
+CASES.push(...SCAN_CASES);
+
 
 let failed = 0;
 for (const c of CASES) {

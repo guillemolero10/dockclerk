@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function PutAwayPage({ searchParams }: PageProps<"/operator/putaway">) {
   await requireRole("operator");
   const { t } = await getT();
-  const { w } = await searchParams;
+  const { w, code } = await searchParams;
   const warehouse = await db.warehouse.findFirst({ where: typeof w === "string" ? { code: w } : {}, orderBy: { code: "asc" } });
   if (!warehouse) return <p className="p-6">{t("op.noWarehouseShort")}</p>;
   const waiting = await db.stock.findMany({
@@ -26,7 +26,9 @@ export default async function PutAwayPage({ searchParams }: PageProps<"/operator
     groups.set(key, [...(groups.get(key) ?? []), row]);
   }
   const palletsWaiting = [...groups.values()];
-  const rows = palletsWaiting[0] ?? [];
+  // A pallet whose ID was scanned comes first (the reader may pick any of the waiting ones).
+  const wanted = typeof code === "string" ? palletsWaiting.find((g) => g[0].palletCode === code) : undefined;
+  const rows = wanted ?? palletsWaiting[0] ?? [];
   const next = rows[0];
   const plan = next ? await planPutAway(next.id) : null;
 
@@ -50,6 +52,7 @@ export default async function PutAwayPage({ searchParams }: PageProps<"/operator
           }}
           suggestion={plan?.slot ?? null}
           why={plan?.why ?? ""}
+          waitingCodes={palletsWaiting.map((g) => g[0].palletCode).filter((c): c is string => !!c)}
         />
       ) : (
         <p className="dock-card bg-white p-5 text-sm text-dock-ink/60">{t("pa.nothing")}</p>

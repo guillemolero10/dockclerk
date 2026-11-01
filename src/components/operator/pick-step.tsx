@@ -4,6 +4,8 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Check, Printer, Route } from "lucide-react";
 import { pick } from "@/app/operator/actions";
+import { ScanField, type ScanResult } from "@/components/operator/scan-field";
+import { parseSlotScan, sameCode } from "@/lib/pallets/scan";
 import { useT } from "@/lib/i18n/client";
 
 type Content = { sku: string; lot: string | null; units: number; word: string };
@@ -24,7 +26,7 @@ type Step = {
 };
 
 /** Walk the route: one big location at a time, the same order the office sees lit up in 3D. A step is one physical pallet. */
-export function PickStep({ outboundId, lane, done, total, shortText, metres, steps }: { outboundId: string; lane: number; done: number; total: number; shortText: string | null; metres: number; steps: Step[] }) {
+export function PickStep({ outboundId, warehouse, lane, done, total, shortText, metres, steps }: { outboundId: string; warehouse: string; lane: number; done: number; total: number; shortText: string | null; metres: number; steps: Step[] }) {
   const { t } = useT();
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -105,13 +107,17 @@ export function PickStep({ outboundId, lane, done, total, shortText, metres, ste
               )}
               <p className="mono px-4 py-2 text-center text-xs text-dock-ink/55">{t("pk.thenExp", { n: lane })}</p>
             </div>
-            <button
-              disabled={pending}
-              onClick={() =>
+            <ScanPick
+              key={current.key}
+              step={current}
+              warehouse={warehouse}
+              pending={pending}
+              what={what}
+              onConfirm={(scanned) =>
                 start(async () => {
                   setError(null);
                   try {
-                    const result = await pick(outboundId, current.stockId, current.take ?? undefined);
+                    const result = await pick(outboundId, current.stockId, current.take ?? undefined, scanned);
                     if (result.error) return setError(result.error);
                     if (result.newCode) setLabel({ code: result.newCode, finished: !!result.done, base: done });
                     else router.refresh();
@@ -120,10 +126,7 @@ export function PickStep({ outboundId, lane, done, total, shortText, metres, ste
                   }
                 })
               }
-              className="cond flex min-h-16 w-full items-center justify-center gap-3 bg-dock-yellow px-4 py-4 text-xl font-bold ring-[1.5px] ring-dock-ink active:brightness-90 disabled:opacity-60"
-            >
-              <Check size={24} aria-hidden /> {pending ? "…" : current.kind === "boxes" ? t("pk.pickedBoxes", { n: current.take ?? 0, word: what?.word ?? "" }) : current.code ? t("pk.pickedCode", { code: current.code }) : t("pk.pickedPallet")}
-            </button>
+            />
             {error && <p role="alert" className="text-sm text-dock-red">{error}</p>}
           </>
         )
@@ -145,6 +148,64 @@ export function PickStep({ outboundId, lane, done, total, shortText, metres, ste
             ))}
           </ol>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** Slot first, then the pallet (boxes steps then confirm the number). A label that will not scan: "confirm by hand". */
+function ScanPick({ step, warehouse, pending, what, onConfirm }: { step: Step; warehouse: string; pending: boolean; what: Content | undefined; onConfirm: (scanned: string | null) => void }) {
+  const { t } = useT();
+  const [slotOk, setSlotOk] = useState(false);
+  const [scanned, setScanned] = useState<string | null>(null);
+  const [manual, setManual] = useState(false);
+  const needsPallet = !!step.code;
+  const atConfirm = slotOk && (!needsPallet || scanned !== null);
+
+  const onScan = (code: string): ScanResult => {
+    const asSlot = parseSlotScan(code, warehouse);
+    if (asSlot) {
+      if (asSlot.warehouse && asSlot.warehouse !== warehouse) return { ok: false, message: t("pk.slotOther", { other: asSlot.warehouse, mine: warehouse }) };
+      if (asSlot.slot !== step.location) return { ok: false, message: t("pk.slotWrong", { got: asSlot.slot, slot: step.location }) };
+      setSlotOk(true);
+      return { ok: true, message: needsPallet ? t("pk.slotOk", { slot: step.location }) : t("pk.noIdScan") };
+    }
+    if (!slotOk) return { ok: false, message: t("pk.scanFirstSlot") };
+    if (!needsPallet) return { ok: false, message: t("pk.noIdScan") };
+    if (!sameCode(code, step.code)) return { ok: false, message: t("pk.palletWrong", { got: code.slice(0, 30), code: step.code ?? "" }) };
+    setScanned(code);
+    // a whole pallet: scanning it is the confirmation; boxes: the person confirms the number next
+    if (step.kind === "pallet") onConfirm(code);
+    return { ok: true, message: t("pk.palletOk", { code }) };
+  };
+
+  const label = !slotOk ? t("pk.scanSlot") : needsPallet && scanned === null ? t("pk.scanPalletCode", { code: step.code ?? "" }) : t("pk.palletOk", { code: step.code ?? "" });
+  const confirmLabel = pending
+    ? "…"
+    : step.kind === "boxes"
+      ? t("pk.pickedBoxes", { n: step.take ?? 0, word: what?.word ?? "" })
+      : step.code
+        ? t("pk.pickedCode", { code: step.code })
+        : t("pk.pickedPallet");
+
+  return (
+    <div className="space-y-3">
+      {!manual && <ScanField label={label} onScan={onScan} disabled={pending} />}
+      {!manual && !slotOk && <p className="cond text-center text-sm font-semibold">{t("pk.scanSlot")}: {step.location}</p>}
+      {!manual && slotOk && needsPallet && scanned === null && <p className="cond text-center text-sm font-semibold">{t("pk.scanPalletCode", { code: step.code ?? "" })}</p>}
+      {(manual || (atConfirm && (step.kind === "boxes" || !needsPallet)) || (slotOk && !needsPallet)) && (
+        <button
+          disabled={pending}
+          onClick={() => onConfirm(manual ? null : scanned)}
+          className="cond flex min-h-16 w-full items-center justify-center gap-3 bg-dock-yellow px-4 py-4 text-xl font-bold ring-[1.5px] ring-dock-ink active:brightness-90 disabled:opacity-60"
+        >
+          <Check size={24} aria-hidden /> {confirmLabel}
+        </button>
+      )}
+      {!manual && (
+        <button type="button" onClick={() => setManual(true)} className="w-full text-center text-xs text-dock-ink/50 underline">
+          {t("pk.manual")}
+        </button>
       )}
     </div>
   );

@@ -6,6 +6,9 @@ import { ChevronDown, ChevronUp, Minus, Plus, Trash2, Truck, X } from "lucide-re
 import { loadPhoto, notePallets, notePhoto, receive, truckHere } from "@/app/operator/actions";
 import { checkBreakdown, expandPallets, MAX_LINES, MAX_PALLETS, type PalletDraft } from "@/lib/pallets/breakdown";
 import { PhotoButton } from "@/components/media/photo-button";
+import { ScanField, type ScanResult } from "@/components/operator/scan-field";
+import { parseCode } from "@/lib/pallets/codes";
+import { sameCode } from "@/lib/pallets/scan";
 import { LOCALE } from "@/lib/i18n/core";
 import { useT } from "@/lib/i18n/client";
 
@@ -130,6 +133,7 @@ export function ReceiveForm({
   expected,
   damagedFound,
   warehouse,
+  liveCodes,
 }: {
   inboundId: string;
   items: ItemInfo[];
@@ -137,6 +141,8 @@ export function ReceiveForm({
   expected: number | null;
   damagedFound: number;
   warehouse: string;
+  /** IDs of the pallets already inside the warehouse (a scan of one of them is red at once). */
+  liveCodes: string[];
 }) {
   const { t, lang } = useT();
   const router = useRouter();
@@ -147,6 +153,14 @@ export function ReceiveForm({
   const [incident, setIncident] = useState("");
   const [pending, begin] = useTransition();
   const [errors, setErrors] = useState<string[]>([]);
+  const [scanned, setScanned] = useState<string[]>([]);
+  // The reader can send two codes before React draws again: the scan logic works on these, and the state follows.
+  const palletsRef = useRef(pallets);
+  const scannedRef = useRef(scanned);
+  useEffect(() => {
+    palletsRef.current = pallets;
+    scannedRef.current = scanned;
+  }, [pallets, scanned]);
 
   // quick add: "38 pallets of AGUA-15"
   const [qItem, setQItem] = useState(items[0]?.id ?? "");
@@ -182,9 +196,54 @@ export function ReceiveForm({
     setErrors([]);
   };
 
+  /** One scan = one pallet. Its ID goes on the pallet the note announced (same ID, or the next without one) or on a new pallet like the last one. */
+  const onScan = (raw: string): ScanResult => {
+    const parsed = parseCode(raw, t);
+    if (!parsed.ok) return { ok: false, message: parsed.error };
+    const code = parsed.code;
+    if (!code) return;
+    if (scannedRef.current.includes(code)) return { ok: false, message: t("rcs.scanDup", { code }) };
+    if (liveCodes.includes(code)) return { ok: false, message: t("rcs.scanInside", { code }) };
+    const list = palletsRef.current;
+    const mark = () => {
+      scannedRef.current = [...scannedRef.current, code];
+      setScanned(scannedRef.current);
+    };
+    const save = (next: PalletState[]) => {
+      palletsRef.current = next;
+      setPallets(next);
+      setErrors([]);
+    };
+    const matched = list.findIndex((p) => sameCode(p.code, code));
+    if (matched >= 0) {
+      mark();
+      return { ok: true, message: t("rcs.scanMatched", { code, n: matched + 1 }) };
+    }
+    const blank = list.findIndex((p) => !p.code.trim());
+    if (blank >= 0) {
+      mark();
+      save(list.map((p, i) => (i === blank ? { ...p, code } : p)));
+      return { ok: true, message: t("rcs.scanFilled", { code, n: blank + 1 }) };
+    }
+    if (list.length >= MAX_PALLETS) return { ok: false, message: t("rcs.scanFull", { max: MAX_PALLETS }) };
+    const last = list[list.length - 1]?.lines[0];
+    const first = start[0]?.lines[0];
+    const line: LineState = last
+      ? { itemId: last.itemId, lot: last.lot, expiresAt: last.expiresAt, units: last.units }
+      : first
+        ? { itemId: first.itemId, lot: first.lot ?? "", expiresAt: first.expiresAt ?? "", units: String(first.units) }
+        : { itemId: items[0]?.id ?? "", lot: "", expiresAt: "", units: String(items[0]?.unitsPerPallet ?? "") };
+    if (!line.itemId) return { ok: false, message: t("rcs.scanNoItems") };
+    const key = list.reduce((m, p) => Math.max(m, p.key), -1) + 1;
+    mark();
+    save([...list, { key, code, lines: [line] }]);
+    const sku = items.find((i) => i.id === line.itemId)?.sku ?? "?";
+    return { ok: true, message: t("rcs.scanAdded", { code, n: list.length + 1, sku }) };
+  };
+
   const confirm = () => {
     const drafts = pallets.map(toDraft);
-    const { errors: found } = checkBreakdown(drafts, items, new Map(), t);
+    const { errors: found } = checkBreakdown(drafts, items, new Map(liveCodes.map((c) => [c, ""])), t);
     if (found.length) return setErrors(found.slice(0, 3));
     setErrors([]);
     begin(async () => {
@@ -201,39 +260,12 @@ export function ReceiveForm({
   return (
     <div className="space-y-3">
       <p className="text-xs text-dock-ink/60">{t("rcs.intro")}</p>
-
-      <fieldset className="space-y-2 border-[1.5px] border-dock-ink bg-dock-concrete-2 p-2.5">
-        <legend className="cond px-1 text-[11px] text-dock-ink/60">{t("rcs.addInOne")}</legend>
-        <div className="grid grid-cols-[72px_1fr] gap-2">
-          <input inputMode="numeric" value={qCount} onChange={(e) => setQCount(e.target.value.replace(/\D/g, "").slice(0, 2))} aria-label={t("rcs.howMany")} className="dock-input mono text-center text-lg" />
-          <select value={qItem} onChange={(e) => { setQItem(e.target.value); setQUnits(""); }} aria-label={t("rcs.item")} className="dock-input min-w-0 text-sm">
-            {items.map((x) => (
-              <option key={x.id} value={x.id}>{x.sku} · {x.description}</option>
-            ))}
-          </select>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <label className="text-[11px] text-dock-ink/55">
-            {t("rcs.boxesEach")}
-            <input inputMode="numeric" value={qUnits} onChange={(e) => setQUnits(e.target.value.replace(/\D/g, ""))} placeholder={String(qInfo?.unitsPerPallet ?? "")} className="dock-input mono mt-0.5 text-sm" />
-          </label>
-          {qInfo?.tracksLot && (
-            <label className="text-[11px] text-dock-ink/55">
-              {t("rcs.lot")}
-              <input value={qLot} onChange={(e) => setQLot(e.target.value)} className="dock-input mono mt-0.5 text-sm" />
-            </label>
-          )}
-          {qInfo?.tracksLot && (
-            <label className="col-span-2 text-[11px] text-dock-ink/55">
-              {t("rcs.bestBefore")}
-              <input type="date" value={qDate} onChange={(e) => setQDate(e.target.value)} className="dock-input mono mt-0.5 text-sm" />
-            </label>
-          )}
-        </div>
-        <button type="button" onClick={add} className="cond min-h-12 w-full bg-dock-yellow px-4 text-base font-semibold ring-[1.5px] ring-dock-ink active:brightness-90">
-          {t("rcs.add_p", { n: Math.max(1, Number(qCount) || 1) })}
-        </button>
-      </fieldset>
+      <section aria-label={t("rcs.scanLabel")} className="space-y-1">
+        <ScanField label={t("rcs.scanLabel")} onScan={onScan} disabled={pending} />
+        <p className="mono text-sm font-semibold" aria-live="polite">
+          {expected !== null ? t("rcs.scanCount", { a: scanned.length, b: expected }) : t("rcs.scanCountOnly", { a: scanned.length })}
+        </p>
+      </section>
 
       {pallets.length === 0 ? (
         <p className="border-[1.5px] border-dashed border-dock-line px-3 py-6 text-center text-sm text-dock-ink/55">{t("rcs.empty")}</p>
@@ -336,6 +368,40 @@ export function ReceiveForm({
           })}
         </ol>
       )}
+
+      <p className="cond text-[11px] text-dock-ink/60">{t("rcs.typeInstead")}</p>
+      <fieldset className="space-y-2 border-[1.5px] border-dock-ink bg-dock-concrete-2 p-2.5">
+        <legend className="cond px-1 text-[11px] text-dock-ink/60">{t("rcs.addInOne")}</legend>
+        <div className="grid grid-cols-[72px_1fr] gap-2">
+          <input inputMode="numeric" value={qCount} onChange={(e) => setQCount(e.target.value.replace(/\D/g, "").slice(0, 2))} aria-label={t("rcs.howMany")} className="dock-input mono text-center text-lg" />
+          <select value={qItem} onChange={(e) => { setQItem(e.target.value); setQUnits(""); }} aria-label={t("rcs.item")} className="dock-input min-w-0 text-sm">
+            {items.map((x) => (
+              <option key={x.id} value={x.id}>{x.sku} · {x.description}</option>
+            ))}
+          </select>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="text-[11px] text-dock-ink/55">
+            {t("rcs.boxesEach")}
+            <input inputMode="numeric" value={qUnits} onChange={(e) => setQUnits(e.target.value.replace(/\D/g, ""))} placeholder={String(qInfo?.unitsPerPallet ?? "")} className="dock-input mono mt-0.5 text-sm" />
+          </label>
+          {qInfo?.tracksLot && (
+            <label className="text-[11px] text-dock-ink/55">
+              {t("rcs.lot")}
+              <input value={qLot} onChange={(e) => setQLot(e.target.value)} className="dock-input mono mt-0.5 text-sm" />
+            </label>
+          )}
+          {qInfo?.tracksLot && (
+            <label className="col-span-2 text-[11px] text-dock-ink/55">
+              {t("rcs.bestBefore")}
+              <input type="date" value={qDate} onChange={(e) => setQDate(e.target.value)} className="dock-input mono mt-0.5 text-sm" />
+            </label>
+          )}
+        </div>
+        <button type="button" onClick={add} className="cond min-h-12 w-full bg-dock-yellow px-4 text-base font-semibold ring-[1.5px] ring-dock-ink active:brightness-90">
+          {t("rcs.add_p", { n: Math.max(1, Number(qCount) || 1) })}
+        </button>
+      </fieldset>
 
       <div className="flex items-center justify-between border-t border-dock-line pt-3 text-sm">
         <span>{t("rcs.damagedBoxes")}</span>

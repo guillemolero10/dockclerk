@@ -59,7 +59,7 @@ const secs = (t: number) => ((Date.now() - t) / 1000).toFixed(1) + " s";
     await Promise.all([p.waitForURL((u) => u.pathname !== "/", { timeout: 30_000 }), p.getByRole("button", { name: /^Sign in/ }).click()]);
     await p.goto(`${BASE}/operator/receive/${inbound.id}`, { waitUntil: "networkidle" });
     const truck = p.getByRole("button", { name: /truck is at the dock/i });
-    if (await truck.count()) { await truck.click(); await p.getByText("Delivery note").first().waitFor({ timeout: 30_000 }); }
+    if (await truck.count()) { await truck.click(); await p.getByText("Scan the pallets").first().waitFor({ timeout: 30_000 }); await p.getByText("Optional: photos").click(); }
     await shot(p, "start");
     // (b) note photo
     let t = Date.now();

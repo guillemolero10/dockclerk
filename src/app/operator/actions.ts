@@ -6,7 +6,7 @@ import { transcribe } from "@/lib/ai/voice";
 import { db } from "@/lib/db";
 import { Fixable, orFixable } from "@/lib/fixable";
 import { getT } from "@/lib/i18n/server";
-import { checkIn, confirmReceipt, pickPallet, putAway, recordLoad, recordNote, suggestPutAway, typeNote } from "@/lib/ops/floor";
+import { checkIn, checkSlot, confirmReceipt, pickPallet, putAway, recordLoad, recordNote, suggestPutAway, typeNote } from "@/lib/ops/floor";
 import { checkBreakdown, cleanDrafts, type PalletDraft } from "@/lib/pallets/breakdown";
 import { consume } from "@/lib/rate-limit";
 import { assertRole } from "@/lib/session";
@@ -108,7 +108,9 @@ export async function putAwayPallet(stockId: string, location: string): Promise<
   try {
     await putAway(stockId, location.trim().toUpperCase());
   } catch (err) {
-    return { error: err instanceof Error ? err.message : (await getT()).t("opa.couldNot") };
+    if (err instanceof Fixable) return { error: err.message };
+    console.error("putAway failed", err);
+    return { error: (await getT()).t("opa.couldNot") };
   }
   refresh();
   return {};
@@ -136,15 +138,33 @@ export async function putAwayAll(warehouseCode: string) {
   return pallets;
 }
 
-/** `{ done, lane, newCode }` (newCode = the ID of the new pallet to label, when boxes were taken) or `{ error }` for what the person can fix. */
-export async function pick(outboundId: string, stockId: string, units?: number): Promise<{ error?: string; done?: boolean; lane?: number; newCode?: string | null }> {
+/**
+ * `{ done, lane, newCode }` (newCode = the ID of the new pallet to label, when boxes were taken) or `{ error }` for what the person can fix.
+ * `scanned`: the pallet ID the reader gave; it must be the one of this step. Without it (a label that will not scan) the step is confirmed by hand.
+ */
+export async function pick(outboundId: string, stockId: string, units?: number, scanned?: string | null): Promise<{ error?: string; done?: boolean; lane?: number; newCode?: string | null }> {
   await requireFloor();
   try {
-    const result = await pickPallet(outboundId, stockId, units);
+    const result = await pickPallet(outboundId, stockId, units, scanned);
     refresh();
     return result;
   } catch (err) {
-    return { error: err instanceof Error ? err.message : (await getT()).t("opa.couldNot") };
+    if (err instanceof Fixable) return { error: err.message };
+    console.error("pick failed", err);
+    return { error: (await getT()).t("opa.couldNot") };
+  }
+}
+
+/** Is this slot free in the pallet's building? `{ ok: true }` or `{ error }` with the reason. Writes nothing. */
+export async function checkSlotFor(stockId: string, location: string): Promise<{ ok?: true; error?: string }> {
+  await requireFloor();
+  try {
+    await checkSlot(stockId, location.trim().toUpperCase());
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof Fixable) return { error: err.message };
+    console.error("checkSlot failed", err);
+    return { error: (await getT()).t("opa.couldNot") };
   }
 }
 

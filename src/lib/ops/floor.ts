@@ -13,6 +13,7 @@ import { Fixable } from "@/lib/fixable";
 import { getT } from "@/lib/i18n/server";
 import { checkBreakdown, leadIndex, sharesOf, summarize, type PalletDraft } from "@/lib/pallets/breakdown";
 import { freshCodes } from "@/lib/pallets/codes";
+import { sameCode } from "@/lib/pallets/scan";
 
 const json = (value: unknown) => value as Prisma.InputJsonValue;
 const layoutOf = (w: { length: number; width: number; height: number; aisleWidth: number; docks: number }) => makeLayout(w);
@@ -258,19 +259,28 @@ export async function planPutAway(stockId: string, taken: string[] = []) {
   return { slot: suggestSlot(layout, occupied, here.filter((s) => s.clientId === pallet.clientId).map((s) => s.location)), why: t("pa.why.near") };
 }
 
+/** Is `location` a rack slot of this pallet's building that is free (or already holds this very pallet)? Writes nothing. Throws the reason otherwise. */
+export async function checkSlot(stockId: string, location: string) {
+  const { t } = await getT();
+  const pallet = await db.stock.findUniqueOrThrow({ where: { id: stockId }, include: { warehouse: true } });
+  if (!layoutOf(pallet.warehouse).contains(location) || location.startsWith("REC-") || location.startsWith("EXP-")) throw new Fixable(t("pa.notRack", { loc: location }));
+  const busy = await db.stock.findFirst({ where: { warehouseId: pallet.warehouseId, location, NOT: pallet.palletCode ? { palletCode: pallet.palletCode } : { id: stockId } } });
+  if (busy) throw new Fixable(t("pa.taken", { loc: location }));
+}
+
 /** Puts a pallet in a rack slot. Every row of the same pallet ID that waits in the same place goes with it (a mixed pallet moves as one). */
 export async function putAway(stockId: string, location: string) {
   const { t } = await getT();
   const pallet = await db.stock.findUniqueOrThrow({ where: { id: stockId }, include: { warehouse: true } });
-  if (!layoutOf(pallet.warehouse).contains(location) || location.startsWith("REC-") || location.startsWith("EXP-")) throw new Error(t("pa.notRack", { loc: location }));
+  if (!layoutOf(pallet.warehouse).contains(location) || location.startsWith("REC-") || location.startsWith("EXP-")) throw new Fixable(t("pa.notRack", { loc: location }));
   const together = pallet.palletCode
     ? { warehouseId: pallet.warehouseId, palletCode: pallet.palletCode, location: pallet.location, outboundId: null }
     : { id: stockId };
   await db.$transaction(async (tx) => {
     const busy = await tx.stock.findFirst({ where: { warehouseId: pallet.warehouseId, location, NOT: pallet.palletCode ? { palletCode: pallet.palletCode } : { id: stockId } } });
-    if (busy) throw new Error(t("pa.taken", { loc: location }));
+    if (busy) throw new Fixable(t("pa.taken", { loc: location }));
     const moved = await tx.stock.updateMany({ where: together, data: { location } });
-    if (moved.count < 1) throw new Error(t("pa.notThere"));
+    if (moved.count < 1) throw new Fixable(t("pa.notThere"));
   }, longTransaction);
 }
 
@@ -297,28 +307,34 @@ export async function openPickPlans() {
  *   A mixed pallet that stays behind is re-shared (the head row may change).
  * Returns the new pallet's ID when boxes were taken, so the operator can label it.
  */
-export async function pickPallet(outboundId: string, stockId: string, units?: number) {
+export async function pickPallet(outboundId: string, stockId: string, units?: number, scannedCode?: string | null) {
   const { t } = await getT();
   const { plans, stock, open } = await openPickPlans();
   const plan = plans.get(outboundId);
   const order = open.find((o) => o.id === outboundId);
-  if (!plan || !order || !plan.warehouseId) throw new Error(t("pk.nothingToPick"));
-  if (!plan.stockIds.includes(stockId) || plan.picked.includes(stockId)) throw new Error(t("pk.notOnList"));
+  if (!plan || !order || !plan.warehouseId) throw new Fixable(t("pk.nothingToPick"));
+  if (!plan.stockIds.includes(stockId) || plan.picked.includes(stockId)) throw new Fixable(t("pk.notOnList"));
   const step = plan.steps.find((p) => (p.kind === "pallet" ? p.stockIds.includes(stockId) : p.stockId === stockId));
-  if (!step) throw new Error(t("pk.notOnList"));
+  if (!step) throw new Fixable(t("pk.notOnList"));
+
+  // The reader on the PDA: the pallet scanned must be the one of this step (checked here too, whatever the screen did).
+  if (scannedCode !== undefined && scannedCode !== null) {
+    if (!step.palletCode) throw new Fixable(t("pk.noIdScan"));
+    if (!sameCode(scannedCode, step.palletCode)) throw new Fixable(t("pk.wrongServer", { got: scannedCode.toUpperCase().replace(/\s+/g, "").slice(0, 30), code: step.palletCode }));
+  }
 
   const row = stock.find((s) => s.id === stockId)!;
   const rowsOf = step.kind === "pallet" ? step.stockIds.map((id) => stock.find((s) => s.id === id)!) : [row];
   const expected = step.kind === "boxes" ? step.units : rowsOf.reduce((sum, r) => sum + r.units, 0);
   const partial = step.kind === "boxes" && step.units < row.units;
-  if (units !== undefined && (!Number.isInteger(units) || units !== expected) && (partial || rowsOf.length === 1)) throw new Error(t("pk.takeBoxes", { n: expected, loc: row.location }));
-  if (partial && units === undefined) throw new Error(t("pk.takeBoxes", { n: expected, loc: row.location }));
+  if (units !== undefined && (!Number.isInteger(units) || units !== expected) && (partial || rowsOf.length === 1)) throw new Fixable(t("pk.takeBoxes", { n: expected, loc: row.location }));
+  if (partial && units === undefined) throw new Fixable(t("pk.takeBoxes", { n: expected, loc: row.location }));
 
   const warehouse = await db.warehouse.findUniqueOrThrow({ where: { id: plan.warehouseId } });
   const lane = dispatchLane(layoutOf(warehouse), stock.filter((s) => s.warehouseId === warehouse.id), outboundId);
   // The plan was made before this transaction: check again, inside it, that the rows are still as the plan saw them.
   // If another operator took them in between, nothing is written and the person reloads the list.
-  const stale = new Error(t("pk.stale"));
+  const stale = new Fixable(t("pk.stale"));
   let newCode: string | null = null;
   await db.$transaction(async (tx) => {
     if (step.kind === "pallet") {

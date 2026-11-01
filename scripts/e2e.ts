@@ -247,6 +247,7 @@ async function main() {
         assert(/new pallet/i.test(t), "the split step does not say the boxes go onto a new pallet");
         sawSplit = true;
         await shot(pda, "pda-take-only-50");
+        await pda.getByRole("button", { name: /confirm by hand/i }).click(); // this run has no reader: the fallback link
         await pda.getByRole("button", { name: /^Picked 50 boxes/ }).click();
         await pda.getByText(/Label the new pallet/i).first().waitFor({ timeout: 40_000 });
         const lt = await text(pda);
@@ -254,6 +255,7 @@ async function main() {
         await shot(pda, "pda-label-new-pallet");
         await pda.getByRole("button", { name: /^(Labelled, next step|Finish)$/ }).click();
       } else {
+        await pda.getByRole("button", { name: /confirm by hand/i }).click();
         await pda.getByRole("button", { name: /^Picked / }).click();
       }
       // The pick is a server action (a few seconds on mobile data): wait until the page has moved on (new progress, or "is prepared"),

@@ -88,6 +88,7 @@ export default async function PickPage({ params }: PageProps<"/operator/pick/[id
       </header>
       <PickStep
         outboundId={id}
+        warehouse={warehouse.code}
         lane={lane}
         done={doneSteps}
         total={doneSteps + plan.steps.length}

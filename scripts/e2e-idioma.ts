@@ -221,6 +221,7 @@ async function main() {
     });
     await step("PDA put away", async () => {
       await visit(pda, "pda", "/operator/putaway");
+      await pda.getByRole("button", { name: /(do it by hand|hacerlo a mano)/i }).click().catch(() => undefined);
       const btn = pda.getByRole("button", { name: /^(Pallet placed in|Palé colocado en|Palé ubicado en)/ });
       if (await btn.count()) { await btn.first().click(); await pda.waitForTimeout(2500); await look(pda, "pda", "putaway after one"); }
     });

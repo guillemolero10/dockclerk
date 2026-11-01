@@ -1,9 +1,11 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { ArrowDown, Bot } from "lucide-react";
-import { putAwayAll, putAwayPallet } from "@/app/operator/actions";
+import { checkSlotFor, putAwayAll, putAwayPallet } from "@/app/operator/actions";
+import { ScanField, type ScanHandle, type ScanResult } from "@/components/operator/scan-field";
+import { parseSlotScan, sameCode } from "@/lib/pallets/scan";
 import { useT } from "@/lib/i18n/client";
 
 /** One pallet at a time: from the receiving lane to the slot the clerk suggests (or another one). */
@@ -13,12 +15,15 @@ export function PutAwayStep({
   pallet,
   suggestion,
   why,
+  waitingCodes,
 }: {
   warehouse: string;
   left: number;
   pallet: { id: string; from: string; code: string | null; client: string; contents: { sku: string; lot: string | null; units: number }[] };
   suggestion: string | null;
   why: string;
+  /** IDs of every pallet waiting in the receiving lanes of this building (scanning another one switches to it). */
+  waitingCodes: string[];
 }) {
   const { t } = useT();
   const router = useRouter();
@@ -26,6 +31,11 @@ export function PutAwayStep({
   const [editing, setEditing] = useState(!suggestion);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // The reader: pallet first, then the slot label. A free slot that is not the suggested one asks "leave it here?".
+  const [stage, setStage] = useState<"pallet" | "slot">(pallet.code ? "pallet" : "slot");
+  const [leaveIn, setLeaveIn] = useState<string | null>(null);
+  const [manual, setManual] = useState(false);
+  const scanner = useRef<ScanHandle>(null);
 
   const run = (job: () => Promise<unknown>) =>
     start(async () => {
@@ -38,6 +48,36 @@ export function PutAwayStep({
         setError(err instanceof Error ? err.message : t("pa.couldNot"));
       }
     });
+
+  const onScan = async (code: string): Promise<ScanResult> => {
+    setLeaveIn(null);
+    setError(null);
+    const asSlot = parseSlotScan(code, warehouse);
+    if (!asSlot) {
+      // a pallet ID: this one, or another that is waiting (then we switch to it)
+      if (sameCode(code, pallet.code)) {
+        setStage("slot");
+        return { ok: true, message: suggestion ? t("pa.palletOk", { code, slot: suggestion }) : t("pa.palletOkNoSlot", { code }) };
+      }
+      if (waitingCodes.some((c) => sameCode(c, code))) {
+        router.replace(`/operator/putaway?w=${warehouse}&code=${encodeURIComponent(code)}`);
+        return { ok: true, message: code };
+      }
+      return { ok: false, message: t("pa.notWaiting", { code }) };
+    }
+    if (stage === "pallet") return { ok: false, message: t("pa.scanPalletFirst") };
+    if (asSlot.warehouse && asSlot.warehouse !== warehouse) return { ok: false, message: t("pa.slotOther", { other: asSlot.warehouse, mine: warehouse }) };
+    if (asSlot.slot === suggestion) {
+      const result = await putAwayPallet(pallet.id, asSlot.slot);
+      if (result.error) return { ok: false, message: result.error };
+      router.refresh();
+      return { ok: true, message: t("pa.placed", { slot: asSlot.slot }) };
+    }
+    const check = await checkSlotFor(pallet.id, asSlot.slot);
+    if (check.error) return { ok: false, message: check.error };
+    setLeaveIn(asSlot.slot);
+    return { ok: true, message: t("pa.leaveHere", { slot: asSlot.slot }) };
+  };
 
   return (
     <div className="space-y-4">
@@ -85,12 +125,42 @@ export function PutAwayStep({
         </div>
       </div>
 
-      <button disabled={pending || !slot} onClick={() => run(() => putAwayPallet(pallet.id, slot))} className="cond w-full bg-dock-yellow px-4 py-4 text-base font-semibold ring-[1.5px] ring-dock-ink disabled:opacity-50">
-        {pending ? "…" : t("pa.placed", { slot: slot || "…" })}
-      </button>
-      {!editing && (
-        <button onClick={() => setEditing(true)} className="w-full text-center text-xs text-dock-ink/50 underline">
-          {t("pa.elsewhere")}
+      <ScanField
+        handle={scanner}
+        label={stage === "pallet" ? t("pa.scanPallet") : t("pa.scanSlot")}
+        onScan={onScan}
+        disabled={pending}
+      />
+      {leaveIn && (
+        <div role="group" aria-label={t("pa.leaveHere", { slot: leaveIn })} className="space-y-2 border-[1.5px] border-dock-ink bg-white p-3">
+          <p className="font-semibold">{t("pa.leaveHere", { slot: leaveIn })}</p>
+          {suggestion && <p className="text-xs text-dock-ink/60">{t("pa.leaveHint", { sug: suggestion })}</p>}
+          <div className="grid grid-cols-2 gap-2">
+            <button disabled={pending} onClick={() => run(() => putAwayPallet(pallet.id, leaveIn))} className="cond min-h-14 bg-dock-yellow px-3 text-base font-semibold ring-[1.5px] ring-dock-ink disabled:opacity-50">
+              {t("pa.yesLeave")}
+            </button>
+            <button disabled={pending} onClick={() => setLeaveIn(null)} className="cond min-h-14 border-[1.5px] border-dock-ink bg-white px-3 text-base">
+              {t("pa.no")}
+            </button>
+          </div>
+        </div>
+      )}
+      {!pallet.code && <p className="text-xs text-dock-ink/60">{t("pa.noIdPallet")}</p>}
+
+      {manual ? (
+        <div className="space-y-3 border-t border-dock-line pt-3">
+          <button disabled={pending || !slot} onClick={() => run(() => putAwayPallet(pallet.id, slot))} className="cond w-full bg-dock-yellow px-4 py-4 text-base font-semibold ring-[1.5px] ring-dock-ink disabled:opacity-50">
+            {pending ? "…" : t("pa.placed", { slot: slot || "…" })}
+          </button>
+          {!editing && (
+            <button onClick={() => setEditing(true)} className="w-full text-center text-xs text-dock-ink/50 underline">
+              {t("pa.elsewhere")}
+            </button>
+          )}
+        </div>
+      ) : (
+        <button onClick={() => setManual(true)} className="w-full text-center text-xs text-dock-ink/50 underline">
+          {t("scan.manual")}
         </button>
       )}
       {error && <p className="text-sm text-dock-red">{error}</p>}
