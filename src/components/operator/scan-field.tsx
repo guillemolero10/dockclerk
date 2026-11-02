@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { useSearchParams } from "next/navigation";
-import { Keyboard, ScanLine } from "lucide-react";
+import { Camera, Keyboard, ScanLine, X } from "lucide-react";
 import { cleanScan } from "@/lib/pallets/scan";
 import { useT } from "@/lib/i18n/client";
 
@@ -36,6 +36,89 @@ const ENDS = /[\r\n\t]/;
 const editable = (el: Element | null) =>
   !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || (el as HTMLElement).isContentEditable);
 
+type Detector = { detect: (source: HTMLVideoElement) => Promise<{ rawValue: string }[]> };
+type DetectorClass = new (opts: { formats: string[] }) => Detector;
+
+/**
+ * Reads a barcode with the camera when there is no reader (or the reader is not set up): Chrome on Android has a barcode detector built in.
+ * Stops the camera as soon as it reads one code.
+ */
+function CameraScan({ onCode, onClose, onFail }: { onCode: (code: string) => void; onClose: () => void; onFail: (message: string) => void }) {
+  const { t } = useT();
+  const video = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const Ctor = (window as unknown as { BarcodeDetector?: DetectorClass }).BarcodeDetector;
+    if (!Ctor) {
+      onFail(t("scan.cameraNo"));
+      return;
+    }
+    let stream: MediaStream | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let done = false;
+    const detector = new Ctor({ formats: ["code_128", "code_39", "ean_13", "ean_8", "qr_code"] });
+    const tick = async () => {
+      if (done) return;
+      const v = video.current;
+      try {
+        if (v && v.readyState >= 2) {
+          const found = await detector.detect(v);
+          const code = found.find((f) => f.rawValue.trim())?.rawValue;
+          if (code && !done) {
+            done = true;
+            navigator.vibrate?.(60);
+            onCode(code);
+            return;
+          }
+        }
+      } catch {
+        // a frame that could not be read: try the next one
+      }
+      timer = setTimeout(tick, 150);
+    };
+    if (!navigator.mediaDevices?.getUserMedia) {
+      onFail(t("scan.cameraError"));
+      return;
+    }
+    navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false })
+      .then((s) => {
+        if (done) return s.getTracks().forEach((tr) => tr.stop());
+        stream = s;
+        if (video.current) {
+          video.current.srcObject = s;
+          void video.current.play().catch(() => {});
+        }
+        void tick();
+      })
+      .catch(() => {
+        if (!done) onFail(t("scan.cameraError"));
+      });
+    return () => {
+      done = true;
+      if (timer) clearTimeout(timer);
+      stream?.getTracks().forEach((tr) => tr.stop());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="relative overflow-hidden bg-black">
+      <video ref={video} playsInline muted className="block h-56 w-full object-cover" />
+      <div aria-hidden className="pointer-events-none absolute inset-x-6 top-1/2 h-0.5 -translate-y-1/2 bg-dock-red/80" />
+      <p className="cond absolute inset-x-0 bottom-0 bg-black/60 px-3 py-1.5 text-center text-sm text-white">{t("scan.cameraHint")}</p>
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label={t("scan.cameraClose")}
+        className="absolute right-2 top-2 flex h-11 w-11 items-center justify-center bg-white text-dock-ink"
+      >
+        <X size={22} aria-hidden />
+      </button>
+    </div>
+  );
+}
+
 /**
  * The field a handheld's barcode reader types into (it acts like a keyboard and ends with Enter).
  * The cursor stays here: it comes back after every scan and whenever the field loses focus, unless the person went to another field.
@@ -58,6 +141,7 @@ export function ScanField({
   const [typing, setTyping] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string; n: number } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [camera, setCamera] = useState(false);
   // `?scandebug=1` lists what the reader really sends (keys, input events), to set up a handheld without a computer.
   const debugOn = useSearchParams().has("scandebug");
   const [debug, setDebug] = useState<string[]>([]);
@@ -181,7 +265,31 @@ export function ScanField({
           {typing ? <ScanLine size={16} aria-hidden /> : <Keyboard size={16} aria-hidden />}
           {typing ? t("scan.reader") : t("scan.type")}
         </button>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => setCamera((v) => !v)}
+          aria-pressed={camera}
+          aria-label={t("scan.camera")}
+          className="cond flex h-14 w-14 shrink-0 items-center justify-center border-[1.5px] border-dock-ink bg-white"
+        >
+          <Camera size={20} aria-hidden />
+        </button>
       </form>
+      {camera && !disabled && (
+        <CameraScan
+          onCode={(code) => {
+            setCamera(false);
+            if (input.current) input.current.value = code;
+            void submit();
+          }}
+          onClose={() => setCamera(false)}
+          onFail={(message) => {
+            setCamera(false);
+            show({ ok: false, message });
+          }}
+        />
+      )}
       <p
         role="status"
         aria-live="polite"
