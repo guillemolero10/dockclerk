@@ -205,12 +205,14 @@ async function main() {
   let st = await stepInfo();
   out(!!st.loc, `pick: first step at ${st.loc} pallet ${st.code || "(no id)"}${st.boxes ? " (boxes)" : ""}`);
   if (st.loc) {
-    // wrong slot (valid shape, different) -> red
-    const wrongSlot = st.loc === "A-01-1" ? "A-01-2" : "A-01-1";
-    expectRes(await scan(p, wrongSlot, "pick"), "error", `wrong slot ${wrongSlot} (red)`);
-    // pallet before slot -> red
-    expectRes(await scan(p, st.code || "ZZZ-9999", "pick"), "error", "pallet before the slot (red)");
-    expectRes(await scan(p, st.loc, "pick"), "ok", `right slot ${st.loc}`);
+    if (st.code) {
+      // a pallet with an ID: only the pallet is scanned; a slot label says "scan the pallet"
+      expectRes(await scan(p, st.loc, "pick"), "error", `slot label instead of the pallet (red)`);
+    } else {
+      const wrongSlot = st.loc === "A-01-1" ? "A-01-2" : "A-01-1";
+      expectRes(await scan(p, wrongSlot, "pick"), "error", `wrong slot ${wrongSlot} (red)`);
+      expectRes(await scan(p, st.loc, "pick"), "ok", `right slot ${st.loc}`);
+    }
     if (st.code) {
       expectRes(await scan(p, "WRONG-0001", "pick"), "error", "wrong pallet (red, UI)");
       // SERVER-side check: rewrite the scanned code inside the server action request, so the UI lets it through
@@ -257,10 +259,12 @@ async function main() {
       }
       break;
     }
-    const a = await scan(p, st.loc, "pick");
-    if (a.r !== "ok") {
-      out(false, `pick loop: slot ${st.loc} rejected "${a.t}"`);
-      break;
+    if (!st.code) {
+      const a = await scan(p, st.loc, "pick");
+      if (a.r !== "ok") {
+        out(false, `pick loop: slot ${st.loc} rejected "${a.t}"`);
+        break;
+      }
     }
     if (st.code) {
       const b = await scan(p, st.code, "pick");

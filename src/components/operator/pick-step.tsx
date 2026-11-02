@@ -153,30 +153,35 @@ export function PickStep({ outboundId, warehouse, lane, done, total, shortText, 
   );
 }
 
-/** Slot first, then the pallet (boxes steps then confirm the number). A label that will not scan: "confirm by hand". */
+/**
+ * A pallet with an ID: scan the pallet only (its ID already says which slot it is in). A pallet with no ID: scan the slot, then confirm.
+ * Boxes steps then confirm the number. A label that will not scan: "confirm by hand".
+ */
 function ScanPick({ step, warehouse, pending, what, onConfirm }: { step: Step; warehouse: string; pending: boolean; what: Content | undefined; onConfirm: (scanned: string | null) => void }) {
   const { t } = useT();
-  const [slotOk, setSlotOk] = useState(false);
+  const needsPallet = !!step.code;
+  const [slotOk, setSlotOk] = useState(needsPallet);
   const [scanned, setScanned] = useState<string | null>(null);
   const [manual, setManual] = useState(false);
-  const needsPallet = !!step.code;
   const atConfirm = slotOk && (!needsPallet || scanned !== null);
 
   const onScan = (code: string): ScanResult => {
+    if (needsPallet && sameCode(code, step.code)) {
+      setScanned(code);
+      // a whole pallet: scanning it is the confirmation; boxes: the person confirms the number next
+      if (step.kind === "pallet") onConfirm(code);
+      return { ok: true, message: t("pk.palletOk", { code }) };
+    }
     const asSlot = parseSlotScan(code, warehouse);
+    if (asSlot && needsPallet) return { ok: false, message: t("pk.slotNotPallet", { code: step.code ?? "" }) };
     if (asSlot) {
       if (asSlot.warehouse && asSlot.warehouse !== warehouse) return { ok: false, message: t("pk.slotOther", { other: asSlot.warehouse, mine: warehouse }) };
       if (asSlot.slot !== step.location) return { ok: false, message: t("pk.slotWrong", { got: asSlot.slot, slot: step.location }) };
       setSlotOk(true);
-      return { ok: true, message: needsPallet ? t("pk.slotOk", { slot: step.location }) : t("pk.noIdScan") };
+      return { ok: true, message: t("pk.noIdScan") };
     }
-    if (!slotOk) return { ok: false, message: t("pk.scanFirstSlot") };
     if (!needsPallet) return { ok: false, message: t("pk.noIdScan") };
-    if (!sameCode(code, step.code)) return { ok: false, message: t("pk.palletWrong", { got: code.slice(0, 30), code: step.code ?? "" }) };
-    setScanned(code);
-    // a whole pallet: scanning it is the confirmation; boxes: the person confirms the number next
-    if (step.kind === "pallet") onConfirm(code);
-    return { ok: true, message: t("pk.palletOk", { code }) };
+    return { ok: false, message: t("pk.palletWrong", { got: code.slice(0, 30), code: step.code ?? "" }) };
   };
 
   const label = !slotOk ? t("pk.scanSlot") : needsPallet && scanned === null ? t("pk.scanPalletCode", { code: step.code ?? "" }) : t("pk.palletOk", { code: step.code ?? "" });
@@ -192,7 +197,11 @@ function ScanPick({ step, warehouse, pending, what, onConfirm }: { step: Step; w
     <div className="space-y-3">
       {!manual && <ScanField label={label} onScan={onScan} disabled={pending} />}
       {!manual && !slotOk && <p className="cond text-center text-sm font-semibold">{t("pk.scanSlot")}: {step.location}</p>}
-      {!manual && slotOk && needsPallet && scanned === null && <p className="cond text-center text-sm font-semibold">{t("pk.scanPalletCode", { code: step.code ?? "" })}</p>}
+      {!manual && needsPallet && scanned === null && (
+        <p className="cond text-center text-sm font-semibold">
+          {step.location} · {t("pk.scanPalletCode", { code: step.code ?? "" })}
+        </p>
+      )}
       {(manual || (atConfirm && (step.kind === "boxes" || !needsPallet)) || (slotOk && !needsPallet)) && (
         <button
           disabled={pending}
