@@ -1,0 +1,41 @@
+// Operator home hides NO_SHOW bookings (50fcc78). Localhost only; changes one booking and puts it back. Reseed after anyway.
+import { mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { PrismaClient } from "@prisma/client";
+import { chromium } from "playwright-core";
+const BASE = "http://localhost:3000";
+const DIR = join(homedir(), "dockclerk-e2e", "2026-11-02-saving"); mkdirSync(DIR, { recursive: true });
+const db = new PrismaClient();
+(async () => {
+  const start = new Date(); start.setHours(0, 0, 0, 0); const end = new Date(start.getTime() + 864e5);
+  const list = await db.inbound.findMany({ where: { status: "EXPECTED", appointment: { startsAt: { gte: start, lt: end } } }, include: { appointment: true, client: true, warehouse: true }, orderBy: { number: "asc" } });
+  console.log("today EXPECTED inbounds with booking:", list.length, list.map((i) => `${i.number}/${i.warehouse?.code}/${i.appointment?.status}`).join(" "));
+  const inb = list[0]; if (!inb) throw new Error("none");
+  const W = inb.warehouse?.code ?? "N1";
+  const browser = await chromium.launch();
+  const ctx = await browser.newContext({ viewport: { width: 375, height: 812 }, isMobile: true, deviceScaleFactor: 2, locale: "en-US" });
+  await ctx.addCookies([{ name: "lang", value: "en", url: BASE }]);
+  const p = await ctx.newPage();
+  await p.goto(BASE + "/", { waitUntil: "domcontentloaded" });
+  await p.locator('input[name="username"]').fill(process.env.E2E_OPERATOR_USER!);
+  await p.locator('input[name="password"]').fill(process.env.E2E_OPERATOR_PASS!);
+  await Promise.all([p.waitForURL((u) => u.pathname !== "/"), p.getByRole("button", { name: /^Sign in/ }).click()]);
+  const href = `/operator/receive/${inb.id}`;
+  const has = async () => { await p.goto(`${BASE}/operator?w=${W}`, { waitUntil: "networkidle" }); return (await p.locator(`a[href="${href}"]`).count()) > 0; };
+  const before = await has(); await p.screenshot({ path: join(DIR, "noshow-before.png"), fullPage: true });
+  const orig = inb.appointment!.status;
+  await db.dockAppointment.update({ where: { id: inb.appointment!.id }, data: { status: "NO_SHOW" } });
+  const during = await has(); await p.screenshot({ path: join(DIR, "noshow-during.png"), fullPage: true });
+  await db.dockAppointment.update({ where: { id: inb.appointment!.id }, data: { status: orig } });
+  const after = await has();
+  console.log(`${before && !during && after ? "PASS" : "FAIL"} inbound ${inb.number} (${W}, ${orig}): listed before=${before}, as NO_SHOW=${during}, restored=${after}`);
+  // second case: NO_SHOW but already RECEIVING must still show
+  await db.inbound.update({ where: { id: inb.id }, data: { status: "RECEIVING" } });
+  await db.dockAppointment.update({ where: { id: inb.appointment!.id }, data: { status: "NO_SHOW" } });
+  const recv = await has();
+  await db.inbound.update({ where: { id: inb.id }, data: { status: "EXPECTED" } });
+  await db.dockAppointment.update({ where: { id: inb.appointment!.id }, data: { status: orig } });
+  console.log(`INFO RECEIVING + NO_SHOW listed=${recv}`);
+  await browser.close();
+})();
