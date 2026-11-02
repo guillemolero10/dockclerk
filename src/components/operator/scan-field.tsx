@@ -61,7 +61,7 @@ export function ScanField({
   // `?scandebug=1` lists what the reader really sends (keys, input events), to set up a handheld without a computer.
   const debugOn = useSearchParams().has("scandebug");
   const [debug, setDebug] = useState<string[]>([]);
-  const burst = useRef<{ last: number; maxGap: number; timer: ReturnType<typeof setTimeout> | null }>({ last: 0, maxGap: 0, timer: null });
+  const burst = useRef<{ last: number; maxGap: number; count: number; bulk: boolean; timer: ReturnType<typeof setTimeout> | null }>({ last: 0, maxGap: 0, count: 0, bulk: false, timer: null });
 
   const log = (line: string) => {
     if (debugOn) setDebug((d) => [line, ...d].slice(0, 12));
@@ -88,7 +88,7 @@ export function ScanField({
 
   const submit = async () => {
     if (burst.current.timer) clearTimeout(burst.current.timer);
-    burst.current = { last: 0, maxGap: 0, timer: null };
+    burst.current = { last: 0, maxGap: 0, count: 0, bulk: false, timer: null };
     const el = input.current;
     const code = cleanScan(el?.value ?? "");
     if (el) el.value = "";
@@ -131,6 +131,7 @@ export function ScanField({
             onKeyDown={(e) => {
               log(`key ${e.key} code=${e.code} ${e.keyCode}`);
               // The reader ends the code with Enter (some set-ups send Tab, or a raw keyCode 13 with no key name).
+              if (e.key === "Tab" && (typing || !e.currentTarget.value)) return; // an empty field or a thumb lets Tab move on
               if (e.key !== "Enter" && e.key !== "Tab" && e.keyCode !== 13) return;
               e.preventDefault();
               void submit();
@@ -147,13 +148,16 @@ export function ScanField({
               const b = burst.current;
               if (b.last) b.maxGap = Math.max(b.maxGap, now - b.last);
               b.last = now;
+              b.count += 1;
+              if (ne.inputType === "insertFromPaste" || (ne.data?.length ?? 0) >= 3) b.bulk = true;
               if (b.timer) clearTimeout(b.timer);
               b.timer = setTimeout(() => {
-                const fast = burst.current.maxGap < BURST_GAP_MS;
+                // One key alone is a thumb, not a reader (unless the whole code came in one go).
+                const fast = burst.current.bulk || (burst.current.count >= 2 && burst.current.maxGap < BURST_GAP_MS);
                 if (fast && cleanScan(input.current?.value ?? "").length >= 3) {
                   log("auto-submit (no Enter)");
                   void submit();
-                } else burst.current = { last: 0, maxGap: 0, timer: null };
+                } else burst.current = { last: 0, maxGap: 0, count: 0, bulk: false, timer: null };
               }, BURST_IDLE_MS);
             }}
             onBlur={() => {
