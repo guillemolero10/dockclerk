@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
+import { useSearchParams } from "next/navigation";
 import { Keyboard, ScanLine } from "lucide-react";
 import { cleanScan } from "@/lib/pallets/scan";
 import { useT } from "@/lib/i18n/client";
@@ -25,6 +26,12 @@ function beep() {
     // no audio: the red bar is enough
   }
 }
+
+/** A reader types a whole code in a burst: this many ms of silence after a fast burst means the code is complete. */
+const BURST_IDLE_MS = 250;
+/** Keys closer than this are a reader, not a thumb. */
+const BURST_GAP_MS = 80;
+const ENDS = /[\r\n\t]/;
 
 const editable = (el: Element | null) =>
   !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || (el as HTMLElement).isContentEditable);
@@ -51,6 +58,14 @@ export function ScanField({
   const [typing, setTyping] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string; n: number } | null>(null);
   const [busy, setBusy] = useState(false);
+  // `?scandebug=1` lists what the reader really sends (keys, input events), to set up a handheld without a computer.
+  const debugOn = useSearchParams().has("scandebug");
+  const [debug, setDebug] = useState<string[]>([]);
+  const burst = useRef<{ last: number; maxGap: number; timer: ReturnType<typeof setTimeout> | null }>({ last: 0, maxGap: 0, timer: null });
+
+  const log = (line: string) => {
+    if (debugOn) setDebug((d) => [line, ...d].slice(0, 12));
+  };
 
   const focus = useCallback(() => {
     if (!editable(document.activeElement) || document.activeElement === input.current) input.current?.focus({ preventScroll: true });
@@ -72,6 +87,8 @@ export function ScanField({
   }, [disabled, busy, focus]);
 
   const submit = async () => {
+    if (burst.current.timer) clearTimeout(burst.current.timer);
+    burst.current = { last: 0, maxGap: 0, timer: null };
     const el = input.current;
     const code = cleanScan(el?.value ?? "");
     if (el) el.value = "";
@@ -88,7 +105,14 @@ export function ScanField({
 
   return (
     <div className="space-y-1.5">
-      <div className="flex items-stretch gap-2">
+      <form
+        className="flex items-stretch gap-2"
+        onSubmit={(e) => {
+          e.preventDefault(); // the "go" key of the keyboard, or an Enter the browser turns into a submit
+          log("submit");
+          void submit();
+        }}
+      >
         <label className="relative block min-w-0 flex-1">
           <span className="sr-only">{label}</span>
           <ScanLine size={20} aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-dock-ink/40" />
@@ -105,9 +129,32 @@ export function ScanField({
             aria-label={`${label}. ${t("scan.aria")}`}
             placeholder={t("scan.ph")}
             onKeyDown={(e) => {
-              if (e.key !== "Enter") return;
-              e.preventDefault(); // the reader ends the code with Enter
+              log(`key ${e.key} code=${e.code} ${e.keyCode}`);
+              // The reader ends the code with Enter (some set-ups send Tab, or a raw keyCode 13 with no key name).
+              if (e.key !== "Enter" && e.key !== "Tab" && e.keyCode !== 13) return;
+              e.preventDefault();
               void submit();
+            }}
+            onInput={(e) => {
+              const el = e.currentTarget;
+              const ne = e.nativeEvent as InputEvent;
+              log(`input ${ne.inputType ?? "?"} ${JSON.stringify(ne.data ?? "")} → ${JSON.stringify(el.value)}`);
+              // A reader that pastes the code with its line break, or commits it through the keyboard service.
+              if (ENDS.test(el.value)) return void submit();
+              if (typing) return;
+              // No Enter at all: a fast burst followed by silence is a whole code.
+              const now = performance.now();
+              const b = burst.current;
+              if (b.last) b.maxGap = Math.max(b.maxGap, now - b.last);
+              b.last = now;
+              if (b.timer) clearTimeout(b.timer);
+              b.timer = setTimeout(() => {
+                const fast = burst.current.maxGap < BURST_GAP_MS;
+                if (fast && cleanScan(input.current?.value ?? "").length >= 3) {
+                  log("auto-submit (no Enter)");
+                  void submit();
+                } else burst.current = { last: 0, maxGap: 0, timer: null };
+              }, BURST_IDLE_MS);
             }}
             onBlur={() => {
               setTimeout(() => {
@@ -130,7 +177,7 @@ export function ScanField({
           {typing ? <ScanLine size={16} aria-hidden /> : <Keyboard size={16} aria-hidden />}
           {typing ? t("scan.reader") : t("scan.type")}
         </button>
-      </div>
+      </form>
       <p
         role="status"
         aria-live="polite"
@@ -139,6 +186,11 @@ export function ScanField({
       >
         {result?.message ?? "·"}
       </p>
+      {debugOn && (
+        <pre className="mono max-h-48 overflow-auto bg-dock-ink p-2 text-[11px] leading-tight text-white" data-scan-debug>
+          {debug.length ? debug.join("\n") : "scandebug: waiting for the reader…"}
+        </pre>
+      )}
     </div>
   );
 }
