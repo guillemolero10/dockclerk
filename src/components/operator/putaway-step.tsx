@@ -50,6 +50,13 @@ export function PutAwayStep({
       }
     });
 
+  // A typed slot may be copied from a printed label ("N1-C-07-3"): read it like a scan.
+  const placeTyped = () => {
+    const typed = parseSlotScan(slot, warehouse);
+    if (typed?.warehouse && typed.warehouse !== warehouse) return setError(t("pa.slotOther", { other: typed.warehouse, mine: warehouse }));
+    run(() => putAwayPallet(pallet.id, typed?.slot ?? slot));
+  };
+
   const onScan = async (code: string): Promise<ScanResult> => {
     setLeaveIn(null);
     setError(null);
@@ -115,6 +122,7 @@ export function PutAwayStep({
           {editing ? (
             <input
               value={slot}
+              autoFocus={!!suggestion}
               onChange={(e) => setSlot(e.target.value.toUpperCase())}
               placeholder="C-07-3"
               aria-label={t("pa.slot")}
@@ -148,9 +156,9 @@ export function PutAwayStep({
       )}
       {!pallet.code && <p className="text-xs text-dock-ink/60">{t("pa.noIdPallet")}</p>}
 
-      {manual || stage === "slot" ? (
+      {leaveIn ? null : manual || stage === "slot" ? (
         <div className="space-y-3 border-t border-dock-line pt-3">
-          <button disabled={pending || !slot} onClick={() => run(() => putAwayPallet(pallet.id, slot))} className="cond min-h-16 w-full bg-dock-yellow px-4 py-4 text-xl font-bold ring-[1.5px] ring-dock-ink disabled:opacity-50">
+          <button disabled={pending || !slot} onClick={placeTyped} className="cond min-h-16 w-full bg-dock-yellow px-4 py-4 text-xl font-bold ring-[1.5px] ring-dock-ink disabled:opacity-50">
             {pending ? "…" : t("pa.placed", { slot: slot || "…" })}
           </button>
           {!editing && (
