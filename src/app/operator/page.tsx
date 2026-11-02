@@ -25,7 +25,7 @@ export default async function OperatorHome({ searchParams }: PageProps<"/operato
       where: {
         warehouseId: here.id,
         status: { in: ["EXPECTED", "RECEIVING"] },
-        OR: [{ appointment: { startsAt: { gte: today.start, lt: today.end } } }, { status: "RECEIVING" }],
+        OR: [{ appointment: { startsAt: { gte: today.start, lt: today.end }, status: { not: "NO_SHOW" } } }, { status: "RECEIVING" }],
       },
       include: { client: true, appointment: true, receipt: true },
     }),

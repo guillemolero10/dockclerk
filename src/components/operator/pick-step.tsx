@@ -199,7 +199,13 @@ function ScanPick({ step, warehouse, pending, what, header, onConfirm }: { heade
 
   const needsConfirm = step.kind === "boxes" || !needsPallet;
   const first = !slotOk ? "now" : needsPallet && scanned === null && !manual ? "now" : "done";
-  const nowText = manual || atConfirm
+  // a whole pallet with an ID has no yellow button: scanning it confirms, so say "saving" (or "scan" again if it was refused)
+  const scanConfirms = step.kind === "pallet" && needsPallet && !manual;
+  const nowText = scanConfirms
+    ? pending
+      ? t("rcs.saving")
+      : t("pk.now.scan", { loc: step.location, code: step.code ?? "" })
+    : manual || atConfirm
     ? step.kind === "boxes"
       ? t("pk.now.confirmBoxes", { n: step.take ?? 0, word: what?.word ?? "" })
       : t("pk.now.confirm")
