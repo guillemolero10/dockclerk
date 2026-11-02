@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { ChevronDown, ChevronUp, Minus, Plus, Trash2, Truck, X } from "lucide-react";
 import { loadPhoto, notePallets, notePhoto, receive, truckHere } from "@/app/operator/actions";
 import { checkBreakdown, expandPallets, MAX_LINES, MAX_PALLETS, type PalletDraft } from "@/lib/pallets/breakdown";
+import { StepHead } from "@/components/operator/task-steps";
 import { PhotoButton } from "@/components/media/photo-button";
 import { ScanField, type ScanResult } from "@/components/operator/scan-field";
 import { parseCode } from "@/lib/pallets/codes";
@@ -25,7 +26,7 @@ export function TruckHereButton({ inboundId }: { inboundId: string }) {
           router.refresh();
         })
       }
-      className="cond flex w-full items-center justify-center gap-2 bg-dock-yellow px-4 py-4 text-base font-semibold ring-[1.5px] ring-dock-ink"
+      className="cond flex min-h-16 w-full items-center justify-center gap-2 bg-dock-yellow px-4 py-4 text-xl font-bold ring-[1.5px] ring-dock-ink"
     >
       <Truck size={18} /> {pending ? "…" : t("rcs.truckHere")}
     </button>
@@ -134,6 +135,7 @@ export function ReceiveForm({
   damagedFound,
   warehouse,
   liveCodes,
+  damageSlot,
 }: {
   inboundId: string;
   items: ItemInfo[];
@@ -143,6 +145,8 @@ export function ReceiveForm({
   warehouse: string;
   /** IDs of the pallets already inside the warehouse (a scan of one of them is red at once). */
   liveCodes: string[];
+  /** Step 3: the optional load photo (server-rendered), shown above the damaged-box counter. */
+  damageSlot?: React.ReactNode;
 }) {
   const { t, lang } = useT();
   const router = useRouter();
@@ -161,6 +165,20 @@ export function ReceiveForm({
     palletsRef.current = pallets;
     scannedRef.current = scanned;
   }, [pallets, scanned]);
+
+  // The photos arrive while the form is open. Follow them without losing what was scanned: the list is replaced only while nothing is scanned,
+  // and the damaged count follows the load photo.
+  const startSig = JSON.stringify(start);
+  const [seenSig, setSeenSig] = useState(startSig);
+  const [seenDamaged, setSeenDamaged] = useState(damagedFound);
+  if (seenSig !== startSig) {
+    setSeenSig(startSig);
+    if (scanned.length === 0) setPallets(start.map((d, i) => toState(d, i)));
+  }
+  if (seenDamaged !== damagedFound) {
+    setSeenDamaged(damagedFound);
+    setDamaged(damagedFound);
+  }
 
   // quick add: "38 pallets of AGUA-15"
   const [qItem, setQItem] = useState(items[0]?.id ?? "");
@@ -258,11 +276,12 @@ export function ReceiveForm({
   };
 
   return (
-    <div className="space-y-3">
+    <div className="dock-card space-y-3 bg-white p-4">
+      <StepHead n={2} title={t("rc.stepScan")} />
       <p className="text-xs text-dock-ink/60">{t("rcs.intro")}</p>
       <section aria-label={t("rcs.scanLabel")} className="space-y-1">
         <ScanField label={t("rcs.scanLabel")} onScan={onScan} disabled={pending} />
-        <p className="mono text-sm font-semibold" aria-live="polite">
+        <p className="mono text-base font-semibold" aria-live="polite">
           {expected !== null ? t("rcs.scanCount", { a: scanned.length, b: expected }) : t("rcs.scanCountOnly", { a: scanned.length })}
         </p>
       </section>
@@ -403,6 +422,9 @@ export function ReceiveForm({
         </button>
       </fieldset>
 
+      <section className="dock-card space-y-3 bg-white p-4" aria-label={t("rc.optDamage")}>
+        <StepHead n={3} title={t("rc.optDamage")} optional={t("st.optional")} />
+        {damageSlot}
       <div className="flex items-center justify-between border-t border-dock-line pt-3 text-sm">
         <span>{t("rcs.damagedBoxes")}</span>
         <span className="flex items-center">
@@ -416,8 +438,10 @@ export function ReceiveForm({
         </span>
       </div>
       <input value={incident} onChange={(e) => setIncident(e.target.value)} placeholder={t("rcs.anything")} aria-label={t("rcs.anythingAria")} className="dock-input text-sm" />
+      </section>
 
       <div className="sticky bottom-0 -mx-4 space-y-2 border-t-[1.5px] border-dock-ink bg-white px-4 pb-3 pt-2">
+        <p className="cond text-xs font-semibold">4 · {t("rc.step4")}</p>
         <p className="mono text-xs" aria-live="polite">
           {t("rcs.lines_p", { n: lineCount })} · {t("op.pallets_p", { n: pallets.length })}
           {mixed > 0 && ` · ${t("rcs.mixedN_p", { n: mixed })}`} · {t("rcs.boxes_p", { n: boxes.toLocaleString(LOCALE[lang]) })}
@@ -430,7 +454,7 @@ export function ReceiveForm({
             ))}
           </div>
         )}
-        <button disabled={pending || pallets.length === 0} onClick={confirm} className="cond min-h-14 w-full bg-dock-ink px-4 py-3 text-base font-semibold text-dock-yellow disabled:opacity-50">
+        <button disabled={pending || pallets.length === 0} onClick={confirm} className="cond min-h-16 w-full bg-dock-ink px-4 py-3 text-lg font-bold text-dock-yellow disabled:opacity-50">
           {pending ? t("rcs.saving") : t("rcs.confirm_p", { n: pallets.length })}
         </button>
         <p className="text-center text-[11px] text-dock-ink/45">{t("rcs.footer", { wh: warehouse || t("rcs.theWarehouse") })}</p>

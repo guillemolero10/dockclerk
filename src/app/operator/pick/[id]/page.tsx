@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { ArrowLeft, Check } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
+import { DoneBand } from "@/components/operator/task-steps";
 import { PickStep } from "@/components/operator/pick-step";
 import { db } from "@/lib/db";
 import { openPickPlans } from "@/lib/ops/floor";
@@ -28,13 +29,12 @@ export default async function PickPage({ params }: PageProps<"/operator/pick/[id
     return (
       <main className="space-y-4 px-4 py-6">
         <Back code={outbound.warehouse?.code} label={t("op.tasks")} />
-        <div className="hazard p-1">
-          <div className="bg-dock-ink px-5 py-6 text-center text-white">
-            <Check className="mx-auto text-dock-yellow" size={28} />
-            <p className="mt-2 text-lg font-semibold">{t("pk.prepared", { n: outbound.number })}</p>
-            <p className="text-sm text-white/60">{t("pk.inLane_p", { n: picked })}</p>
-          </div>
-        </div>
+        <DoneBand
+          title={t("pk.prepared", { n: outbound.number })}
+          sub={`${outbound.appointment?.dock ? t("pk.readyAt", { n: outbound.appointment.dock }) : t("pk.readyNoDock")} · ${t("pk.inLane_p", { n: picked })}`}
+          href={`/operator${outbound.warehouse?.code ? `?w=${outbound.warehouse.code}` : ""}`}
+          cta={t("pk.nextTasks")}
+        />
         {made.length > 0 && (
           <section className="dock-card bg-dock-yellow px-4 py-4 text-center" aria-label={t("rc.toLabel")}>
             <p className="cond text-xs font-semibold">{t("pk.label_p", { n: made.length })}</p>

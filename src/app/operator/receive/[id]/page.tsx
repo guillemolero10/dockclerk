@@ -1,8 +1,9 @@
 /* eslint-disable @next/next/no-img-element -- photos come from our own upload route */
 import Link from "next/link";
-import { ArrowLeft, Bot, Check } from "lucide-react";
+import { ArrowLeft, Bot } from "lucide-react";
 import { LoadPhoto } from "@/components/load-photo";
 import { LoadStep, NoteStepOperator, ReceiveForm, TruckHereButton } from "@/components/operator/receive-steps";
+import { DoneBand, NowLine, StepHead, Stepper } from "@/components/operator/task-steps";
 import { aiStatus } from "@/lib/ai/client";
 import { db } from "@/lib/db";
 import { fromNote, type NoteLineLite, type PalletDraft } from "@/lib/pallets/breakdown";
@@ -66,9 +67,12 @@ export default async function ReceivePage({ params }: PageProps<"/operator/recei
 
       {received ? (
         <div className="space-y-3">
-          <p className="flex items-center gap-2 bg-dock-ink px-4 py-3 text-sm text-white">
-            <Check size={16} className="text-dock-yellow" /> {t("rc.received_p", { n: inbound.receivedPallets ?? 0 })} {r?.signedAt ? t("rc.signedBy", { name: r.signedBy ?? "" }) : t("rc.waitSign")}
-          </p>
+          <DoneBand
+            title={t("rc.done")}
+            sub={`${t("rc.received_p", { n: inbound.receivedPallets ?? 0 })} ${r?.signedAt ? t("rc.signedBy", { name: r.signedBy ?? "" }) : t("rc.waitSign")}`}
+            href={`/operator/putaway?w=${inbound.warehouse?.code ?? ""}`}
+            cta={t("rc.nextPutAway_p", { n: inbound.receivedPallets ?? 0 })}
+          />
           {generated.length > 0 && (
             <section className="dock-card bg-white p-3" aria-label={t("rc.toLabel")}>
               <h2 className="cond text-[11px] text-dock-ink/55">{t("rc.labelThese_p", { n: generated.length })}</h2>
@@ -77,90 +81,87 @@ export default async function ReceivePage({ params }: PageProps<"/operator/recei
                   <li key={g.code}>{g.code}</li>
                 ))}
               </ul>
-              <Link href={`/labels?w=${inbound.warehouse?.code ?? ""}&kind=pallets&codes=${generated.map((g) => g.code).join(",")}`} className="cond mt-2 inline-block text-xs underline">
+              <Link href={`/labels?w=${inbound.warehouse?.code ?? ""}&kind=pallets&codes=${generated.map((g) => g.code).join(",")}`} className="cond mt-2 inline-block py-2 text-sm underline">
                 {t("rc.printLabels")}
               </Link>
             </section>
           )}
-          <Link href={`/operator/putaway?w=${inbound.warehouse?.code ?? ""}`} className="cond block bg-dock-yellow px-4 py-3 text-center font-semibold ring-[1.5px] ring-dock-ink">
-            {t("rc.putAwayNow")}
-          </Link>
-          <Link href={`/receipts/${inbound.id}`} className="cond block text-center text-xs text-dock-ink/50 underline">
-            {t("rc.receipt")}
-          </Link>
+          <div className="flex justify-between gap-3">
+            <Link href={`/operator?w=${inbound.warehouse?.code ?? ""}`} className="cond py-2 text-sm text-dock-ink/60 underline">
+              {t("rc.nextTasks")}
+            </Link>
+            <Link href={`/receipts/${inbound.id}`} className="cond py-2 text-sm text-dock-ink/60 underline">
+              {t("rc.receipt")}
+            </Link>
+          </div>
         </div>
       ) : !arrived ? (
-        <TruckHereButton inboundId={inbound.id} />
+        <div className="space-y-3">
+          <NowLine tag={t("st.now")}>{t("rc.now.truck")}</NowLine>
+          <TruckHereButton inboundId={inbound.id} />
+        </div>
       ) : (
         <>
-          <Step n={1} title={t("rc.stepScan")} done={false}>
-            <ReceiveForm
-              // starts again from what the photos just read (its lines live in useState)
-              key={JSON.stringify([start, r?.notePallets, boxes?.length, boxes?.filter((b) => b.damaged).length])}
-              inboundId={inbound.id}
-              items={inbound.client.items.map((i) => ({ id: i.id, sku: i.sku, description: i.description, unitsPerPallet: i.unitsPerPallet, tracksLot: i.tracksLot }))}
-              start={start}
-              expected={r?.notePallets ?? inbound.expectedPallets}
-              damagedFound={boxes?.filter((b) => b.damaged).length ?? 0}
-              warehouse={inbound.warehouse?.code ?? ""}
-              liveCodes={liveCodes}
-            />
-          </Step>
+          <Stepper
+            label={t("st.label")}
+            steps={[
+              { label: t("rc.s1"), state: r?.notePallets ? "done" : "next", optional: t("st.optional") },
+              { label: t("rc.s2"), state: "now" },
+              { label: t("rc.s3"), state: boxes ? "done" : "next", optional: t("st.optional") },
+              { label: t("rc.s4"), state: "next" },
+            ]}
+          />
+          <NowLine tag={t("st.now")}>{r?.notePallets ? t("rc.now.scanNote", { n: r.notePallets }) : t("rc.now.scan")}</NowLine>
 
-          {/* Photos help but are never needed: the pallets can be received with the reader alone. */}
-          <details className="dock-card bg-white" open={!!r?.notePallets || !!r?.palletImageUrl}>
-            <summary className="cond cursor-pointer px-4 py-3 text-sm font-semibold">{t("rc.optional")}</summary>
-            <div className="space-y-4 border-t border-dock-line p-4">
-              <p className="text-xs text-dock-ink/60">{t("rc.optionalHint")}</p>
-              <section className="space-y-2" aria-label={t("rc.optNote")}>
-                <h3 className="cond text-xs font-semibold">{t("rc.optNote")}</h3>
-                {r?.notePallets ? (
-                  <div className="flex gap-3 text-sm">
-                    {r.noteImageUrl && <img src={r.noteImageUrl} alt={t("rc.noteAlt")} className="h-16 w-12 border border-dock-line object-cover" />}
-                    <div>
-                      <p className="mono text-lg font-semibold">{t("rc.onNote_p", { n: r.notePallets })}</p>
-                      <p className="cond flex items-center gap-1 text-[11px] text-dock-ink/50">
-                        {r.readBy === "muse-spark" ? (
-                          <>
-                            <Bot size={12} /> {t("rc.readByMuse")}
-                          </>
-                        ) : (
-                          t("rc.typedBy", { who: r.readBy === "operator" ? t("rc.who.operator") : r.readBy === "office" ? t("rc.who.office") : String(r.readBy) })
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  <NoteStepOperator inboundId={inbound.id} aiReady={!!ai.vision} items={inbound.client.items.map((i) => ({ sku: i.sku, description: i.description }))} />
-                )}
-              </section>
-              <section className="space-y-2" aria-label={t("rc.optDamage")}>
-                <h3 className="cond text-xs font-semibold">{t("rc.optDamage")}</h3>
+          {/* 1. The note photo goes first: it fills the list that step 2 checks. It is never needed. */}
+          <section className="dock-card space-y-2 bg-white p-4" aria-label={t("rc.optNote")}>
+            <StepHead n={1} title={t("rc.optNote")} done={!!r?.notePallets} optional={t("st.optional")} />
+            {r?.notePallets ? (
+              <div className="flex gap-3 text-sm">
+                {r.noteImageUrl && <img src={r.noteImageUrl} alt={t("rc.noteAlt")} className="h-16 w-12 border border-dock-line object-cover" />}
+                <div>
+                  <p className="mono text-lg font-semibold">{t("rc.onNote_p", { n: r.notePallets })}</p>
+                  <p className="cond flex items-center gap-1 text-[11px] text-dock-ink/50">
+                    {r.readBy === "muse-spark" ? (
+                      <>
+                        <Bot size={12} /> {t("rc.readByMuse")}
+                      </>
+                    ) : (
+                      t("rc.typedBy", { who: r.readBy === "operator" ? t("rc.who.operator") : r.readBy === "office" ? t("rc.who.office") : String(r.readBy) })
+                    )}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <NoteStepOperator inboundId={inbound.id} aiReady={!!ai.vision} items={inbound.client.items.map((i) => ({ sku: i.sku, description: i.description }))} />
+            )}
+          </section>
+
+          <ReceiveForm
+            // The lists lives in useState: the form follows the photos by itself (it keeps what was scanned), so no `key` here.
+            inboundId={inbound.id}
+            items={inbound.client.items.map((i) => ({ id: i.id, sku: i.sku, description: i.description, unitsPerPallet: i.unitsPerPallet, tracksLot: i.tracksLot }))}
+            start={start}
+            expected={r?.notePallets ?? inbound.expectedPallets}
+            damagedFound={boxes?.filter((b) => b.damaged).length ?? 0}
+            warehouse={inbound.warehouse?.code ?? ""}
+            liveCodes={liveCodes}
+            damageSlot={
+              <div className="space-y-2">
+                <p className="text-xs text-dock-ink/60">{t("rc.optionalHint")}</p>
                 {r?.palletImageUrl && <LoadPhoto src={r.palletImageUrl} boxes={boxes} alt={t("rc.loadAlt")} />}
                 {r?.countedBy && boxes && (
-                  <p className="cond mt-2 flex items-center gap-1.5 text-xs">
+                  <p className="cond flex items-center gap-1.5 text-xs">
                     <Bot size={13} /> {t("rc.found_p", { who: r.countedBy === "sam-3.1" ? "SAM 3.1" : r.countedBy === "sam-3" ? "SAM 3" : "Muse Spark", n: boxes.length })}
                     {boxes.some((b) => b.damaged) && <span className="text-dock-red"> {t("rc.damaged", { n: boxes.filter((b) => b.damaged).length })}</span>}
                   </p>
                 )}
                 <LoadStep inboundId={inbound.id} aiReady={!!(ai.segment || ai.vision)} counter={ai.segment ? "SAM 3.1" : "Muse Spark"} again={!!r?.palletImageUrl} />
-              </section>
-            </div>
-          </details>
+              </div>
+            }
+          />
         </>
       )}
     </main>
-  );
-}
-
-function Step({ n, title, done, children }: { n: number; title: string; done: boolean; children: React.ReactNode }) {
-  return (
-    <section className="dock-card space-y-3 bg-white p-4">
-      <h2 className="flex items-center gap-2 font-semibold">
-        <span className={`cond grid h-6 w-6 place-items-center text-xs ${done ? "bg-dock-ink text-dock-yellow" : "border-[1.5px] border-dock-ink"}`}>{done ? <Check size={13} /> : n}</span>
-        {title}
-      </h2>
-      {children}
-    </section>
   );
 }

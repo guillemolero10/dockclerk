@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Check, Printer, Route } from "lucide-react";
 import { pick } from "@/app/operator/actions";
+import { NowLine, Stepper } from "@/components/operator/task-steps";
 import { ScanField, type ScanResult } from "@/components/operator/scan-field";
 import { parseSlotScan, sameCode } from "@/lib/pallets/scan";
 import { useT } from "@/lib/i18n/client";
@@ -49,6 +50,7 @@ export function PickStep({ outboundId, warehouse, lane, done, total, shortText, 
 
       {label ? (
         <>
+          <NowLine tag={t("st.now")}>{t("pk.now.label")}</NowLine>
           <div className="dock-card overflow-hidden bg-white">
             <div className="bg-dock-yellow px-4 py-5 text-center">
               <p className="cond flex items-center justify-center gap-1.5 text-xs font-semibold">
@@ -71,6 +73,10 @@ export function PickStep({ outboundId, warehouse, lane, done, total, shortText, 
       ) : (
         current && (
           <>
+            <ScanPick
+              key={current.key}
+              step={current}
+              header={
             <div className="dock-card overflow-hidden bg-white">
               <div className="bg-dock-ink px-4 py-5 text-center">
                 <p className="cond text-[11px] text-white/50">{t("pk.goTo")}</p>
@@ -107,9 +113,7 @@ export function PickStep({ outboundId, warehouse, lane, done, total, shortText, 
               )}
               <p className="mono px-4 py-2 text-center text-xs text-dock-ink/55">{t("pk.thenExp", { n: lane })}</p>
             </div>
-            <ScanPick
-              key={current.key}
-              step={current}
+              }
               warehouse={warehouse}
               pending={pending}
               what={what}
@@ -157,7 +161,7 @@ export function PickStep({ outboundId, warehouse, lane, done, total, shortText, 
  * A pallet with an ID: scan the pallet only (its ID already says which slot it is in). A pallet with no ID: scan the slot, then confirm.
  * Boxes steps then confirm the number. A label that will not scan: "confirm by hand".
  */
-function ScanPick({ step, warehouse, pending, what, onConfirm }: { step: Step; warehouse: string; pending: boolean; what: Content | undefined; onConfirm: (scanned: string | null) => void }) {
+function ScanPick({ step, warehouse, pending, what, header, onConfirm }: { header: React.ReactNode; step: Step; warehouse: string; pending: boolean; what: Content | undefined; onConfirm: (scanned: string | null) => void }) {
   const { t } = useT();
   const needsPallet = !!step.code;
   const [slotOk, setSlotOk] = useState(needsPallet);
@@ -193,12 +197,33 @@ function ScanPick({ step, warehouse, pending, what, onConfirm }: { step: Step; w
         ? t("pk.pickedCode", { code: step.code })
         : t("pk.pickedPallet");
 
+  const needsConfirm = step.kind === "boxes" || !needsPallet;
+  const first = !slotOk ? "now" : needsPallet && scanned === null && !manual ? "now" : "done";
+  const nowText = manual || atConfirm
+    ? step.kind === "boxes"
+      ? t("pk.now.confirmBoxes", { n: step.take ?? 0, word: what?.word ?? "" })
+      : t("pk.now.confirm")
+    : needsPallet
+      ? t("pk.now.scan", { loc: step.location, code: step.code ?? "" })
+      : t("pk.now.scanSlot", { loc: step.location });
+
   return (
     <div className="space-y-3">
+      {needsConfirm && (
+        <Stepper
+          label={t("st.label")}
+          steps={[
+            { label: needsPallet ? t("pk.s1") : t("pk.s1slot"), state: first },
+            { label: t("pk.s2"), state: first === "now" ? "next" : "now" },
+          ]}
+        />
+      )}
+      <NowLine tag={t("st.now")}>{nowText}</NowLine>
+      {header}
       {!manual && <ScanField label={label} onScan={onScan} disabled={pending} />}
-      {!manual && !slotOk && <p className="cond text-center text-sm font-semibold">{t("pk.scanSlot")}: {step.location}</p>}
+      {!manual && !slotOk && <p className="sr-only">{t("pk.scanSlot")}: {step.location}</p>}
       {!manual && needsPallet && scanned === null && (
-        <p className="cond text-center text-sm font-semibold">
+        <p className="sr-only">
           {step.location} · {t("pk.scanPalletCode", { code: step.code ?? "" })}
         </p>
       )}
@@ -212,7 +237,7 @@ function ScanPick({ step, warehouse, pending, what, onConfirm }: { step: Step; w
         </button>
       )}
       {!manual && (
-        <button type="button" onClick={() => setManual(true)} className="w-full text-center text-xs text-dock-ink/50 underline">
+        <button type="button" onClick={() => setManual(true)} className="min-h-12 w-full py-3 text-center text-sm text-dock-ink/60 underline">
           {t("pk.manual")}
         </button>
       )}

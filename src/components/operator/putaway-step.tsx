@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { ArrowDown, Bot } from "lucide-react";
 import { checkSlotFor, putAwayAll, putAwayPallet } from "@/app/operator/actions";
+import { NowLine, Stepper } from "@/components/operator/task-steps";
 import { ScanField, type ScanHandle, type ScanResult } from "@/components/operator/scan-field";
 import { parseSlotScan, sameCode } from "@/lib/pallets/scan";
 import { useT } from "@/lib/i18n/client";
@@ -89,7 +90,21 @@ export function PutAwayStep({
 
   return (
     <div className="space-y-4">
-      <p className="mono text-xs text-dock-ink/50">{t("pa.waiting_p", { n: left })}</p>
+      <Stepper
+        label={t("st.label")}
+        steps={[
+          { label: t("pa.s1"), state: stage === "pallet" ? "now" : "done" },
+          { label: t("pa.s2"), state: stage === "pallet" ? "next" : "now" },
+        ]}
+      />
+      <NowLine tag={t("st.now")}>
+        {stage === "pallet"
+          ? t("pa.now.scan", { code: pallet.code ?? "", lane: pallet.from.replace("-", " ") })
+          : suggestion
+            ? t("pa.now.place", { slot: suggestion })
+            : t("pa.now.placeFree")}
+      </NowLine>
+      <p className="mono text-sm font-semibold">{t("pa.left_p", { n: left })}</p>
       <div className="dock-card overflow-hidden bg-white">
         <div className="px-4 py-3">
           <p className="cond text-[11px] text-dock-ink/50">{t("pa.from", { lane: pallet.from.replace("-", " ") })}</p>
@@ -162,20 +177,20 @@ export function PutAwayStep({
             {pending ? "…" : t("pa.placed", { slot: slot || "…" })}
           </button>
           {!editing && (
-            <button onClick={() => setEditing(true)} className="w-full text-center text-xs text-dock-ink/50 underline">
+            <button onClick={() => setEditing(true)} className="min-h-12 w-full py-3 text-center text-sm text-dock-ink/60 underline">
               {t("pa.elsewhere")}
             </button>
           )}
         </div>
       ) : (
-        <button onClick={() => setManual(true)} className="w-full text-center text-xs text-dock-ink/50 underline">
+        <button onClick={() => setManual(true)} className="min-h-12 w-full py-3 text-center text-sm text-dock-ink/60 underline">
           {t("scan.manual")}
         </button>
       )}
       {error && <p className="text-sm text-dock-red">{error}</p>}
 
       {left > 1 && (
-        <button disabled={pending} onClick={() => run(() => putAwayAll(warehouse))} className="cond w-full border-[1.5px] border-dock-ink bg-white px-4 py-3 text-sm">
+        <button disabled={pending} onClick={() => run(() => putAwayAll(warehouse))} className="cond min-h-14 w-full border-[1.5px] border-dock-ink bg-white px-4 py-3 text-base">
           {t("pa.putAll", { n: left })}
         </button>
       )}

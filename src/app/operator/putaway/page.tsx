@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+import { DoneBand } from "@/components/operator/task-steps";
 import { PutAwayStep } from "@/components/operator/putaway-step";
 import { db } from "@/lib/db";
 import { planPutAway } from "@/lib/ops/floor";
@@ -55,7 +56,7 @@ export default async function PutAwayPage({ searchParams }: PageProps<"/operator
           waitingCodes={palletsWaiting.map((g) => g[0].palletCode).filter((c): c is string => !!c)}
         />
       ) : (
-        <p className="dock-card bg-white p-5 text-sm text-dock-ink/60">{t("pa.nothing")}</p>
+        <DoneBand title={t("pa.allDone")} sub={t("pa.allDoneSub")} href={`/operator?w=${warehouse.code}`} cta={t("pa.next")} />
       )}
     </main>
   );
