@@ -267,7 +267,7 @@ export function ScanField({
         </button>
         <button
           type="button"
-          disabled={disabled || busy}
+          disabled={disabled}
           onClick={() => setCamera((v) => !v)}
           aria-pressed={camera}
           aria-label={t("scan.camera")}
