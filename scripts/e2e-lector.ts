@@ -114,8 +114,9 @@ async function main() {
   if (L === "en") await noRawKeys(p, "receive");
 
   // Known risk: photos after scanning reset ReceiveForm? Look at what the photo block is and whether it re-keys.
-  const details = p.locator("details").filter({ hasText: re("photos", "fotos") }).first();
-  out(true === ((await details.count()) > 0), `receive: photos are inside an optional <details>`);
+  // since 485adde the photos are numbered steps with an "optional" tag (no <details>): step 1 (note) and step 3 (damage)
+  const optTags = await p.getByText(re("optional", "opcional")).count();
+  out(optTags >= 2, `receive: the photo steps are tagged optional (${optTags} tags)`);
 
   const confirm = p.getByRole("button", { name: re("^Confirm \\d+ pallets? into receiving", "^Confirmar \\d+ pal") });
   await confirm.scrollIntoViewIfNeeded();
