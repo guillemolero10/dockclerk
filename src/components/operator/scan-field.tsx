@@ -37,7 +37,8 @@ const editable = (el: Element | null) =>
   !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || (el as HTMLElement).isContentEditable);
 
 type Detector = { detect: (source: HTMLVideoElement) => Promise<{ rawValue: string }[]> };
-type DetectorClass = new (opts: { formats: string[] }) => Detector;
+type DetectorClass = (new (opts: { formats: string[] }) => Detector) & { getSupportedFormats?: () => Promise<string[]> };
+const WANTED = ["code_128", "code_39", "ean_13", "ean_8", "qr_code"];
 
 /**
  * Reads a barcode with the camera when there is no reader (or the reader is not set up): Chrome on Android has a barcode detector built in.
@@ -56,12 +57,12 @@ function CameraScan({ onCode, onClose, onFail }: { onCode: (code: string) => voi
     let stream: MediaStream | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let done = false;
-    const detector = new Ctor({ formats: ["code_128", "code_39", "ean_13", "ean_8", "qr_code"] });
+    let detector: Detector | null = null;
     const tick = async () => {
       if (done) return;
       const v = video.current;
       try {
-        if (v && v.readyState >= 2) {
+        if (v && detector && v.readyState >= 2) {
           const found = await detector.detect(v);
           const code = found.find((f) => f.rawValue.trim())?.rawValue;
           if (code && !done) {
@@ -80,8 +81,20 @@ function CameraScan({ onCode, onClose, onFail }: { onCode: (code: string) => voi
       onFail(t("scan.cameraError"));
       return;
     }
-    navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false })
+    // Chrome can expose the detector with no formats at all (an Android without Google Play services): say so instead of a camera that never reads.
+    Promise.resolve(Ctor.getSupportedFormats?.() ?? WANTED)
+      .then((supported) => {
+        const formats = WANTED.filter((f) => supported.includes(f));
+        if (!formats.includes("code_128")) throw new Error("no code_128");
+        detector = new Ctor({ formats });
+      })
+      .then(
+        () => navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false }),
+        (err) => {
+          if (!done) onFail(t("scan.cameraNo"));
+          throw err;
+        },
+      )
       .then((s) => {
         if (done) return s.getTracks().forEach((tr) => tr.stop());
         stream = s;
@@ -92,7 +105,8 @@ function CameraScan({ onCode, onClose, onFail }: { onCode: (code: string) => voi
         void tick();
       })
       .catch(() => {
-        if (!done) onFail(t("scan.cameraError"));
+        // onFail already ran if there is no detector; this one is the camera itself
+        if (!done && detector) onFail(t("scan.cameraError"));
       });
     return () => {
       done = true;
