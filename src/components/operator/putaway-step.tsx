@@ -31,7 +31,8 @@ export function PutAwayStep({
   const [editing, setEditing] = useState(!suggestion);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  // The reader: pallet first, then the slot label. A free slot that is not the suggested one asks "leave it here?".
+  // Scan the pallet, leave it in the slot and tap the button (racks have no labels to scan). A slot label scanned anyway still works;
+  // a free slot that is not the suggested one asks "leave it here?".
   const [stage, setStage] = useState<"pallet" | "slot">(pallet.code ? "pallet" : "slot");
   const [leaveIn, setLeaveIn] = useState<string | null>(null);
   const [manual, setManual] = useState(false);
@@ -147,9 +148,9 @@ export function PutAwayStep({
       )}
       {!pallet.code && <p className="text-xs text-dock-ink/60">{t("pa.noIdPallet")}</p>}
 
-      {manual ? (
+      {manual || stage === "slot" ? (
         <div className="space-y-3 border-t border-dock-line pt-3">
-          <button disabled={pending || !slot} onClick={() => run(() => putAwayPallet(pallet.id, slot))} className="cond w-full bg-dock-yellow px-4 py-4 text-base font-semibold ring-[1.5px] ring-dock-ink disabled:opacity-50">
+          <button disabled={pending || !slot} onClick={() => run(() => putAwayPallet(pallet.id, slot))} className="cond min-h-16 w-full bg-dock-yellow px-4 py-4 text-xl font-bold ring-[1.5px] ring-dock-ink disabled:opacity-50">
             {pending ? "…" : t("pa.placed", { slot: slot || "…" })}
           </button>
           {!editing && (
