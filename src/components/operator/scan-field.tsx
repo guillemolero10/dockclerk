@@ -156,6 +156,11 @@ export function ScanField({
   const [result, setResult] = useState<{ ok: boolean; message: string; n: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [camera, setCamera] = useState(false);
+  // The camera keeps the handler it was opened with: these refs let it reach the latest page state (e.g. the slot was just scanned with the reader).
+  const busyRef = useRef(false);
+  const cameraCode = useRef<(code: string) => void>(() => {});
+  // A disabled field (e.g. while a pick is being saved) closes the camera for good, so it does not reopen by itself afterwards.
+  if (disabled && camera) setCamera(false);
   // `?scandebug=1` lists what the reader really sends (keys, input events), to set up a handheld without a computer.
   const debugOn = useSearchParams().has("scandebug");
   const [debug, setDebug] = useState<string[]>([]);
@@ -190,16 +195,26 @@ export function ScanField({
     const el = input.current;
     const code = cleanScan(el?.value ?? "");
     if (el) el.value = "";
-    if (!code || busy) return focus();
+    if (!code || busyRef.current) return focus();
+    busyRef.current = true;
     setBusy(true);
     try {
       const r = await onScan(code);
       if (r) show(r);
     } finally {
+      busyRef.current = false;
       setBusy(false);
       setTimeout(() => input.current?.focus({ preventScroll: true }), 0);
     }
   };
+
+  useEffect(() => {
+    cameraCode.current = (code) => {
+      setCamera(false);
+      if (input.current) input.current.value = code;
+      void submit();
+    };
+  });
 
   return (
     <div className="space-y-1.5">
@@ -292,11 +307,7 @@ export function ScanField({
       </form>
       {camera && !disabled && (
         <CameraScan
-          onCode={(code) => {
-            setCamera(false);
-            if (input.current) input.current.value = code;
-            void submit();
-          }}
+          onCode={(code) => cameraCode.current(code)}
           onClose={() => setCamera(false)}
           onFail={(message) => {
             setCamera(false);
