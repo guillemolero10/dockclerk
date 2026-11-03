@@ -29,11 +29,11 @@ There are demo accounts: `oficina` (office), `operario` (warehouse operator) and
 
 | Role | Where | What to do |
 |---|---|---|
-| **Office** | Sign in as `oficina` | **AI inbox**: press *Let the clerk handle it* and watch it read each message, call its tools and draft the outbound. The order for "Hipermercados Turia" has a yellow field (the chain has two hubs): choose one, approve, then *Light up the pick*: the 3D warehouse shows which pallets to take and the route. *Replay the morning* starts the demo again. |
+| **Office** | Sign in as `oficina` | **AI inbox**: press *Let the clerk handle N messages* and watch it read each message, call its tools and draft the outbound. The order for "Hipermercados Turia" has a yellow field (the chain has two hubs): choose one, approve, then *Light up the pick*: the 3D warehouse shows which pallets to take and the route. *Replay the morning* starts the demo again. |
 | | **Dock** | Day timeline for each door. *Let the clerk schedule them* books every waiting truck without overlaps. The driver's link for each truck is here. |
 | | **Billing** | *Prepare pre-invoices* for last month: storage pallet by pallet, handling in and out, with a check that the detail adds up to the summary. A person approves each one. Pre-invoices only, not legal invoices. |
 | | **Alerts** | Late trucks, orders short of stock, lots about to expire and full buildings, each with a ready-to-send notice for the customer. |
-| | **Analyst** | The weekly report of the second agent: who runs out of stock and when, when a building fills up, which carrier is late on which weekday. Each finding comes with its chart, its method and a button that acts on it. |
+| | **Analyst** | The weekly report of the second agent: who runs out of stock and when, when a building fills up, which carrier is late on which weekday. Each finding comes with its chart, its method and, where it applies, a button that acts on it. |
 | | **Lot trace** | Type a lot to see the truck that brought it, the pallet IDs, the rack it sits in and every customer it went to. |
 | **Operator** | Sign in as `operario` (phone size) | The handheld: unload, put away, pick, all by scanning the pallet label (camera button next to each field, or type it). *Report damage* takes a photo of the load and SAM 3.1 numbers the boxes. Voice note to the office for incidents. |
 | **Driver** | Link from the office's **Dock** screen | No app and no account. Photo of the delivery note, *I'm at the gate*, sign with a finger, download the dock receipt. |
@@ -56,12 +56,12 @@ All companies, people, goods and photos in the demo are invented or made by me.
 - A guard checks every figure the model writes: a quantity only stands if the customer's message says it, or if it comes out of `convert_quantity` from what the customer wrote ("2 and a half pallets of horchata" → 2 pallets + 50 boxes). Otherwise the field turns yellow.
 - Money is computed by code. The assistant explains a charge from the same numbers; a figure that isn't in the data is rejected.
 
-**Plan B is built in.** Every model sits behind a key. Without a key, or if a call fails or runs past its time limit, the inbox runs on a rules engine with the same contract and the operator types what the model would have read. The log in the UI always says which path ran. A daily budget (`AI_DAILY_BUDGET_USD`, default $3) caps spending; past it, the rules engine answers.
+**Plan B is built in.** Every model sits behind a key. Without a key, or if a call fails or runs past its time limit, the inbox runs on a rules engine with the same contract and the operator types what the model would have read. The log in the UI always says which path ran. A daily budget (`AI_DAILY_BUDGET_USD`, default $3) caps spending; past it, the rules engine and the analyst's template answer.
 
 ## How it is built
 
 - **Next.js 16** (App Router, server actions) + **React 19** + **Tailwind 4**, deployed on **Vercel** (functions in Dublin, next to the database).
-- **PostgreSQL** (Supabase, EU) with **Prisma 6**. The "legacy warehouse software" is a replica of a typical 3PL schema (clients, items, stock by location and lot, inbounds, outbounds, consignees, carriers). DockClerk only adds tables around it: messages, drafts, dock appointments, receipts, uploads, tariffs and pre-invoices.
+- **PostgreSQL** (Supabase, EU) with **Prisma 6**. The "legacy warehouse software" is a replica of a typical 3PL schema (clients, items, stock by location and lot, inbounds, outbounds, consignees, carriers). DockClerk adds tables around it (messages, drafts, dock appointments, receipts, uploads, tariffs, pre-invoices, users and sessions) and a few columns such as pallet IDs.
 - **Pallets as the warehouse counts them:**
   - Every pallet has an ID (the supplier's, if the note has one, or a generated `N1-000123`), unique while it's in the building.
   - Mixed pallets (one ID, several items or lots) count as one pallet.
@@ -76,7 +76,7 @@ All companies, people, goods and photos in the demo are invented or made by me.
   - Occupancy trends: least squares with an interval on the slope.
   - ABC slotting, priced in seconds of forklift travel and lift.
   - Carrier lateness and delivery quality: Fisher exact tests with Benjamini–Hochberg correction and Wilson intervals.
-  - It says what it cannot conclude yet, and why (`src/lib/analyst/`). Runs every Monday at 07:00 through Vercel Cron.
+  - It says what it cannot conclude yet, and why (`src/lib/analyst/`). Runs every Monday at 07:00 Spanish time through Vercel Cron.
 - **Floor loop:** the truck arrives, the driver checks in, the operator receives the goods into a lane by the door, the driver signs, the pallets are put away into suggested slots, picked to a dispatch lane and shipped. Every shipped pallet keeps its ID and lot for traceability (`src/lib/ops/floor.ts`).
 - **Accounts and permissions:** real users in the database (office, operator, customer), not a role picker.
   - Passwords are hashed with Node's `scrypt` (random salt per user, constant-time comparison).
@@ -122,7 +122,7 @@ npm run dev
 
 The seed creates the demo accounts that are missing, each with a random password that it writes **once** to a file outside the repository; it never prints them and never changes the password of an account that exists. To change one: `npm run users:reset -- <user>`.
 
-The app runs without any model key, using the rules engine and manual entry. Add `BASETEN_API_KEY` to switch the inbox to Muse Spark Open, `META_API_KEY` to turn on Muse Spark vision and Voice Transcribe, and `SAM_API_KEY` + `META_SAM_URL` for SAM 3.1 (deploy it with `modal deploy modal/sam_service.py`, see `modal/README.md`). Sessions need no secret.
+The app runs without any model key, using the rules engine and manual entry. Add `BASETEN_API_KEY` to switch the inbox, the customer assistant, the analyst and photo reading to Muse Spark Open; `META_API_KEY` moves photo reading to Muse Spark and turns on Voice Transcribe; `SAM_API_KEY` + `META_SAM_URL` (commented in `.env.example`) turn on SAM 3.1 (deploy it with `modal deploy modal/sam_service.py`, see `modal/README.md`). Sessions need no secret.
 
 ---
 
