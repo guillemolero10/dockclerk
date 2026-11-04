@@ -104,7 +104,7 @@ prisma/           schema, seed and six months of simulated history (invented dat
 ## Real vs. simulated
 
 - **Real:** the agent loop, the model calls (Muse Spark, Muse Spark Open, SAM 3.1, Voice Transcribe), the warehouse logic, billing, the 3D, scanning, photos and signatures (stored in Postgres) and the dock receipt.
-- **Simulated:** the legacy software is a replica built during the hackathon and filled with invented data. No real email or WhatsApp is received or sent: the inbox is seeded with sample messages and replies are drafted, not sent. The six months of history are simulated (seasons, weekdays, min/max replenishment, FIFO lots), with a few patterns planted on purpose so the analyst always has something to find; they are listed in `prisma/history.ts`. The photos of boxes and the delivery note are mine, with an invented note.
+- **Simulated:** the legacy software is a replica built during the hackathon and filled with invented data. No real email or WhatsApp is received or sent: the inbox is seeded with sample messages and replies are drafted, not sent. The six months of history are simulated (seasons, weekdays, min/max replenishment, FIFO lots), with a few patterns planted on purpose so the analyst always has something to find; they are listed in `prisma/history.ts`. The box photo and the delivery note used in the video are illustrations made for the demo, with invented data; the models read them live on the deployed site.
 
 ## Built during the hackathon
 
