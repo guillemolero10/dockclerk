@@ -8,7 +8,7 @@ Built for the **Meta Global AI Developer Hackathon** (Oct 26 – Nov 4, 2026), I
 
 **Live demo:** https://dockclerk.vercel.app. Sign in with one of the demo accounts (the user names and passwords come with the hackathon submission form). The app speaks English and Spanish (switch with **ES | EN**).
 
-**Video (3:00):** _link added with the submission_
+**Video (2:36):** https://youtu.be/lm8TzyhdoqY
 
 ---
 
@@ -39,7 +39,7 @@ There are demo accounts: `oficina` (office), `operario` (warehouse operator) and
 | **Driver** | Link from the office's **Dock** screen | No app and no account. Photo of the delivery note, *I'm at the gate*, sign with a finger, download the dock receipt. |
 | **Customer** | Sign in as a customer (e.g. `juguetes-levante`) | Stock by lot and pallet with expiry dates, movements with signed receipts, and an assistant that answers from the live data ("how much have I spent on storage this month?"). Orders go to the office queue already drafted. |
 
-All companies, people, goods and photos in the demo are invented or made by me.
+All companies, people and goods in the demo are invented, and the photos are illustrations made for the demo.
 
 ## Where Meta's models do the work
 
